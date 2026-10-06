@@ -1,5 +1,8 @@
 """Render-scoped authorization decision memoization."""
 
+from unittest.mock import patch
+
+from evennia.authorization.engine import GrantScope, GrantSnapshot
 from evennia.authorization.service import authorize, decision_scope, has_capability
 from evennia.utils.test_resources import EvenniaTest
 
@@ -45,3 +48,22 @@ class TestDecisionScope(EvenniaTest):
             has_capability(self.account, "engine.object.view")
 
             self.assertEqual(len(scope), 2)
+
+    def test_break_glass_decisions_are_memoized_in_the_scope(self):
+        grants = GrantSnapshot(
+            "account:1",
+            {
+                "engine.authorization.break_glass": frozenset(
+                    {GrantScope("account:1", "world", "*")}
+                )
+            },
+            0,
+        )
+        with patch("evennia.authorization.service.load_grants", return_value=grants):
+            with decision_scope() as scope:
+                first = authorize(self.account, self.obj1, "view")
+                second = authorize(self.account, self.obj1, "view")
+
+                self.assertEqual(first.reason_code, "break_glass")
+                self.assertIs(first, second)
+                self.assertEqual(len(scope), 1)

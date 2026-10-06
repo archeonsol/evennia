@@ -121,9 +121,13 @@ def authorize(
         return decision
 
     break_glass = False
-    for scope in grants.by_capability.get("engine.authorization.break_glass", ()):
-        kind, key = (scope.kind, scope.key) if hasattr(scope, "kind") else scope[-2:]
-        constraints = dict(getattr(scope, "constraints", ()))
+    for grant_scope in grants.by_capability.get("engine.authorization.break_glass", ()):
+        kind, key = (
+            (grant_scope.kind, grant_scope.key)
+            if hasattr(grant_scope, "kind")
+            else grant_scope[-2:]
+        )
+        constraints = dict(getattr(grant_scope, "constraints", ()))
         required_session = constraints.get("session_id")
         session_matches = required_session is None or str(
             getattr(getattr(context, "session", None), "sessid", "")
