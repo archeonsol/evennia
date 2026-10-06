@@ -2,7 +2,7 @@
   import "dockview-core/dist/styles/dockview.css";
   import { createDockview } from "dockview-core";
   import type { DockviewApi } from "dockview-core";
-  import { svelteComponents } from "../lib/dockAdapter";
+  import { svelteComponents } from "../lib/dockAdapter.svelte";
   import { chat } from "../lib/chat.svelte";
   import { dock, VIEWS } from "../lib/dock.svelte";
   import { panelPrefs } from "../lib/panelPrefs.svelte";

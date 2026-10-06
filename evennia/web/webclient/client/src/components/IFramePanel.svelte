@@ -1,6 +1,14 @@
 <script lang="ts">
-  // Embedded web page (help, map, staff pages, wiki). URL comes from panel params.
-  let { url = "", title = "Web page" }: { url?: string; title?: string } = $props();
+  // Embedded web page (help, map, staff pages, wiki). URL comes from panel params,
+  // and a later open for the same base changes it in place (dock.openIframe).
+  import { dock } from "../lib/dock.svelte";
+
+  let {
+    url = "",
+    title = "Web page",
+    panelId = "",
+    pinned = false,
+  }: { url?: string; title?: string; panelId?: string; pinned?: boolean } = $props();
 
   // A window of its own is the better home for a full page app like the grid:
   // real size, its own history, and a screen reader treats it as a document
@@ -14,6 +22,14 @@
   {#if url}
     <div class="bar">
       <span class="name">{title}</span>
+      {#if panelId}
+        <button
+          class="sh-cmd pop"
+          aria-pressed={pinned}
+          title={pinned ? "The next page opens in a new panel" : "Keep this page; the next one opens beside it"}
+          onclick={() => dock.togglePin(panelId)}>{pinned ? "Unpin" : "Pin"}</button
+        >
+      {/if}
       <button class="sh-cmd pop" onclick={popOut}>New window</button>
     </div>
     <iframe src={url} {title} referrerpolicy="no-referrer"></iframe>

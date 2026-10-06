@@ -18,6 +18,13 @@ describe("simple layout", () => {
     expect(simple.active).toBe("log");
   });
 
+  it("gives an open view its new page", () => {
+    simple.open({ id: "wiki", component: "iframe", title: "Wiki", params: { url: "/wiki/a/" } });
+    simple.open({ id: "wiki", component: "iframe", title: "Wiki", params: { url: "/wiki/b/" } });
+    expect(simple.views.find((v) => v.id === "wiki")?.params).toEqual({ url: "/wiki/b/" });
+    simple.close("wiki");
+  });
+
   it("never closes a base view", () => {
     simple.close("chat");
     expect(simple.has("chat")).toBe(true);
