@@ -220,7 +220,7 @@ export interface UiRemovePayload {
 /** args[0] = video URL. */
 export type VideoPayload = string;
 
-/** Open an embedded web page in the shell: args[0] = {url, title?, id?}. */
+/** Open an embedded web page in the shell: args[0] = {url, title?, id?, size?}; size is wide (default) or side. */
 export type WebPanelPayload = Record<string, any>;
 
 /** args[0] = YouTube URL. */

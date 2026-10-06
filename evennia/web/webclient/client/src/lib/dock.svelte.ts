@@ -8,7 +8,11 @@ import { chat } from "./chat.svelte";
 import { toasts } from "./toasts.svelte";
 import { announcer } from "./announce.svelte";
 import { activity } from "./activity.svelte";
-import { iframeTarget } from "./iframePanels";
+import { iframeTarget, pageFloat, type PageSize } from "./iframePanels";
+
+// A browser reloads an iframe that leaves the page and comes back: a white
+// flash and a lost scroll. "always" keeps a hidden page panel in the page.
+const PAGE_RENDERER = "always";
 
 const LKEY = "underspire.layout.v2";
 const PRESET_PREFIX = "underspire.layout.preset.";
@@ -125,13 +129,13 @@ class Dock {
    * for it, which is usually inside the browser's popup allowance; when it is
    * not, the page opens in the shell and a toast says why.
    */
-  openWebPage(id: string, title: string, url: string): void {
+  openWebPage(id: string, title: string, url: string, size: PageSize = "wide"): void {
     if (settings.webPages === "window") {
       const win = window.open(url, `underspire-${id.replace(/[^\w-]/g, "_")}`);
       if (win) return;
       toasts.push("web", "Popup blocked", `${title} opened in the shell instead.`);
     }
-    this.openIframe(id, title, url);
+    this.openIframe(id, title, url, size);
   }
 
   /**
@@ -139,7 +143,7 @@ class Dock {
    * the page loads into that base's unpinned panel, or a new one beside any
    * pinned panel (see iframePanels.ts).
    */
-  openIframe(id: string, title: string, url: string): void {
+  openIframe(id: string, title: string, url: string, size: PageSize = "wide"): void {
     if (settings.screenreader) {
       const fresh = !simple.has(id);
       simple.open({ id, component: "iframe", title, params: { url, title } });
@@ -155,11 +159,14 @@ class Dock {
     const existing = target.reuse ? this.api.getPanel(target.reuse) : undefined;
     if (existing) {
       if (existing.params?.url !== url) existing.api.updateParameters({ url, title });
+      // A saved layout can restore a page panel with the default renderer.
+      existing.api.setRenderer(PAGE_RENDERER);
       // Saved layouts kept the old postage-stamp float, so a page that was
-      // opened small before comes back small forever. Reopen it at size.
+      // opened small before comes back small forever. Reopen it at size. A side
+      // page is narrower than that on purpose.
       const g: any = existing.group;
       const floating = g?.api?.location?.type === "floating";
-      const tiny = floating && (g.width < 480 || g.height < 320);
+      const tiny = size === "wide" && floating && (g.width < 480 || g.height < 320);
       if (!tiny) {
         existing.api.setActive();
         return;
@@ -168,20 +175,18 @@ class Dock {
       existing.api.close();
     }
     // dockview's default float is a few hundred pixels square, which left the
-    // grid a postage stamp. Open near the full workspace instead; the player
-    // can still shrink or dock it.
+    // grid a postage stamp. The caller picks wide or side (see pageFloat).
     // The element's own size: dockview's width reads 0 until its resize
     // observer has fired once, which would collapse the float to 100px.
     const w = this.host?.clientWidth || this.api.width;
     const h = this.host?.clientHeight || this.api.height;
-    const width = Math.max(w - 40, Math.min(w, 480));
-    const height = Math.max(h - 40, Math.min(h, 360));
     this.api.addPanel({
       id: panelId,
       component: "iframe",
       title,
       params: { url, title, base: id, panelId },
-      floating: { x: Math.max(0, (w - width) / 2), y: Math.max(0, (h - height) / 2), width, height },
+      renderer: PAGE_RENDERER,
+      floating: pageFloat(size, w, h),
     });
   }
 
