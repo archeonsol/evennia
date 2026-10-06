@@ -22,6 +22,7 @@ import { renderNodeHtml } from "./lib/render";
 import { media } from "./lib/media.svelte";
 import { ui } from "./lib/ui.svelte";
 import { dock } from "./lib/dock.svelte";
+import { pageSize } from "./lib/iframePanels";
 import { createLegacyEmitter } from "./lib/legacy-emitter";
 import { compose } from "./lib/compose.svelte";
 import { lexicon } from "./lib/lexicon.svelte";
@@ -250,7 +251,7 @@ connection.on("oob", (env) => {
     const url = String(spec.url ?? "");
     if (url) {
       const id = String(spec.id ?? url);
-      dock.openWebPage(id, String(spec.title ?? "Web"), url);
+      dock.openWebPage(id, String(spec.title ?? "Web"), url, pageSize(spec.size));
     }
   } else if (is(event, "logout")) {
     activity.logout();

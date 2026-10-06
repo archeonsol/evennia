@@ -24,3 +24,33 @@ export function iframeTarget(panels: PanelLike[], base: string): IframeTarget {
   for (let n = 2; taken.has(freshId); n++) freshId = `${base}:${n}`;
   return { reuse: reuse?.id ?? null, freshId };
 }
+
+/**
+ * How big a server-opened page floats. `wide` fills the workspace less a margin,
+ * for full page apps like the grid. `side` floats at the right like help, so the
+ * terminal stays in view.
+ */
+export type PageSize = "wide" | "side";
+
+export interface Float {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export function pageSize(value: unknown): PageSize {
+  return value === "side" ? "side" : "wide";
+}
+
+/** The float for a new page panel in a `w` by `h` workspace. */
+export function pageFloat(size: PageSize, w: number, h: number): Float {
+  if (size === "side") {
+    const width = Math.max(Math.min(w * 0.42, 640), Math.min(w, 340));
+    const height = Math.max(h - 40, Math.min(h, 320));
+    return { x: Math.max(0, w - width - 20), y: 20, width, height };
+  }
+  const width = Math.max(w - 40, Math.min(w, 480));
+  const height = Math.max(h - 40, Math.min(h, 360));
+  return { x: Math.max(0, (w - width) / 2), y: Math.max(0, (h - height) / 2), width, height };
+}

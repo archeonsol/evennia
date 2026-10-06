@@ -49,6 +49,6 @@
     color: var(--fg-dim); font-size: 0.7rem; letter-spacing: 0.12em; text-transform: uppercase;
   }
   .pop { flex: none; }
-  iframe { flex: 1; width: 100%; min-height: 0; border: none; background: #fff; }
+  iframe { flex: 1; width: 100%; min-height: 0; border: none; background: var(--bg); }
   .empty { color: var(--fg-faint); padding: 1rem; margin: 0; font-size: 0.64rem; letter-spacing: 0.14em; text-transform: uppercase; }
 </style>

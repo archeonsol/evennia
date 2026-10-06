@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { iframeTarget } from "./iframePanels";
+import { iframeTarget, pageFloat, pageSize } from "./iframePanels";
 
 describe("iframe panel target", () => {
   it("makes the base panel when none is open", () => {
@@ -31,5 +31,19 @@ describe("iframe panel target", () => {
 
   it("does not take another base's panel", () => {
     expect(iframeTarget([{ id: "nous:grid", params: { base: "nous:grid" } }], "wiki").reuse).toBeNull();
+  });
+});
+
+describe("page float", () => {
+  it("fills the workspace less a margin when wide", () => {
+    expect(pageFloat("wide", 1200, 800)).toEqual({ x: 20, y: 20, width: 1160, height: 760 });
+  });
+
+  it("floats at the right like help when side", () => {
+    expect(pageFloat("side", 1200, 800)).toEqual({ x: 676, y: 20, width: 504, height: 760 });
+  });
+
+  it("reads anything but side as wide", () => {
+    expect([pageSize("side"), pageSize(undefined), pageSize("huge")]).toEqual(["side", "wide", "wide"]);
   });
 });

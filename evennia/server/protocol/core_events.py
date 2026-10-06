@@ -68,5 +68,8 @@ register_event(
     "web_panel",
     carrier="args",
     fields={"_": "dict"},
-    doc="Open an embedded web page in the shell: args[0] = {url, title?, id?}.",
+    doc=(
+        "Open an embedded web page in the shell: args[0] = {url, title?, id?, size?}; "
+        "size is wide (default) or side."
+    ),
 )
