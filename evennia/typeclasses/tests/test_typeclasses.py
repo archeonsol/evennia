@@ -350,6 +350,26 @@ class TestTypeclassManagerGet(EvenniaTestCase):
         with self.assertRaises(DefaultObject.DoesNotExist):
             TestSearchManagerTypeclassChild.objects.get(pk=self.obj.pk)
 
+    def test_related_manager_keeps_its_owner_filter(self):
+        from django.db.models.fields.related_descriptors import (
+            create_reverse_many_to_one_manager,
+        )
+
+        from evennia.objects.models import ObjectDB
+
+        container, _ = TestSearchManagerTypeclass.create(key="container")
+        inside, _ = TestSearchManagerTypeclass.create(key="inside", location=container)
+        rel = ObjectDB._meta.get_field("db_location").remote_field
+        manager_class = create_reverse_many_to_one_manager(
+            type(TestSearchManagerTypeclass.objects), rel
+        )
+        contents = manager_class(container)
+        contents.model = TestSearchManagerTypeclass
+
+        self.assertEqual(contents.get(pk=inside.pk), inside)
+        with self.assertRaises(DefaultObject.DoesNotExist):
+            contents.get(pk=self.obj.pk)
+
     def test_other_lookups_use_sql(self):
         with self.assertNumQueries(1):
             self.assertIs(TestSearchManagerTypeclass.objects.get(db_key="obj"), self.obj)

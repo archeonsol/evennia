@@ -729,9 +729,11 @@ class TypeclassManager(TypedObjectManager):
                 on the model base used.
 
         """
-        if not args and len(kwargs) == 1:
+        if not args and len(kwargs) == 1 and getattr(self, "instance", None) is None:
             # The added db_typeclass_path makes this a two-kwarg lookup, which
             # SharedMemoryManager.get always sends to SQL; read the idmapper here.
+            # A related manager (one with an ``instance``) filters by its owner,
+            # which a cache hit cannot check, so it goes to SQL.
             (key, value), = kwargs.items()
             if key.removesuffix("__exact") in ("pk", self.model._meta.pk.attname):
                 inst = self.model.get_cached_instance(value)
