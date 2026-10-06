@@ -12,6 +12,16 @@ from evennia.utils.utils import is_iter, make_iter, to_str
 _CMDHANDLER = None
 _MSG_CONTENTS_PARSER = funcparser.FuncParser(funcparser.ACTOR_STANCE_CALLABLES)
 _TEMPLATE_KEY = re.compile(r"\{(\w+)\}")
+#: Template text that ends where a sentence opens: nothing yet, or a sentence end
+#: and its closing quote or bracket, then any colour codes.
+_SENTENCE_OPEN = re.compile(
+    r"(?:^\s*|[.!?][\"'\u201d)\]]*\s+)(?:\|\[?(?:[A-Za-z]|\d{3}|=[a-z]|#[0-9A-Fa-f]{6}))*$"
+)
+
+
+def _opens_sentence(inmessage, match):
+    """True when the ``{key}`` at ``match`` opens a sentence of ``inmessage``."""
+    return bool(_SENTENCE_OPEN.search(inmessage[: match.start()]))
 
 
 def _template_plan(inmessage, mapping, outkwargs, from_obj):
@@ -49,10 +59,11 @@ def _template_plan(inmessage, mapping, outkwargs, from_obj):
             )
         except Exception:
             is_character = getattr(target, "account", None) is not None
+        capitalize = _opens_sentence(inmessage, match)
         spans.append(
-            CharRef(char_id=entity_id, role=key)
+            CharRef(char_id=entity_id, role=key, capitalize=capitalize)
             if is_character
-            else ObjectRef(object_id=entity_id, kind="object", role=key)
+            else ObjectRef(object_id=entity_id, kind="object", role=key, capitalize=capitalize)
         )
         position = match.end()
     if not any(isinstance(span, (CharRef, ObjectRef)) for span in spans):
@@ -414,6 +425,13 @@ class MessagingMixin:
                 deliver_to(plan, contents, from_obj=from_obj, **kwargs)
                 return plan
 
+        from evennia.narrative.render import capitalize_lead
+
+        opening_keys = {
+            match.group(1)
+            for match in _TEMPLATE_KEY.finditer(inmessage or "")
+            if _opens_sentence(inmessage, match)
+        }
         display_names_by_receiver = {}
         for receiver in contents:
             display_names_by_receiver[id(receiver)] = {
@@ -427,6 +445,10 @@ class MessagingMixin:
 
         for receiver in contents:
             names = display_names_by_receiver[id(receiver)]
+            names = {
+                key: capitalize_lead(str(name)) if key in opening_keys else name
+                for key, name in names.items()
+            }
 
             if use_funcparser:
                 outmessage = _MSG_CONTENTS_PARSER.parse(

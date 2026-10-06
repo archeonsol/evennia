@@ -27,6 +27,7 @@ is what gates switching a live surface over (see the game-side parity harness).
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field, fields
 from typing import Protocol, runtime_checkable
 
@@ -100,6 +101,8 @@ class CharRef:
     # Whether the resolver applies skin-tone/name formatting. Emotes and say use
     # formatted names; whisper uses the raw display name (no colour).
     formatted: bool = True
+    # The name opens a sentence, so its first visible letter is upper-cased.
+    capitalize: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -154,6 +157,8 @@ class ObjectRef:
         formatted (bool): whether the resolver applies presentation formatting.
         fallback (str): what to render when the viewer cannot perceive the
             entity at all and the resolver has no better answer.
+        capitalize (bool): the name opens a sentence, so its first visible
+            letter is upper-cased.
     """
 
     object_id: int | None
@@ -162,6 +167,7 @@ class ObjectRef:
     possessive: bool = False
     formatted: bool = True
     fallback: str = "something"
+    capitalize: bool = False
 
 
 def ExitRef(object_id, *, role="exit", possessive=False, formatted=True, fallback="somewhere"):
@@ -274,6 +280,23 @@ class SpanResolver(Protocol):
         ...
 
 
+#: Colour codes in front of a name's first letter: named, xterm, greyscale and hex,
+#: each with its |[ background form.
+_LEAD_CODES = re.compile(r"(?:\|\[?(?:[A-Za-z]|\d{3}|=[a-z]|#[0-9A-Fa-f]{6}))*")
+
+
+def capitalize_lead(text: str) -> str:
+    """Upper-case ``text``'s first visible character when it is a lower-case letter.
+
+    Colour codes in front are stepped over. A name that opens on anything else
+    ("@handle", "^ID", a digit) reads as written.
+    """
+    index = _LEAD_CODES.match(text).end()
+    if index < len(text) and text[index].isalpha() and text[index].islower():
+        return text[:index] + text[index].upper() + text[index + 1 :]
+    return text
+
+
 def _self_text(ref: SelfRef) -> str:
     """Default second-person rendering for a :class:`SelfRef`."""
     value = _SELF_FORMS.get(ref.form, "you")
@@ -312,7 +335,8 @@ class KeyResolver:
     def char(self, ref: CharRef, ctx: ViewerContext) -> str:
         obj = self._obj(ref.char_id)
         name = getattr(obj, "key", str(ref.char_id)) if obj is not None else str(ref.char_id)
-        return name + ("'s" if ref.possessive else "")
+        name += "'s" if ref.possessive else ""
+        return capitalize_lead(name) if ref.capitalize else name
 
     def pron(self, ref: PronounRef, ctx: ViewerContext) -> str:
         return ref.original
@@ -330,16 +354,18 @@ class KeyResolver:
         """
         entity = self._obj(ref.object_id)
         if entity is None:
-            return ref.fallback + ("'s" if ref.possessive else "")
-        getter = getattr(entity, "get_display_name", None)
-        if callable(getter):
-            try:
-                name = getter(looker=ctx.viewer)
-            except Exception:
-                name = getattr(entity, "key", str(ref.object_id))
+            name = ref.fallback
         else:
-            name = getattr(entity, "key", str(ref.object_id))
-        return str(name) + ("'s" if ref.possessive else "")
+            getter = getattr(entity, "get_display_name", None)
+            if callable(getter):
+                try:
+                    name = getter(looker=ctx.viewer)
+                except Exception:
+                    name = getattr(entity, "key", str(ref.object_id))
+            else:
+                name = getattr(entity, "key", str(ref.object_id))
+        name = str(name) + ("'s" if ref.possessive else "")
+        return capitalize_lead(name) if ref.capitalize else name
 
     def selfref(self, ref: SelfRef, ctx: ViewerContext) -> str:
         return _self_text(ref)
