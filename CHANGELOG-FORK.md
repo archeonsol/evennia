@@ -25,6 +25,44 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.306: Web panels follow their base and can be pinned
+
+A page the server opens in a web panel now loads into that base's panel instead
+of only focusing whatever the panel last showed, so a second `web_panel` event
+for the same `id` changes the page. A Pin button keeps a panel's page; the next
+open for that base gets a new panel beside it.
+
+### Engine
+
+- **Panels follow their base** ([`dock.svelte.ts`](evennia/web/webclient/client/src/lib/dock.svelte.ts),
+  [`iframePanels.ts`](evennia/web/webclient/client/src/lib/iframePanels.ts),
+  [`simpleLayout.svelte.ts`](evennia/web/webclient/client/src/lib/simpleLayout.svelte.ts)).
+  `openIframe` reuses the base's unpinned panel and loads the new `url` and
+  `title` into it with `updateParameters`. Panel params now carry `base` and
+  `panelId`, so the pin survives a saved layout. The phone layout updates an open
+  view's params the same way.
+- **Pin and Unpin** ([`IFramePanel.svelte`](evennia/web/webclient/client/src/components/IFramePanel.svelte)).
+  A pinned panel keeps its page; `togglePin(panelId)` flips it.
+- **Reactive panel props** ([`dockAdapter.svelte.ts`](evennia/web/webclient/client/src/lib/dockAdapter.svelte.ts)).
+  The dockview adapter keeps props as `$state` and applies `update(event)` in
+  place, so a parameter change re-renders the mounted component. The file is
+  renamed from `dockAdapter.ts` for the rune. The prebuilt shell is rebuilt
+  ([`shell.js`](evennia/web/static/webclient/shell/shell.js)).
+
+### Migration
+
+- None for games. A game that sends `web_panel` with a stable `id` gets the
+  follow behavior with no change.
+
+### Tests
+
+- [`iframePanels.test.ts`](evennia/web/webclient/client/src/lib/iframePanels.test.ts):
+  reuse picks the base's unpinned panel; a pinned base gets a fresh id.
+- [`simpleLayout.test.ts`](evennia/web/webclient/client/src/lib/simpleLayout.test.ts):
+  opening an open view updates its params.
+
+---
+
 ## 6.0.0+underspire.305: The Reading client, and a Server stop that keeps connections
 
 The webclient gains the Reading surface (a Reading page in Settings, an OOC log
