@@ -3,10 +3,9 @@
 Games register their own events in a module listed in
 settings.PROTOCOL_EVENT_MODULES. This is the engine's baseline, always loaded.
 
-Every event the engine sends to a shell belongs here. An unregistered event
-still reaches the client — the wire format passes anything through — but it is
-absent from the generated ``oob-events.ts``, so the client routes it on an
-unchecked string literal and nothing catches a rename.
+Every event the engine sends to a shell belongs here. The server drops a command
+that is neither a registered event nor a registered outputfunc, so an
+unregistered event never reaches the client.
 """
 
 from evennia.server.protocol import register_event

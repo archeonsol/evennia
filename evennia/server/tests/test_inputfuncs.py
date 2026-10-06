@@ -226,6 +226,14 @@ class TestMonitoredInputfunc(BaseEvenniaTest):
         self.assertIsInstance(monitor_kwargs["session"], str)
         pickle.dumps((self.session.sessid, sent_kwargs), pickle.HIGHEST_PROTOCOL)
 
+    def test_undeclared_reply_name_is_refused(self):
+        """A client cannot pick a reply name the server would not send."""
+        from evennia.scripts.monitorhandler import MONITOR_HANDLER
+
+        with mock.patch.object(MONITOR_HANDLER, "add") as add:
+            inputfuncs.monitor(self.session, name="location", outputfunc_name="_internal")
+        add.assert_not_called()
+
 
 class TestTextDispatchErrback(unittest.TestCase):
     """``text`` must consume a failed cmdhandler coroutine by logging it, not

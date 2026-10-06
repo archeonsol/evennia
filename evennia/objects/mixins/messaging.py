@@ -162,11 +162,12 @@ class MessagingMixin:
                 stay on the server and are never sent to a session.
             **kwargs (string or tuples): All kwarg keys not listed above
                 will be treated as send-command names and their arguments
-                (which can be a string or a tuple).
+                (which can be a string or a tuple). A name must be declared
+                (see `evennia.server.protocol.is_client_command`) or the
+                server drops it.
 
         Notes:
             The `at_msg_receive` method will be called on this Object.
-            All extra kwargs will be passed on to the protocol.
 
         """
         # R1 universal facade: callers may pass an immutable RenderNode directly.

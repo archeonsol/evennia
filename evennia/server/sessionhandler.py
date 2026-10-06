@@ -23,6 +23,7 @@ import evennia
 from evennia.commands.cmdhandler import CMD_LOGINSTART
 from evennia.console import watch as _watch
 from evennia.server.portal import amp
+from evennia.server.protocol import is_client_command
 from evennia.server.service_registry import IMMEDIATE_RESULT
 from evennia.server.signals import (
     SIGNAL_ACCOUNT_POST_FIRST_LOGIN,
@@ -30,7 +31,7 @@ from evennia.server.signals import (
     SIGNAL_ACCOUNT_POST_LOGIN,
     SIGNAL_ACCOUNT_POST_LOGOUT,
 )
-from evennia.utils.logger import log_trace, log_warn
+from evennia.utils.logger import log_err, log_trace, log_warn
 from evennia.utils.utils import (
     callables_from_module,
     class_from_module,
@@ -210,6 +211,27 @@ def delayed_import():
 # -----------------------------------------------------------
 # SessionHandler base class
 # ------------------------------------------------------------
+
+
+_LOGGED_UNDECLARED = set()
+
+
+def _log_undeclared(session, names):
+    """Log each undeclared command name once per process.
+
+    Args:
+        session (Session): The session the command was sent to.
+        names (list): Command names that are not declared.
+    """
+    for name in names:
+        if name in _LOGGED_UNDECLARED:
+            continue
+        _LOGGED_UNDECLARED.add(name)
+        log_err(
+            f"Dropped undeclared client command {name!r} sent to session "
+            f"{getattr(session, 'sessid', None)}. Register it with register_event "
+            "or register_outputfunc to send it."
+        )
 
 
 class SessionHandler(dict):
@@ -1013,8 +1035,17 @@ class ServerSessionHandler(SessionHandler):
 
         Notes:
             The outdata will be scrubbed for sending across
-            the wire here.
+            the wire here. Only declared client commands are sent (see
+            `evennia.server.protocol.is_client_command`); any other keyword
+            is dropped and logged, so server-side data never leaves the
+            server.
         """
+        undeclared = [key for key in kwargs if not is_client_command(key)]
+        if undeclared:
+            _log_undeclared(session, undeclared)
+            kwargs = {key: value for key, value in kwargs.items() if key not in undeclared}
+            if not kwargs.keys() - {"options"}:
+                return
         uid = session.sessid
         self._outbuf.setdefault(uid, [])
         self._outbuf[uid].append(kwargs)

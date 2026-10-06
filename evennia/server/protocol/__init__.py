@@ -68,6 +68,24 @@ def all_events() -> dict[str, dict]:
     return dict(_EVENTS)
 
 
+def is_client_command(name: str) -> bool:
+    """Whether ``name`` is declared as a server->client command.
+
+    The server sends only declared commands. A name is declared when it is a
+    registered event or a registered outputfunc.
+
+    Args:
+        name (str): A command name, the key of one ``msg`` keyword.
+
+    Returns:
+        bool: True if a session may receive ``name``.
+    """
+    _load_modules()
+    from evennia.server.protocol.outputfuncs import is_outputfunc
+
+    return name in _EVENTS or is_outputfunc(name)
+
+
 def _pascal(name: str) -> str:
     return "".join(p.capitalize() for p in name.split("_"))
 

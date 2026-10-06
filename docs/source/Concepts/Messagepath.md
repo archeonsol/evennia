@@ -113,6 +113,16 @@ This will be converted to a `commandtuple` looking like this:
 ("current_status", ("healthy", "charged"), {"hp": 12, "mp": 20})
 ```
 
+The server sends only declared commands. Register `current_status` first, as an
+event with `evennia.server.protocol.register_event` or as an outputfunc with
+`evennia.server.protocol.outputfuncs.register_outputfunc`. An undeclared
+command name is dropped and logged, so it never reaches a client.
+
+Every `msg()` keyword is a command for the client. A fact that only the server
+needs, such as "this delivery is a relayed perception", goes in the `route`
+parameter (`evennia.narrative.route.DeliveryRoute`), which never leaves the
+server.
+
 ### outputfuncs 
 
 ```{sidebar}
@@ -185,7 +195,7 @@ This is then sent to the client over the wire. It's then up to the client to int
 
 1. The `msg()` method is called
 2. `ServerSession` and in particular `ServerSession.msg()`  is the central point through which all `msg()` calls are routed in order to send data to that [Session](../Components/Sessions.md). 
-3. `ServerSessionHandler` converts the `msg` input to a proper `commandtuple` structure `(cmdname, (args), {kwargs})`.   It pickles the `commandtuple` together with the session-id.
+3. `ServerSessionHandler` drops any command name that is not declared, then converts the `msg` input to a proper `commandtuple` structure `(cmdname, (args), {kwargs})`.   It pickles the `commandtuple` together with the session-id.
 4.  Pickled data is sent across across the `AMP` (Asynchronous Message Protocol) connection to the [Portal](Server-And-Portal) part of Evennia.
 5. `PortalSessionHandler` unpickles the `commandtuple` and matches its session id to a matching `PortalSession`.
 6. The `PortalSession` is now responsible for converting the generic `commandtuple` to the communication protocol used by that particular connection.

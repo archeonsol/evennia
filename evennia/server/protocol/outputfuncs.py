@@ -6,11 +6,11 @@ session output frame: ``text``, ``prompt``, ``options`` and friends. A frame is
 ``{outputfunc_name: [args, kwargs]}``; each entry can be validated against its
 registered signature.
 
-Validation is intentionally permissive (``extra="allow"`` on the kwargs model):
-outputfuncs are an open protocol and portals/contribs add their own. The catalog
-is the single typed description of the well-known ones, used for the TS codegen
-and for opt-in frame validation (``settings.VALIDATE_OUTPUT_FRAMES``). It is not
-enforced on the hot send path by default.
+The catalog is enforced by name: together with the event catalog it is the
+list of commands the server may send (``ServerSessionHandler.data_out`` drops
+any other name). Portals and contribs register their own outputfuncs here.
+Signature validation stays permissive (``extra="allow"`` on the kwargs model)
+and opt-in (``settings.VALIDATE_OUTPUT_FRAMES``).
 """
 
 from __future__ import annotations
@@ -48,6 +48,18 @@ def register_outputfunc(
 
 def all_outputfuncs() -> dict[str, dict]:
     return dict(_OUTPUTFUNCS)
+
+
+def is_outputfunc(name: str) -> bool:
+    """Whether ``name`` is a registered outputfunc.
+
+    Args:
+        name (str): A command name.
+
+    Returns:
+        bool: True if ``name`` is in the catalog.
+    """
+    return name in _OUTPUTFUNCS
 
 
 def _kwargs_model(name: str):

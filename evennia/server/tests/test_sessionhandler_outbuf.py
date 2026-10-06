@@ -428,3 +428,60 @@ class TestSlowOutbufTurnLog(TestCase):
         warn = self._flush({"activity_batch": 0.01, "map": 0.02})
 
         warn.assert_not_called()
+
+
+class TestDeclaredCommandsOnly(TestCase):
+    """Only declared client commands enter the output buffer."""
+
+    def setUp(self):
+        self.handler = ServerSessionHandler()
+        self.session = _session()
+        self.handler[1] = self.session
+        patcher = patch("evennia.utils.clock.call_later")
+        self.addCleanup(patcher.stop)
+        patcher.start()
+        logged = patch("evennia.server.sessionhandler._LOGGED_UNDECLARED", set())
+        self.addCleanup(logged.stop)
+        logged.start()
+
+    def test_undeclared_keyword_is_dropped(self):
+        with patch("evennia.server.sessionhandler.log_err"):
+            self.handler.data_out(self.session, text="hello", _internal_flag=True)
+        self.assertEqual(self.handler._outbuf[1], [{"text": "hello"}])
+
+    def test_frame_left_with_only_options_is_not_buffered(self):
+        with patch("evennia.server.sessionhandler.log_err"):
+            self.handler.data_out(self.session, _internal_flag=True, options={})
+        self.assertNotIn(1, self.handler._outbuf)
+
+    def test_undeclared_name_is_logged_once(self):
+        with patch("evennia.server.sessionhandler.log_err") as log_err:
+            self.handler.data_out(self.session, text="a", _internal_flag=True)
+            self.handler.data_out(self.session, text="b", _internal_flag=True)
+        log_err.assert_called_once()
+        self.assertIn("_internal_flag", log_err.call_args.args[0])
+
+    def test_declared_commands_are_kept(self):
+        with patch("evennia.server.sessionhandler.log_err") as log_err:
+            self.handler.data_out(self.session, logged_in={}, patch=((), {}), options={})
+        log_err.assert_not_called()
+        self.assertEqual(
+            self.handler._outbuf[1], [{"logged_in": {}, "patch": ((), {}), "options": {}}]
+        )
+
+    def test_dropping_a_flag_lets_narrative_frames_merge(self):
+        with patch("evennia.server.sessionhandler.log_err"):
+            for body in ("first", "second"):
+                self.handler.data_out(
+                    self.session,
+                    narrative=([{"body": body}], {}),
+                    options=None,
+                    _internal_flag=True,
+                )
+        with (
+            patch("evennia.server.sessionhandler.evennia") as engine,
+            patch.object(self.handler, "clean_senddata", side_effect=lambda session, frame: frame),
+        ):
+            self.handler._flush_outbuf(1)
+        sent = engine.EVENNIA_SERVER_SERVICE.portal_bus.send_MsgServer2Portal.call_args_list
+        self.assertEqual(len(sent), 1)

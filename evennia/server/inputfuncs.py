@@ -481,13 +481,18 @@ def monitor(session, *args, **kwargs):
       stop (bool): Stop monitoring the above name.
       outputfunc_name (str, optional): Change the name of
         the outputfunc name. This is used e.g. by MSDP which
-        has its own specific output format.
+        has its own specific output format. It must be a declared
+        client command, or the request is ignored.
 
     """
     from evennia.scripts.monitorhandler import MONITOR_HANDLER
 
+    from evennia.server.protocol import is_client_command
+
     name = kwargs.get("name", None)
     outputfunc_name = kwargs.get("outputfunc_name", "monitor")
+    if not is_client_command(outputfunc_name):
+        return
     category = kwargs.get("category", None)
     _puppet = session.get_puppet()
     if name and name in _monitorable and _puppet:
