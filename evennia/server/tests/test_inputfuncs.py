@@ -284,6 +284,85 @@ class TestTextLineTerminators(unittest.TestCase):
         self.assertEqual(self._dispatched("emote waves  \n"), "emote waves  ")
 
 
+class TestTextDone(unittest.TestCase):
+    """``text_done`` answers only after the line's command task has ended."""
+
+    TOKEN = "ab12cd34ef56"
+
+    def setUp(self):
+        self.session = mock.MagicMock()
+        self.session.account = None
+
+    def test_reply_waits_for_the_command(self):
+        import asyncio
+
+        from evennia.utils import clock
+
+        session = self.session
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        saved_loop = (clock._main_loop, clock._loop_thread_id)
+        clock.bind_loop(loop)
+        seen = []
+
+        async def scenario():
+            gate = loop.create_future()
+
+            async def command(sess, txt, **kwargs):
+                seen.append((txt, kwargs))
+                await gate
+                sess.msg("command output")
+
+            with mock.patch.object(inputfuncs, "cmdhandler", side_effect=command):
+                inputfuncs.text_done(session, "look", self.TOKEN, cmdobj="injected")
+                for _ in range(5):
+                    await asyncio.sleep(0)
+                self.assertEqual(session.msg.call_args_list, [])
+                gate.set_result(None)
+                for _ in range(5):
+                    await asyncio.sleep(0)
+
+        try:
+            loop.run_until_complete(scenario())
+        finally:
+            loop.close()
+            asyncio.set_event_loop(None)
+            clock._main_loop, clock._loop_thread_id = saved_loop
+        self.assertEqual(seen, [("look", {"callertype": "session", "session": session})])
+        self.assertEqual(
+            session.msg.call_args_list,
+            [mock.call("command output"), mock.call(text_done=self.TOKEN)],
+        )
+
+    def test_idle_line_replies_at_once(self):
+        with mock.patch.object(inputfuncs, "cmdhandler") as handler:
+            inputfuncs.text_done(self.session, "idle", self.TOKEN)
+        handler.assert_not_called()
+        self.session.msg.assert_called_once_with(text_done=self.TOKEN)
+
+    def test_malformed_input_runs_nothing(self):
+        with mock.patch.object(inputfuncs, "text") as text:
+            inputfuncs.text_done(self.session, "look")
+            inputfuncs.text_done(self.session, "look", "not a token")
+            inputfuncs.text_done(self.session, "look", self.TOKEN, "extra")
+            inputfuncs.text_done(self.session, ["look"], self.TOKEN)
+        text.assert_not_called()
+        self.session.msg.assert_not_called()
+
+    def test_over_limit_line_is_refused_like_text(self):
+        with (
+            mock.patch.object(inputfuncs, "text") as text,
+            mock.patch.object(inputfuncs.settings, "MAX_CHAR_LIMIT", 5),
+            mock.patch.object(inputfuncs.settings, "MAX_CHAR_LIMIT_WARNING", "too long"),
+        ):
+            inputfuncs.text_done(self.session, "say a long line", self.TOKEN)
+        text.assert_not_called()
+        self.assertEqual(
+            self.session.msg.call_args_list,
+            [mock.call("too long"), mock.call(text_done=self.TOKEN)],
+        )
+
+
 class TestClientOptionsScreenSize(unittest.TestCase):
     """``client_options`` sets a session's screen size, as NAWS does for telnet.
 

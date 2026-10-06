@@ -178,6 +178,9 @@ export interface StopMusicPayload {
 /** Cut playback immediately. */
 export type StopMusicNowPayload = any;
 
+/** args[0] = the token of a `text_done` input whose command has finished. */
+export type TextDonePayload = string;
+
 export interface TicketAlertPayload {
   id: string;
   label: string;
@@ -265,6 +268,7 @@ export type OobEvent =
   | "screenreader_mode"
   | "stop_music"
   | "stop_music_now"
+  | "text_done"
   | "ticket_alert"
   | "ticket_inbox"
   | "ticket_msg"
@@ -313,6 +317,7 @@ export interface OobEventMap {
   "screenreader_mode": ScreenreaderModePayload;
   "stop_music": StopMusicPayload;
   "stop_music_now": StopMusicNowPayload;
+  "text_done": TextDonePayload;
   "ticket_alert": TicketAlertPayload;
   "ticket_inbox": TicketInboxPayload;
   "ticket_msg": TicketMsgPayload;

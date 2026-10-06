@@ -17,6 +17,12 @@ register_event(
 )
 register_event("logout", carrier="args", fields={"_": "str"}, doc="args[0] = reason (e.g. 'quit').")
 register_event(
+    "text_done",
+    carrier="args",
+    fields={"_": "str"},
+    doc="args[0] = the token of a `text_done` input whose command has finished.",
+)
+register_event(
     "screenreader_mode",
     fields={"on": "bool"},
     doc="The session's SCREENREADER flag, sent whenever it is set (login restore, @option).",

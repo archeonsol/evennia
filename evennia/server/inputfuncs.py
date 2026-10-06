@@ -20,7 +20,9 @@ settings.INPUT_FUNC_MODULES.
 
 """
 
+import asyncio
 import importlib
+import re
 from codecs import lookup as codecs_lookup
 
 from django.conf import settings
@@ -80,6 +82,9 @@ def text(session, *args, **kwargs):
         text (str): First arg is used as text-command input. Other
             arguments are ignored.
 
+    Returns:
+        asyncio.Task or None: The task running the command, when one started.
+
     """
 
     # from evennia.server.profiling.timetrace import timetrace
@@ -116,11 +121,54 @@ def text(session, *args, **kwargs):
 
     # cmdhandler is `async def`; kick it off on the loop (unhandled errors
     # are logged via clock.run_coroutine's task done-callback).
-    clock.run_coroutine(
+    task = clock.run_coroutine(
         cmdhandler(session, txt, callertype="session", session=session, **kwargs),
         task_kind="command",
     )
     session.update_session_counters()
+    return task
+
+
+_TEXT_DONE_TOKEN = re.compile(r"[0-9A-Za-z]{1,32}")
+
+
+def text_done(session, *args, **kwargs):
+    """
+    Run one line as `text` does, then send `text_done` once its command ends.
+
+    `text` starts the command as its own task and returns at once, so a
+    scripted client cannot otherwise tell when a line's output is complete.
+    The reply follows every message that command sent.
+
+    Args:
+        session (Session): The active Session to receive the input.
+        line (str): The line to run, exactly as if typed.
+        token (str): 1-32 letters or digits, sent back as `text_done`.
+
+    Notes:
+        Client kwargs are dropped, so the line can do no more than typing it.
+        The portal applies MAX_CHAR_LIMIT to `text` input only; it is applied
+        here instead.
+
+    """
+    if len(args) != 2 or not all(isinstance(arg, str) for arg in args):
+        return
+    line, token = args
+    if not _TEXT_DONE_TOKEN.fullmatch(token):
+        return
+    if 0 < settings.MAX_CHAR_LIMIT < len(line):
+        session.msg(settings.MAX_CHAR_LIMIT_WARNING)
+        session.msg(text_done=token)
+        return
+    task = text(session, line)
+    from evennia.utils import clock
+
+    async def report_done():
+        if isinstance(task, asyncio.Future):
+            await asyncio.gather(task, return_exceptions=True)
+        session.msg(text_done=token)
+
+    clock.run_coroutine(report_done(), task_kind="command")
 
 
 def bot_data_in(session, *args, **kwargs):
