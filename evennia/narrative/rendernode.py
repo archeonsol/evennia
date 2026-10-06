@@ -15,6 +15,7 @@ from dataclasses import dataclass, field, replace
 from types import MappingProxyType
 from typing import Any, Mapping
 
+from evennia.narrative.route import NO_ROUTE
 from evennia.utils.fast_ids import new_runtime_id
 
 __all__ = [
@@ -773,6 +774,7 @@ def deliver_node(
 
         logger.log_trace("render timeline sink failed")
     text_meta = _text_metadata(node)
+    rendered_route = replace(route or NO_ROUTE, rendered=True)
     if not capable:
         # Preserve an explicitly targeted session subset; without one, let the
         # recipient's own multisession policy decide, exactly as before R1.
@@ -782,8 +784,7 @@ def deliver_node(
             (node.body, text_meta),
             from_obj=from_obj,
             options=options,
-            _render_delivery=True,
-            route=route,
+            route=rendered_route,
             **msg_kwargs,
         )
         _record_delivery_metric("text", started)
@@ -793,8 +794,7 @@ def deliver_node(
         session=capable,
         from_obj=from_obj,
         options=options,
-        _render_delivery=True,
-        route=route,
+        route=rendered_route,
         **msg_kwargs,
     )
     # MODE_BOTH sessions take the structured payload *and* the text line.
@@ -805,8 +805,7 @@ def deliver_node(
             session=others,
             from_obj=from_obj,
             options=options,
-            _render_delivery=True,
-            route=route,
+            route=rendered_route,
             **msg_kwargs,
         )
     _record_delivery_metric("mixed" if others else "structured", started)

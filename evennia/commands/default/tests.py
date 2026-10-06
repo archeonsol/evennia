@@ -91,7 +91,7 @@ class TestGeneral(BaseEvenniaCommandTest):
         self.assertEqual(body, "Char looks around")
         self.assertEqual(meta["type"], "pose")
         self.assertEqual(self.char2.msg.call_args[1]["from_obj"], self.char1)
-        self.assertTrue(self.char2.msg.call_args[1]["_render_delivery"])
+        self.assertTrue(self.char2.msg.call_args[1]["route"].rendered)
 
     def test_nick(self):
         self.call(

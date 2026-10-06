@@ -1860,7 +1860,7 @@ class DefaultAccount(AccountDB, metaclass=TypeclassBase):
         """
         from evennia.narrative.rendernode import RenderNode, deliver_node, text_node
 
-        render_delivery = bool(kwargs.pop("_render_delivery", False))
+        render_delivery = bool(route and route.rendered)
 
         if from_obj and not render_delivery:
             # call hook

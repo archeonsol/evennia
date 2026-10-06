@@ -173,10 +173,10 @@ class MessagingMixin:
         # Hooks and transforms still run exactly once before protocol fan-out.
         from evennia.narrative.rendernode import RenderNode, deliver_node, text_node
 
-        render_delivery = bool(kwargs.pop("_render_delivery", False))
+        render_delivery = bool(route and route.rendered)
 
         # try send hooks once. Recursive text/structured sends from deliver_node
-        # carry the private marker above and bypass these hooks.
+        # carry a rendered route and bypass these hooks.
         if from_obj and not render_delivery:
             for obj in make_iter(from_obj):
                 try:

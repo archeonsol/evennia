@@ -546,6 +546,14 @@ class TestDelivery(PlanTestCase):
         deliver(self._plan(), viewer, route=route)
         self.assertTrue(viewer.calls[0][1]["route"].perception_relay)
 
+    def test_delivered_route_is_rendered_and_keeps_the_relay_fact(self):
+        viewer = _Viewer("Ana", sessions=[_Session({})], knows=[1])
+        deliver(self._plan(), viewer, route=DeliveryRoute(perception_relay=True))
+        route = viewer.calls[0][1]["route"]
+        self.assertTrue(route.rendered)
+        self.assertTrue(route.perception_relay)
+        self.assertNotIn("_render_delivery", viewer.calls[0][1])
+
     def test_relay_hooks_run_for_a_direct_delivery(self):
         viewer = _RelayViewer("Ana", sessions=[_Session({})], knows=[1])
         deliver(self._plan(), viewer)
