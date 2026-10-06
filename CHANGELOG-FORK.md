@@ -25,6 +25,28 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.308: The give line opens with a capital
+
+The default `give` told the receiver "a tall woman gives you a handset." The
+line is built by hand, so it missed the sentence-start capital that
+`msg_contents` templates gained in `.307`.
+
+### Engine
+
+- **Give receiver line** ([`objects.py`](evennia/actions/default/objects.py)).
+  The giver's name passes through `capitalize_lead` (`87c8bc828`).
+
+### Migration
+
+- None.
+
+### Tests
+
+- [`test_default_objects.py`](evennia/actions/tests/test_default_objects.py):
+  a lower-case short description opens the receiver's line with a capital.
+
+---
+
 ## 6.0.0+underspire.307: Server-side data stays on the server
 
 Every `msg()` keyword is a command for the client, but the engine and games also
