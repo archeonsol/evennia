@@ -347,6 +347,7 @@
       value={compose.text}
       oninput={(e) => compose.setText(e.currentTarget.value)}
       onkeydown={onComposeKey}
+      spellcheck={settings.spellcheck}
       aria-label="compose"
     ></textarea>
     <!-- Server-rendered preview of what you and the room will actually see. -->
@@ -401,7 +402,7 @@
       onpaste={onPaste}
       autocomplete="off"
       autocapitalize="off"
-      spellcheck="false"
+      spellcheck={settings.spellcheck}
       enterkeyhint="send"
       use:focusOnMount
       aria-label="Command"

@@ -106,6 +106,8 @@ interface Persisted {
   historyKeys: RecallKeys;
   /** Leave the compose pad open after sending from it, for the next pose. */
   composeStaysOpen: boolean;
+  /** Let the browser underline misspellings in the command line and compose pad. */
+  spellcheck: boolean;
   /** Show help in its own panel instead of printing it into the terminal. */
   helpPanel: boolean;
   customColors: Record<string, string>;
@@ -145,6 +147,7 @@ const DEFAULTS: Persisted = {
   keepCommand: false,
   historyKeys: "edge",
   composeStaysOpen: false,
+  spellcheck: true,
   helpPanel: true,
   customColors: { ...CUSTOM_DEFAULTS },
 };
@@ -205,6 +208,7 @@ class Settings {
   keepCommand = $state(DEFAULTS.keepCommand);
   historyKeys = $state<RecallKeys>(DEFAULTS.historyKeys);
   composeStaysOpen = $state(DEFAULTS.composeStaysOpen);
+  spellcheck = $state(DEFAULTS.spellcheck);
   helpPanel = $state(DEFAULTS.helpPanel);
   customColors = $state<Record<string, string>>({ ...CUSTOM_DEFAULTS });
   private _lastSR: boolean | null = null;

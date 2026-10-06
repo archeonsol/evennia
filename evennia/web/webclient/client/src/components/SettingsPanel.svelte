@@ -320,6 +320,7 @@
         </select>
       </label>
       {@render toggle("Keep compose open after sending", "composeStaysOpen")}
+      {@render toggle("Spellcheck while typing", "spellcheck")}
       {@render toggle("Help in its own panel", "helpPanel")}
     {:else if view === "reading"}
       <!-- Kept by the game on the account, not in this browser: they follow the
