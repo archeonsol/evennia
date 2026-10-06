@@ -25,6 +25,93 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.307: Server-side data stays on the server
+
+Every `msg()` keyword is a command for the client, but the engine and games also
+used `msg()` keywords as server-side routing flags. Nothing removed them, so
+`_narrative_relayed` (set on every plan delivery) and a game's
+`_perception_relay` reached sessions. Telnet clients that negotiated MSDP or
+GMCP received them as raw subnegotiations, and a client that handled those
+badly showed garbled, spliced text. Routing now travels in a `route` parameter
+that never leaves the server, and the server sends only declared commands.
+Also ships the untagged work since `.306`: steady web panels, `text_done`, a
+which-one prompt fix, capitalized names at sentence start, two manager fixes,
+and command-line spellcheck.
+
+### Engine
+
+- **`route` parameter** ([`route.py`](evennia/narrative/route.py),
+  [`plan.py`](evennia/narrative/plan.py),
+  [`rendernode.py`](evennia/narrative/rendernode.py),
+  [`messaging.py`](evennia/objects/mixins/messaging.py),
+  [`accounts.py`](evennia/accounts/accounts.py),
+  [`serversession.py`](evennia/server/serversession.py)). `DeliveryRoute` holds
+  `perception_relay` (skip the `at_narrative_plan` and `at_narrative_delivery`
+  relay hooks) and `rendered` (the node already ran its hooks and transforms).
+  `msg`, `deliver`, `deliver_resolved` and `deliver_node` take it as a named
+  keyword, so it is never left in `**kwargs`. `_narrative_relayed` is no longer
+  set. `_render_delivery` is replaced by `route.rendered`
+  (`127895454`, `a22bb7e18`).
+- **Only declared commands are sent** ([`sessionhandler.py`](evennia/server/sessionhandler.py),
+  [`protocol/__init__.py`](evennia/server/protocol/__init__.py),
+  [`core_outputfuncs.py`](evennia/server/protocol/core_outputfuncs.py)).
+  `ServerSessionHandler.data_out` drops any keyword that is not a registered
+  event or outputfunc, logs each dropped name once per process, and skips a
+  frame left with only `options`. The check runs before the output buffer, so
+  it also lets plan-delivered `narrative` frames merge again. New
+  `is_client_command(name)`. The commands the engine already sent are now
+  registered as outputfuncs: `narrative`, `patch`, `res`, the inputfunc
+  replies, and the IRC, Grapevine and Discord bot commands. `monitor` ignores
+  an undeclared `outputfunc_name` (`74f5294b4`).
+- **Steady web panels, and a side size for `web_panel`**
+  ([`dock.svelte.ts`](evennia/web/webclient/client/src/lib/dock.svelte.ts),
+  [`iframePanels.ts`](evennia/web/webclient/client/src/lib/iframePanels.ts)).
+  A page panel stays mounted while hidden, so switching tabs no longer reloads
+  its iframe, and the iframe loads over the shell background. `web_panel`
+  takes an optional `size`: `wide` (default) or `side`, a help-sized float at
+  the right (`08330f001`).
+- **`text_done` inputfunc** ([`inputfuncs.py`](evennia/server/inputfuncs.py)).
+  A scripted client sends a token with a command line and receives a
+  `text_done` event with that token when the command finishes (`ab8c97be4`).
+- **Which-one prompt** ([`dispatch.py`](evennia/actions/dispatch.py),
+  [`menus.py`](evennia/actions/menus.py)). A line that names no candidate and
+  is not a bare number closes the prompt and runs as a new command, instead of
+  "Invalid choice. Cancelled." (`d5f8cdf2f`).
+- **Capitalized names at sentence start** ([`render.py`](evennia/narrative/render.py)).
+  `CharRef` and `ObjectRef` gain `capitalize`, so `"{name} sits down."` no
+  longer opens with a lower-case short description (`6e2f45c69`).
+- **Managers** ([`managers.py`](evennia/typeclasses/managers.py)).
+  `get(pk=)` reads the idmapper first (`4773383d0`); a related manager keeps
+  its filter in `get` (`69d11e7ec`).
+- **Break-glass grants** ([`service.py`](evennia/authorization/service.py)).
+  The break-glass loop no longer rebinds the decision-scope memo, which made
+  `finish()` raise `TypeError` inside a `decision_scope` (`8332614a2`).
+- **Spellcheck** ([`CommandInput.svelte`](evennia/web/webclient/client/src/components/CommandInput.svelte)).
+  The command line spellchecks by default; a "Spellcheck while typing" setting
+  turns it off for the command line and the compose pad (`cf7e96b05`).
+
+### Migration
+
+- Pass `route=DeliveryRoute(perception_relay=True)` where a game passed
+  `_perception_relay=True`. Read `route.rendered` where it read
+  `_render_delivery`. Drop any check for `_narrative_relayed`.
+- Register every custom client command with `register_event` (shell events)
+  or `register_outputfunc` (anything else), or the server drops it and logs
+  `Dropped undeclared client command`.
+
+### Tests
+
+- [`test_plan.py`](evennia/narrative/tests/test_plan.py): no routing keyword on
+  delivery; `route` reaches `msg` rendered and keeps `perception_relay`; relay
+  hooks run for a direct delivery and are skipped for a relayed one.
+- [`test_sessionhandler_outbuf.py`](evennia/server/tests/test_sessionhandler_outbuf.py):
+  undeclared keywords dropped and logged once; options-only frame skipped;
+  declared commands kept; narrative frames merge after a flag is dropped.
+- [`test_inputfuncs.py`](evennia/server/tests/test_inputfuncs.py): `monitor`
+  refuses an undeclared reply name.
+
+---
+
 ## 6.0.0+underspire.306: Web panels follow their base and can be pinned
 
 A page the server opens in a web panel now loads into that base's panel instead
