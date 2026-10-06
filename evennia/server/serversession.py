@@ -447,12 +447,14 @@ class ServerSession(SessionLoginRules, _BASE_SESSION_CLASS):
         """
         self.sessionhandler.call_inputfuncs(self, **kwargs)
 
-    def msg(self, text=None, **kwargs):
+    def msg(self, text=None, *, route=None, **kwargs):
         """
         Wrapper to mimic msg() functionality of Objects and Accounts.
 
         Args:
             text (str): String input.
+            route (DeliveryRoute, optional): Accepted for parity with object
+                and account ``msg``. It is never sent to the client.
 
         Keyword Args:
             any (str or tuple): Send-commands identified

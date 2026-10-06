@@ -544,6 +544,7 @@ def deliver(
     options=None,
     extras=None,
     publish=True,
+    route=None,
     **msg_kwargs,
 ):
     """Resolve ``plan`` for ``viewer``, run universal transforms, and send.
@@ -573,7 +574,7 @@ def deliver(
     # to the perceiving object. Invoke it once at the plan boundary, before
     # protocol fan-out, so text/nodes/both clients cannot duplicate or bypass
     # the remote perception.
-    if not msg_kwargs.get("_perception_relay"):
+    if not (route and route.perception_relay):
         relay_hook = getattr(viewer, "at_narrative_plan", None)
         if callable(relay_hook):
             try:
@@ -582,7 +583,6 @@ def deliver(
                 from evennia.utils import logger
 
                 logger.log_trace("narrative perspective relay failed")
-    msg_kwargs.setdefault("_narrative_relayed", True)
     return deliver_resolved(
         node,
         viewer,
@@ -590,6 +590,7 @@ def deliver(
         sessions=target,
         options=options,
         context={"plan": plan},
+        route=route,
         **msg_kwargs,
     )
 
@@ -602,6 +603,7 @@ def deliver_resolved(
     sessions=None,
     options=None,
     context=None,
+    route=None,
     **msg_kwargs,
 ):
     """Run universal transforms over an already-resolved node, then send it.
@@ -643,7 +645,7 @@ def deliver_resolved(
     # times per event depending on what the client can take. A mirror hung off
     # ``msg`` instead fires twice for a client accepting both payloads and not
     # at all for a nodes-only one, whose call carries no text.
-    if not msg_kwargs.get("_perception_relay"):
+    if not (route and route.perception_relay):
         mirror = getattr(viewer, "at_narrative_delivery", None)
         if callable(mirror):
             try:
@@ -667,6 +669,7 @@ def deliver_resolved(
         sessions=sessions,
         options=options,
         _transformed=True,
+        route=route,
         **msg_kwargs,
     )
 

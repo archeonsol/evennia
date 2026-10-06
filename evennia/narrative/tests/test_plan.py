@@ -33,6 +33,7 @@ from evennia.narrative.rendernode import (
     flatten_blocks,
     narrative_mode,
 )
+from evennia.narrative.route import DeliveryRoute
 
 
 class _Entity:
@@ -69,6 +70,18 @@ class _Viewer:
 
     def msg(self, *args, **kwargs):
         self.calls.append((args, kwargs))
+
+
+class _RelayViewer(_Viewer):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.relayed = []
+
+    def at_narrative_plan(self, plan, extras=None):
+        self.relayed.append("plan")
+
+    def at_narrative_delivery(self, node, context=None):
+        self.relayed.append("delivery")
 
 
 KADE = _Entity(1, "Kade")
@@ -521,6 +534,27 @@ class TestDelivery(PlanTestCase):
         self.assertIsNone(result)
         self.assertEqual(viewer.calls, [])
         self.assertEqual(later_calls, [])
+
+    def test_delivery_adds_no_routing_keyword(self):
+        viewer = _Viewer("Ana", sessions=[_Session({})], knows=[1])
+        deliver(self._plan(), viewer)
+        self.assertNotIn("_narrative_relayed", viewer.calls[0][1])
+
+    def test_route_reaches_the_viewer_msg(self):
+        route = DeliveryRoute(perception_relay=True)
+        viewer = _Viewer("Ana", sessions=[_Session({})], knows=[1])
+        deliver(self._plan(), viewer, route=route)
+        self.assertTrue(viewer.calls[0][1]["route"].perception_relay)
+
+    def test_relay_hooks_run_for_a_direct_delivery(self):
+        viewer = _RelayViewer("Ana", sessions=[_Session({})], knows=[1])
+        deliver(self._plan(), viewer)
+        self.assertEqual(viewer.relayed, ["plan", "delivery"])
+
+    def test_relayed_delivery_skips_relay_hooks(self):
+        viewer = _RelayViewer("Ana", sessions=[_Session({})], knows=[1])
+        deliver(self._plan(), viewer, route=DeliveryRoute(perception_relay=True))
+        self.assertEqual(viewer.relayed, [])
 
     def test_single_viewer_delivery_publishes_the_event(self):
         from evennia.narrative import timeline

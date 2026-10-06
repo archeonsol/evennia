@@ -139,7 +139,7 @@ class MessagingMixin:
             task_kind="command",
         )
 
-    def msg(self, text=None, from_obj=None, session=None, options=None, **kwargs):
+    def msg(self, text=None, from_obj=None, session=None, options=None, *, route=None, **kwargs):
         """
         Emits something to a session attached to the object.
 
@@ -158,6 +158,8 @@ class MessagingMixin:
                 depends on the MULTISESSION_MODE.
             options (dict): Message-specific option-value
                 pairs. These will be applied at the protocol level.
+            route (DeliveryRoute, optional): Server-side routing facts. They
+                stay on the server and are never sent to a session.
             **kwargs (string or tuples): All kwarg keys not listed above
                 will be treated as send-command names and their arguments
                 (which can be a string or a tuple).
@@ -201,6 +203,7 @@ class MessagingMixin:
                 sessions=sessions,
                 options=options,
                 transform_context={"hooks_applied": True},
+                route=route,
                 **passthrough,
             )
 
@@ -235,6 +238,7 @@ class MessagingMixin:
                 sessions=target_sessions,
                 options=options,
                 transform_context={"hooks_applied": True},
+                route=route,
                 **passthrough,
             )
 

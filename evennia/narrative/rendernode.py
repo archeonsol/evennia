@@ -721,6 +721,7 @@ def deliver_node(
     options=None,
     _transformed=False,
     transform_context=None,
+    route=None,
     **msg_kwargs,
 ):
     """Deliver one node to every viewer session with text parity fallback.
@@ -741,6 +742,7 @@ def deliver_node(
             options=options,
             context=transform_context,
             refs_builder=refs_builder,
+            route=route,
             **msg_kwargs,
         )
 
@@ -781,6 +783,7 @@ def deliver_node(
             from_obj=from_obj,
             options=options,
             _render_delivery=True,
+            route=route,
             **msg_kwargs,
         )
         _record_delivery_metric("text", started)
@@ -791,6 +794,7 @@ def deliver_node(
         from_obj=from_obj,
         options=options,
         _render_delivery=True,
+        route=route,
         **msg_kwargs,
     )
     # MODE_BOTH sessions take the structured payload *and* the text line.
@@ -802,6 +806,7 @@ def deliver_node(
             from_obj=from_obj,
             options=options,
             _render_delivery=True,
+            route=route,
             **msg_kwargs,
         )
     _record_delivery_metric("mixed" if others else "structured", started)

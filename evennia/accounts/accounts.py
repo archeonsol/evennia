@@ -1834,7 +1834,7 @@ class DefaultAccount(AccountDB, metaclass=TypeclassBase):
 
     # methods inherited from database model
 
-    def msg(self, text=None, from_obj=None, session=None, options=None, **kwargs):
+    def msg(self, text=None, from_obj=None, session=None, options=None, *, route=None, **kwargs):
         """
         Evennia -> User
         This is the main route for sending data back to the user from the
@@ -1852,6 +1852,8 @@ class DefaultAccount(AccountDB, metaclass=TypeclassBase):
                 default send behavior for the current
                 MULTISESSION_MODE.
             options (list): Protocol-specific options. Passed on to the protocol.
+            route (DeliveryRoute, optional): Server-side routing facts. They
+                stay on the server and are never sent to a session.
         Keyword Args:
             any (dict): All other keywords are passed on to the protocol.
 
@@ -1886,6 +1888,7 @@ class DefaultAccount(AccountDB, metaclass=TypeclassBase):
                 sessions=sessions,
                 options=options,
                 transform_context={"hooks_applied": True},
+                route=route,
                 **passthrough,
             )
 
@@ -1915,6 +1918,7 @@ class DefaultAccount(AccountDB, metaclass=TypeclassBase):
                 sessions=target_sessions,
                 options=options,
                 transform_context={"hooks_applied": True},
+                route=route,
                 **passthrough,
             )
 
