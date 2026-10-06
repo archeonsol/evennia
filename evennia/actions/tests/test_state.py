@@ -380,6 +380,14 @@ class TestDisambiguation(unittest.TestCase):
         self.assertFalse(actor.has_state(DisambiguationState))
         self.assertIn("Invalid choice. Cancelled.", char.messages)
 
+    def test_new_command_passes_instead_of_cancelling(self):
+        actor, char, pending, _cands, ctx, choice = self._setup("look around")
+        trace = _sync(ENGINE.dispatch(choice, actor, ctx))
+        self.assertNotEqual(trace.outcome, "blocked")
+        self.assertIsNone(pending.target)
+        self.assertFalse(actor.has_state(DisambiguationState))
+        self.assertNotIn("Invalid choice. Cancelled.", char.messages)
+
     def test_parser_ambiguous_target_installs_state(self):
         # actor.search raising AmbiguousTarget is the integration trigger.
         class AmbiguousActor(Actor):

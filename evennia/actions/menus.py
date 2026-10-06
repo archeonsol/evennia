@@ -575,13 +575,24 @@ def _parse_choice(raw, candidates, looker=None):
     return None
 
 
+def _reads_as_choice(raw):
+    """True when ``raw`` can only be an answer: blank or a bare number.
+
+    Any other line that names no candidate is a new command, so it runs
+    instead of being spent cancelling the prompt.
+    """
+    token = (raw or "").strip()
+    return not token or token.isdigit()
+
+
 class DisambiguationState(StateProvider):
     """One-shot state that resolves an ambiguous target on the next input.
 
     Installed by the dispatch loop (Phase 4) when the parser raises
     :class:`AmbiguousTarget`. The next input line is read as a choice; a valid
-    choice patches the pending action's target field and re-dispatches it, an
-    invalid one cancels. Either way the state exits.
+    choice patches the pending action's target field and re-dispatches it, a
+    blank line or an out-of-range number cancels, and any other line runs as
+    the command it is. Either way the state exits.
     """
 
     def __init__(
@@ -621,7 +632,7 @@ class DisambiguationState(StateProvider):
 
     @rule(Action, phase="before", priority=9999)
     def resolve_disambiguation(self, action, actor):
-        """Read the next input as a choice; redirect the pending action or cancel.
+        """Read the next input as a choice; redirect, cancel, or let a new command run.
 
         The dispatch loop reuses the same provider list across a ``REDIRECT``, so
         this rule stays in the context for the very action it redirects to. Once
@@ -638,8 +649,10 @@ class DisambiguationState(StateProvider):
             action._raw_string, self.candidates, looker=getattr(actor, "character", None)
         )
         if choice is None:
-            actor.msg("Invalid choice. Cancelled.")
             actor.exit_state(DisambiguationState)
+            if not _reads_as_choice(action._raw_string):
+                return PASS
+            actor.msg("Invalid choice. Cancelled.")
             return SILENT_FAIL
         setattr(self.pending, self.target_field, choice)
         actor.exit_state(DisambiguationState)

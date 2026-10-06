@@ -50,7 +50,7 @@ from .actor import Actor
 from .context import build_context
 from .engine import engine as _default_engine
 from .exceptions import AmbiguousTarget
-from .menus import DisambiguationState, _candidate_label, _parse_choice
+from .menus import DisambiguationState, _candidate_label, _parse_choice, _reads_as_choice
 from .parser import parser as _default_parser
 
 __all__ = [
@@ -399,10 +399,25 @@ async def _resolve_disambiguation(
     callertype=None,
     **kwargs,
 ):
-    """Resolve a pending disambiguation from the player's choice line."""
+    """Resolve a pending disambiguation from the player's choice line.
+
+    A line that names no candidate and is not a bare number runs as a new
+    command once the prompt has closed.
+    """
     choice = _parse_choice(raw_string, state.candidates, looker=getattr(actor, "character", None))
     actor.exit_state(DisambiguationState)
     if choice is None:
+        if not _reads_as_choice(raw_string):
+            return await try_action_dispatch(
+                called_by,
+                raw_string,
+                session=session,
+                actor=actor,
+                engine=engine,
+                parser=parser,
+                callertype=callertype,
+                **kwargs,
+            )
         actor.msg("Invalid choice. Cancelled.")
         return None
     if state.choice_resolver is not None:

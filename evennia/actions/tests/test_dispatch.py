@@ -517,6 +517,21 @@ class TestDisambiguation(unittest.TestCase):
         self.assertEqual(len(c1.kicked) + len(c2.kicked), 0)
 
 
+    def test_new_command_runs_instead_of_cancelling(self):
+        c1, c2 = RuleTarget("goblin"), RuleTarget("goblin chief")
+        orc = RuleTarget("orc")
+        self.char._search_hook = lambda name: orc
+        self.actor.enter_state(
+            DisambiguationState([c1, c2], pending_raw="kick goblin", ambiguous_name="goblin")
+        )
+        trace = _dispatch(self.actor, "kick orc", self.parser)
+        self.assertEqual(trace.outcome, "succeeded")
+        self.assertFalse(self.actor.has_state(DisambiguationState))
+        self.assertNotIn("Invalid choice. Cancelled.", self.char.messages)
+        self.assertEqual(len(orc.kicked), 1)
+        self.assertEqual(len(c1.kicked) + len(c2.kicked), 0)
+
+
 # --- profiling middleware ---------------------------------------------------
 class TestProfiling(unittest.TestCase):
     def setUp(self):
