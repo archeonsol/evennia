@@ -455,7 +455,10 @@ class CharacterObjectRules:
         else:
             obj_name = to_give[0].get_numbered_name(len(moved), caller, return_string=True)
             caller.msg(f"You give {obj_name} to {target.get_display_name(caller)}.")
-            target.msg(f"{caller.get_display_name(target)} gives you {obj_name}.")
+            from evennia.narrative.render import capitalize_lead
+
+            giver = capitalize_lead(caller.get_display_name(target))
+            target.msg(f"{giver} gives you {obj_name}.")
         return CLAIM
 
     # --- put (character preflight) -------------------------------------------

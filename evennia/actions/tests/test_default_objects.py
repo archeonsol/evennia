@@ -96,6 +96,16 @@ class TestAsyncCommit(unittest.TestCase):
         self.assertTrue(any("You give" in m for m in char.messages))
         self.assertTrue(any("gives you" in m for m in bob.messages))
 
+    def test_give_tells_the_receiver_with_a_capital(self):
+        char, actor, _room = self._char()
+        char.get_display_name = lambda looker=None, **kwargs: "a tall woman"
+        _coin(char, char)
+        bob = FakeObj(key="bob")
+        char.search_map["bob"] = bob
+        char.search_for = lambda *args, **kwargs: None
+        self._trace(Give(mode="plain", item_spec="coin", target_spec="bob"), actor, [char])
+        self.assertIn("A tall woman gives you coins.", bob.messages)
+
     def test_put_commits_off_the_loop(self):
         char, actor, _room = self._char()
         chest = _Container(key="chest")
