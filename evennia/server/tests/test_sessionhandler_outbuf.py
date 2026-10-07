@@ -12,7 +12,9 @@ from unittest.mock import Mock, patch
 
 from django.test import override_settings
 
+import evennia
 from evennia.server.sessionhandler import ServerSessionHandler, SessionHandler
+from evennia.utils.test_resources import BaseEvenniaTest
 
 
 def _session(sessid=1):
@@ -493,3 +495,28 @@ class TestDeclaredCommandsOnly(TestCase):
             self.handler._flush_outbuf(1)
         sent = engine.EVENNIA_SERVER_SERVICE.portal_bus.send_MsgServer2Portal.call_args_list
         self.assertEqual(len(sent), 1)
+
+
+class TestUndeclaredLogThroughMsg(BaseEvenniaTest):
+    """The drop log names the game frame that called ``msg``."""
+
+    evennia_fixtures = ("char1", "session")
+
+    def test_log_names_the_msg_caller(self):
+        handler = evennia.SESSION_HANDLER
+
+        def send_with_a_stray_flag():
+            self.char1.msg("hello", session=self.session, _internal_flag=True)
+
+        with (
+            patch.object(handler, "data_out", self.backups[0]),
+            patch.object(handler, "_outbuf", {}),
+            patch.object(handler, "_outbuf_flush_scheduled", False),
+            patch("evennia.utils.clock.call_later"),
+            patch("evennia.server.sessionhandler._LOGGED_UNDECLARED", set()),
+            patch("evennia.server.sessionhandler.log_err") as log_err,
+        ):
+            send_with_a_stray_flag()
+        logged = log_err.call_args.args[0]
+        self.assertIn("in send_with_a_stray_flag", logged)
+        self.assertNotIn("in deliver_node", logged)

@@ -13,6 +13,8 @@ There are two similar but separate stores of sessions:
 
 """
 
+import itertools
+import os
 import time
 import traceback
 from codecs import decode as codecs_decode
@@ -215,8 +217,21 @@ def delayed_import():
 
 
 _LOGGED_UNDECLARED = set()
-#: Frames above ``data_out`` named in the log, enough to reach the ``msg`` caller.
+#: Caller frames named in the log, counted from the first frame outside
+#: ``_MESSAGING_PATHS``. A game ``msg`` override is one of them.
 _UNDECLARED_CALLER_FRAMES = 6
+_EVENNIA_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+#: Engine message and session code between a ``msg`` call and ``data_out``.
+_MESSAGING_PATHS = tuple(
+    os.path.join(_EVENNIA_DIR, *path.split("/"))
+    for path in (
+        "server/session.py",
+        "server/serversession.py",
+        "server/sessionhandler.py",
+        "narrative/",
+        "objects/mixins/messaging.py",
+    )
+)
 
 
 def _log_undeclared(session, names):
@@ -235,10 +250,17 @@ def _log_undeclared(session, names):
             continue
         _LOGGED_UNDECLARED.add(name)
         if callers is None:
-            # the last two frames are this function and data_out
-            frames = traceback.extract_stack(limit=_UNDECLARED_CALLER_FRAMES + 2)[:-2]
+            outward = reversed(traceback.extract_stack())
+            frames = list(
+                itertools.islice(
+                    itertools.dropwhile(
+                        lambda frame: frame.filename.startswith(_MESSAGING_PATHS), outward
+                    ),
+                    _UNDECLARED_CALLER_FRAMES,
+                )
+            )
             callers = "\n".join(
-                f"  {frame.filename}:{frame.lineno} in {frame.name}" for frame in reversed(frames)
+                f"  {frame.filename}:{frame.lineno} in {frame.name}" for frame in frames
             )
         log_err(
             f"Dropped undeclared client command {name!r} sent to session "
