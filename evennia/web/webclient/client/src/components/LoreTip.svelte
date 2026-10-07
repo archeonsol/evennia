@@ -36,40 +36,55 @@
     onpointerenter={() => lore.hold()}
     onpointerleave={() => lore.hide()}
   >
-    <div class="title">{a.tip.title}</div>
+    <div class="head">
+      <span class="title">{a.tip.title}</span>
+      <button class="sh-cmd more" onclick={() => void lore.open()}>Read more</button>
+    </div>
     <p class="blurb">{a.tip.blurb}</p>
-    <button class="sh-cmd more" onclick={() => void lore.open()}>Read more</button>
   </div>
 {/if}
 
 <style>
   /* Over the floating panels (40), under the shell's own dialogs (Settings 90,
-     palette 95, toasts 120): a note never covers a dialog. */
+     palette 95, toasts 120): a note never covers a dialog. Small on purpose: it
+     sits over the text being read. Sized in em, so it follows the font setting. */
   .lore-tip {
     position: fixed;
     z-index: 80;
     box-sizing: border-box;
-    max-width: min(24rem, calc(100vw - 16px));
-    padding: 8px 11px 9px;
+    /* max-content, not shrink-to-fit: the width must not depend on where the
+       note is placed, or one placed near the right edge would be squeezed. */
+    width: max-content;
+    max-width: min(26em, calc(100vw - 16px));
+    padding: 5px 9px 7px;
     background: var(--bg-deep);
     color: var(--fg);
     border: 1px solid var(--accent);
     font-family: var(--font-mono);
-    font-size: calc(var(--shell-font-size, 15px) * 0.88);
-    line-height: 1.45;
-    box-shadow: 0 6px 22px rgb(0 0 0 / 55%);
+    font-size: calc(var(--shell-font-size, 15px) * 0.76);
+    line-height: 1.38;
+    box-shadow: 0 4px 16px rgb(0 0 0 / 55%);
+  }
+  .head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 1.2em;
+    margin-bottom: 2px;
   }
   .title {
-    margin-bottom: 3px;
     color: var(--gold);
-    font-size: 0.78em;
-    letter-spacing: 0.14em;
+    font-size: 0.86em;
+    letter-spacing: 0.12em;
     text-transform: uppercase;
   }
   .blurb {
     margin: 0;
   }
   .more {
-    margin-top: 7px;
+    flex: none;
+    min-height: 0;
+    padding: 0;
+    font-size: 0.9em;
   }
 </style>

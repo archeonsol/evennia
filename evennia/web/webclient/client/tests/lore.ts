@@ -92,6 +92,12 @@ async function run(): Promise<void> {
   check("the note sits over the word when there is room", box.bottom <= w.top + 0.5, `${box.bottom} vs ${w.top}`);
   check("the note stays inside the window", box.left >= 0 && box.right <= window.innerWidth && box.top >= 0, JSON.stringify(box));
   check("the note is in the tooltip role", open!.getAttribute("role") === "tooltip");
+  // Small, so it does not bury the text it sits over: no wider than 26 of its own
+  // characters' em, and its text smaller than the log's.
+  const noteFont = parseFloat(getComputedStyle(open!).fontSize);
+  const logFont = parseFloat(getComputedStyle(marrow).fontSize);
+  check("the note is compact", box.width <= noteFont * 26.5 && box.height <= 190, `${Math.round(box.width)}x${Math.round(box.height)} at ${noteFont}px`);
+  check("the note's text is smaller than the log's", noteFont < logFont, `${noteFont}px vs ${logFont}px`);
 
   // Leaving closes it after a moment, so the pointer can cross onto the note.
   pointer("pointerout", marrow, "mouse", { relatedTarget: document.body });
