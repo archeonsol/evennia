@@ -144,3 +144,26 @@ class TestLegacySentenceOpeningNames(TestCase):
                 mapping={"name": actor, "dn": "steel door"},
             )
         self.assertEqual(delivered, ["A stranger sits. The steel door shuts behind a stranger."])
+
+    def test_funcparser_template_capitalizes_only_the_opening_key(self):
+        viewers = [SimpleNamespace(ndb=SimpleNamespace())]
+        actor = SimpleNamespace(id=41, get_display_name=Mock(return_value="Kade"))
+        target = SimpleNamespace(id=42, get_display_name=Mock(return_value="a stranger"))
+        room = SimpleNamespace(get_message_recipients=lambda exclude: viewers)
+        delivered = []
+
+        with (
+            patch.object(
+                plan,
+                "deliver_resolved",
+                side_effect=lambda node, viewer, **kw: delivered.append(node.body),
+            ),
+            patch.object(plan, "deliver_to"),
+        ):
+            MessagingMixin.msg_contents(
+                room,
+                "$You() $conj(wave) at $you(target). {target} waves back.",
+                from_obj=actor,
+                mapping={"target": target},
+            )
+        self.assertEqual(delivered, ["Kade waves at a stranger. A stranger waves back."])
