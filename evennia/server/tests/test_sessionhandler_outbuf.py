@@ -509,7 +509,7 @@ class TestUndeclaredLogThroughMsg(BaseEvenniaTest):
             self.char1.msg("hello", session=self.session, _internal_flag=True)
 
         with (
-            patch.object(handler, "data_out", self.backups[0]),
+            patch.object(handler, "data_out", type(handler).data_out.__get__(handler)),
             patch.object(handler, "_outbuf", {}),
             patch.object(handler, "_outbuf_flush_scheduled", False),
             patch("evennia.utils.clock.call_later"),
