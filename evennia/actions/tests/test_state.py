@@ -380,12 +380,31 @@ class TestDisambiguation(unittest.TestCase):
         self.assertFalse(actor.has_state(DisambiguationState))
         self.assertIn("Invalid choice. Cancelled.", char.messages)
 
-    def test_new_command_passes_instead_of_cancelling(self):
-        actor, char, pending, _cands, ctx, choice = self._setup("look around")
-        trace = _sync(ENGINE.dispatch(choice, actor, ctx))
-        self.assertNotEqual(trace.outcome, "blocked")
-        self.assertIsNone(pending.target)
-        self.assertFalse(actor.has_state(DisambiguationState))
+    def test_installed_state_lets_a_new_command_carry_out(self):
+        """The dispatch bridge installs the pending_raw style and resolves it
+        before the engine, so the rule passes the next action through."""
+
+        class Performs(StateProvider):
+            def __init__(self):
+                self.carried_out = []
+
+            @rule(Choice, phase="carry_out")
+            def perform(self, action, actor):
+                self.carried_out.append(action)
+
+        char = FakeChar()
+        actor = Actor(character=char)
+        state = DisambiguationState(
+            [FakeObj("goblin"), FakeObj("goblin chief")],
+            pending_raw="attack goblin",
+            ambiguous_name="goblin",
+        )
+        actor.enter_state(state)
+        performs = Performs()
+        choice = Choice()
+        choice._raw_string = "look around"
+        _sync(ENGINE.dispatch(choice, actor, ActionContext(providers=[state, performs])))
+        self.assertEqual(performs.carried_out, [choice])
         self.assertNotIn("Invalid choice. Cancelled.", char.messages)
 
     def test_parser_ambiguous_target_installs_state(self):
