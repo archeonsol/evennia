@@ -7,14 +7,20 @@ from dataclasses import dataclass
 from types import SimpleNamespace
 from unittest import mock
 
-from twisted.internet.defer import ensureDeferred
+from twisted.internet.defer import Deferred, ensureDeferred
 
 from evennia.actions.action import Action
 from evennia.actions.actor import Actor
 from evennia.actions.context import ActionContext
 from evennia.actions.engine import RuleEngine
-from evennia.actions.menus import GetInputState, InputCaptureState, MenuPrompt, YesNoState
-from evennia.actions.result import CLAIM
+from evennia.actions.menus import (
+    INPUT_CLOSED,
+    GetInputState,
+    InputCaptureState,
+    MenuPrompt,
+    YesNoState,
+)
+from evennia.actions.result import CLAIM, PASS
 from evennia.actions.rule import rule
 from evennia.actions.state import (
     StateProvider,
@@ -51,6 +57,40 @@ class AskFlow:
         try:
             answer = yield self.prompt
             self.events.append(f"got:{answer}")
+        except GeneratorExit:
+            self.events.append("closed")
+            raise
+        return CLAIM
+
+
+class AfterFlow:
+    """A lower-priority carry_out rule and a report rule that record when they run."""
+
+    def __init__(self):
+        self.events = []
+
+    @rule(Ask, phase="carry_out", priority=-10)
+    def fallback(self, action, actor):
+        self.events.append("carry_out")
+        return PASS
+
+    @rule(Ask, phase="report")
+    def narrate(self, action, actor):
+        self.events.append("report")
+
+
+class WaitFlow:
+    """A flow suspended on a Deferred, the shape of an editor handoff."""
+
+    def __init__(self):
+        self.waiter = Deferred()
+        self.events = []
+
+    @rule(Ask, phase="carry_out")
+    def wait(self, action, actor):
+        try:
+            text = yield self.waiter
+            self.events.append(f"got:{text}")
         except GeneratorExit:
             self.events.append("closed")
             raise
@@ -107,32 +147,45 @@ class TestCloseCaptures(unittest.TestCase):
 
 
 class TestCloseSuspendedFlow(unittest.TestCase):
-    def _suspend(self, flow):
+    def _suspend(self, *providers):
         holder = _holder()
         actor = Actor(character=holder)
         dispatch = ensureDeferred(
-            RuleEngine().dispatch(Ask(), actor, ActionContext(providers=[flow]))
+            RuleEngine().dispatch(Ask(), actor, ActionContext(providers=list(providers)))
         )
         return holder, dispatch
 
     def _close(self, prompt):
         loop = asyncio.new_event_loop()
         flow = AskFlow(prompt)
+        after = AfterFlow()
         try:
             with (
                 mock.patch.object(engine_mod.clock, "get_bound_loop", return_value=loop),
                 mock.patch("evennia.utils.logger.log_trace") as rule_error,
             ):
-                holder, dispatch = self._suspend(flow)
+                holder, dispatch = self._suspend(flow, after)
                 self.assertTrue(has_state(holder, InputCaptureState))
                 self.assertFalse(dispatch.called)
                 self.assertTrue(close_captures(holder))
                 trace = loop.run_until_complete(dispatch.asFuture(loop))
         finally:
             loop.close()
-        self.assertEqual(trace.outcome, "succeeded")
+        self.assertEqual(trace.outcome, "aborted")
+        self.assertEqual(after.events, [])
         rule_error.assert_not_called()
         return holder, flow
+
+    def test_a_flow_waiting_on_a_closed_deferred_ends_the_action(self):
+        flow = WaitFlow()
+        after = AfterFlow()
+        holder, dispatch = self._suspend(flow, after)
+        self.assertFalse(dispatch.called)
+        flow.waiter.callback(INPUT_CLOSED)
+        self.assertTrue(dispatch.called)
+        self.assertEqual(flow.events, ["closed"])
+        self.assertEqual(after.events, [])
+        self.assertEqual(dispatch.result.outcome, "aborted")
 
     def test_a_text_prompt_flow_is_closed(self):
         holder, flow = self._close("Proceed?")
@@ -143,3 +196,4 @@ class TestCloseSuspendedFlow(unittest.TestCase):
         holder, flow = self._close(MenuPrompt("Pick:", options=[("a", "Alpha")]))
         self.assertEqual(flow.events, ["closed"])
         self.assertEqual(get_states(holder), [])
+

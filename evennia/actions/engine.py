@@ -28,6 +28,8 @@ Phase semantics (read off the returned :class:`RuleResult`'s ``kind``):
   evaluate against a ``None`` target — so gate rules never see one.
 * **carry_out** — the work. ``CLAIM`` stops the phase; an exception in one rule
   is logged and does not stop the others (absent ``CLAIM``). **May suspend.**
+  A suspended flow closed by :func:`~evennia.actions.state.close_captures`
+  ends the dispatch as ``aborted``: no later rule and no report runs.
 * **report** — narration. Every rule fires; nothing short-circuits. **May
   suspend.**
 
@@ -72,8 +74,9 @@ from evennia.utils.utils import cached_setting
 
 from .context import ActionContext
 from .exceptions import ActionError
+from .menus import INPUT_CLOSED
 from .registry import rule_registry
-from .result import FAIL, PASS, SKIP, ActionTrace, PhaseTrace, RuleResult
+from .result import FAIL, PASS, SILENT_FAIL, SKIP, ActionTrace, PhaseTrace, RuleResult
 
 __all__ = ["RuleEngine", "engine"]
 
@@ -83,6 +86,10 @@ REDIRECT_LIMIT = 5
 #: Sentinel: a provider/rule that does not apply (actor_type mismatch). Distinct
 #: from ``SKIP`` (a rule that applied but whose ``requires`` failed — recorded).
 _NA = object()
+
+#: Sentinel: a suspended rule whose flow was closed before it was answered.
+#: The phase stops and dispatch ends as ``aborted``.
+_CLOSED = object()
 
 
 # ---------------------------------------------------------------------------
@@ -134,15 +141,16 @@ async def _drive_generator(gen, actor):
     * ``Deferred`` → await it; resume with its result.
     * anything else → ignored (resume with ``None``).
 
-    A capture closed by :func:`~evennia.actions.state.close_captures` closes the
-    generator at its ``yield`` (``GeneratorExit``) and returns ``None``.
+    A capture closed by :func:`~evennia.actions.state.close_captures` (a prompt
+    answered with :data:`~evennia.actions.menus.INPUT_CLOSED`, or a ``Deferred``
+    that fires with it) closes the generator at its ``yield``
+    (``GeneratorExit``) and returns ``INPUT_CLOSED``.
 
     Returns:
         Deferred: fires with the value the generator ``return``\\s (``None`` if it
-        falls off the end or a quit leaves it uncaught).
+        falls off the end or a quit leaves it uncaught), or ``INPUT_CLOSED``.
     """
     from .menus import (
-        INPUT_CLOSED,
         QUIT,
         MenuPrompt,
         MenuQuit,
@@ -167,13 +175,16 @@ async def _drive_generator(gen, actor):
         to_throw = None
         if _is_deferred(value):
             to_send = await clock.maybe_await(value)
+            if to_send is INPUT_CLOSED:
+                gen.close()
+                return INPUT_CLOSED
         elif isinstance(value, MenuPrompt):
             while True:
                 caller.msg(format_menu_prompt(value))
                 raw = await clock.maybe_await(_get_input_future(actor, ""))
                 if raw is INPUT_CLOSED:
                     gen.close()
-                    return None
+                    return INPUT_CLOSED
                 choice = parse_menu_choice(raw, value)
                 if choice == "__look__":
                     continue
@@ -189,7 +200,7 @@ async def _drive_generator(gen, actor):
             to_send = await clock.maybe_await(_get_input_future(actor, value))
             if to_send is INPUT_CLOSED:
                 gen.close()
-                return None
+                return INPUT_CLOSED
         elif isinstance(value, (int, float)):
             await clock.maybe_await(_sleep(value))
         # else: unknown yield value — resume with None
@@ -299,9 +310,11 @@ class RuleEngine:
             # reflects all four phases for ``explain()``.
             aborted = await self._run_phase(action, actor, plan, trace, memo, "carry_out", dry_run)
             if aborted:
-                # The focus body this dispatch acted for was popped/collapsed by
-                # another session while a carry_out rule was suspended. Stop —
-                # don't narrate (report) work that no longer has a valid body.
+                # Either the focus body this dispatch acted for was popped or
+                # collapsed by another session while a carry_out rule was
+                # suspended, or the rule's flow was closed before it was
+                # answered. Stop: no later rule may act without that answer, and
+                # report must not narrate work that did not happen.
                 trace.outcome = "aborted"
                 return trace
             await self._run_phase(action, actor, plan, trace, memo, "report", dry_run)
@@ -468,17 +481,21 @@ class RuleEngine:
         """Drive one suspendable phase. ``carry_out`` stops on ``CLAIM``; both
         phases serialize across suspension (the next rule waits for this one).
 
-        Returns ``True`` if the phase was aborted because the actor's pinned
-        focus was invalidated mid-suspend (I1 race guard), else ``False``. The
-        guard is only consulted after a rule that actually *suspended* — a
-        synchronous rule cannot yield the reactor to another session, so no
-        DB re-read is paid on the fast path."""
+        Returns ``True`` if the phase was aborted, else ``False``. It aborts when
+        a rule's flow was closed by
+        :func:`~evennia.actions.state.close_captures`, or when the actor's
+        pinned focus was invalidated mid-suspend (I1 race guard). The guard is
+        only consulted after a rule that actually *suspended*: a synchronous
+        rule cannot yield the reactor to another session, so no DB re-read is
+        paid on the fast path."""
         stop_on_claim = phase == "carry_out"
         guard = getattr(actor, "focus_still_valid", None)
         for provider, spec in plan[phase]:
             result, suspended = await self._eval_rule_async(
                 provider, spec, action, actor, memo, trace, phase, dry_run
             )
+            if result is _CLOSED:
+                return True
             if suspended and guard is not None and not guard():
                 return True
             if result is _NA or result.is_skip:
@@ -497,7 +514,8 @@ class RuleEngine:
         Returns ``(result, suspended)``: ``suspended`` is ``True`` when the body
         was a generator/Deferred (i.e. it could have yielded the reactor to
         another session), so the caller knows whether to consult the focus
-        guard.
+        guard. ``result`` is ``_CLOSED`` when the body's flow was closed before
+        it was answered; the trace records it as ``SILENT_FAIL``.
         """
         if not self._actor_type_ok(spec, actor):
             return _NA, False
@@ -527,12 +545,18 @@ class RuleEngine:
                 self._note_suspension(
                     provider, spec, phase, time.monotonic() - started, "generator"
                 )
+                if final is INPUT_CLOSED:
+                    self._record(trace, phase, provider, spec, SILENT_FAIL)
+                    return _CLOSED, suspended
                 result = self._coerce_final(final)
             elif _is_deferred(raw):
                 suspended = True
                 started = time.monotonic()
                 final = await clock.maybe_await(raw)
                 self._note_suspension(provider, spec, phase, time.monotonic() - started, "deferred")
+                if final is INPUT_CLOSED:
+                    self._record(trace, phase, provider, spec, SILENT_FAIL)
+                    return _CLOSED, suspended
                 result = self._coerce_final(final)
             else:
                 result = PASS
