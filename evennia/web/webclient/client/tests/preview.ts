@@ -114,6 +114,8 @@ connection.state = "open";
 // they are set up front so the lines seeded below are marked as they land.
 lore.init();
 lore.setTips(loreFixtures);
+// The preview does not run settings.init(), which is what sets this in the real shell.
+document.documentElement.toggleAttribute("data-lore-tips", settings.loreTips);
 
 scene.room = { name: "Kettle's Noodle Counter" } as any;
 scene.present = true;
