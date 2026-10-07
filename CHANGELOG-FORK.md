@@ -25,6 +25,44 @@ matching release procedure.
 
 ---
 
+## Unreleased
+
+### Engine
+
+- **Dropped command log names the game caller** ([`sessionhandler.py`](evennia/server/sessionhandler.py)).
+  For a text send, the six frames above `data_out` were all engine message
+  internals (`ServerSession.data_out`, both `msg` passes, `deliver_node`,
+  `deliver_resolved`), so the log never reached game code. It now skips
+  frames in `server/session.py`, `server/serversession.py`,
+  `server/sessionhandler.py`, `narrative/` and `objects/mixins/messaging.py`
+  and names six frames from the first one outside them. A game `msg`
+  override is one of the six (`21c29ce48`).
+- **Labelled answers at a which-one prompt** ([`menus.py`](evennia/actions/menus.py)).
+  `2-goblin`, `goblin-2` and the prompt's own line `2: goblin` echoed back
+  choose candidate 2. The label must match that candidate's shown label,
+  ignoring case, or be left out (`2-`). A line led by a number that names no
+  candidate cancels: `9-goblin` out of range, or `2: orc` when candidate 2 is
+  a goblin. A `label-N` line whose label names no candidate, or whose number
+  is out of range, runs as a new command, since `say t-1000` has the same
+  shape (`c9859c1f4`).
+
+### Tests
+
+- [`test_sessionhandler_outbuf.py`](evennia/server/tests/test_sessionhandler_outbuf.py):
+  a stray flag sent through a real `msg()` logs the test's own caller and no
+  `deliver_node` frame (`21c29ce48`).
+- [`test_dispatch.py`](evennia/actions/tests/test_dispatch.py): labelled
+  answer shapes choose, number-led answers that name no candidate cancel, and
+  `kick t-1000` still runs (`c9859c1f4`).
+- [`test_state.py`](evennia/actions/tests/test_state.py): the `pending_action`
+  style lets a new command carry out and reads the echoed prompt line
+  (`c5673ae14`, `c9859c1f4`).
+- [`test_messaging_templates.py`](evennia/objects/tests/test_messaging_templates.py):
+  a `$func` template keeps `$you(target)` lowercase mid-sentence and
+  capitalizes the opening `{target}` (`5844d4ebb`).
+
+---
+
 ## 6.0.0+underspire.309: Loud event modules, traceable drops, closing captures
 
 Follow-ups to the `.307` rule that the server sends only declared commands.
