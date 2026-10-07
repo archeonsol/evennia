@@ -715,6 +715,8 @@ WEB_PLUGINS_MODULE = "server.conf.web_plugins"
 INPUT_FUNC_MODULES = ["evennia.server.inputfuncs", "server.conf.inputfuncs"]
 # Modules that register OOB events into the protocol catalog (see
 # evennia.server.protocol). The engine's core events plus any game modules.
+# The server sends only registered commands, so a module that fails to import
+# stops server start.
 PROTOCOL_EVENT_MODULES = ["evennia.server.protocol.core_events"]
 # If True, each outgoing session frame is validated against the typed outputfunc
 # catalog (evennia.server.protocol.outputfuncs) and mismatches are logged. The

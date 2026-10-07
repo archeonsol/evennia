@@ -40,11 +40,19 @@ def register_event(name: str, carrier: str = "kwargs", fields: dict | None = Non
     _MODELS.pop(name, None)  # invalidate cached model
 
 
-def _load_modules():
+def load_event_modules():
+    """Import the engine baselines and every ``settings.PROTOCOL_EVENT_MODULES``.
+
+    The catalog decides which commands the server may send, so a module that
+    fails to import raises instead of leaving its names undeclared. The server
+    calls this at start; a failed load is retried on the next call.
+
+    Raises:
+        Exception: Whatever the failing module raised on import.
+    """
     global _loaded
     if _loaded:
         return
-    _loaded = True
     from importlib import import_module
 
     from django.conf import settings
@@ -54,17 +62,13 @@ def _load_modules():
     import evennia.server.protocol.core_outputfuncs  # noqa: F401
 
     for path in getattr(settings, "PROTOCOL_EVENT_MODULES", []) or []:
-        try:
-            import_module(path)
-        except Exception:
-            from evennia.utils import logger
-
-            logger.log_trace(f"protocol: could not load event module {path!r}")
+        import_module(path)
+    _loaded = True
 
 
 def all_events() -> dict[str, dict]:
     """The merged catalog (loads PROTOCOL_EVENT_MODULES on first call)."""
-    _load_modules()
+    load_event_modules()
     return dict(_EVENTS)
 
 
@@ -80,7 +84,7 @@ def is_client_command(name: str) -> bool:
     Returns:
         bool: True if a session may receive ``name``.
     """
-    _load_modules()
+    load_event_modules()
     from evennia.server.protocol.outputfuncs import is_outputfunc
 
     return name in _EVENTS or is_outputfunc(name)
@@ -92,7 +96,7 @@ def _pascal(name: str) -> str:
 
 def model_for(event: str):
     """Pydantic model for a kwargs event with named fields, or None."""
-    _load_modules()
+    load_event_modules()
     if event in _MODELS:
         return _MODELS[event]
     spec = _EVENTS.get(event)

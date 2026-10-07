@@ -485,7 +485,12 @@ class EvenniaServerService(MultiService):
         # (engine systems first, then settings.SYSTEM_MODULES; a broken
         # declared module is a loud startup failure by design). Stop-and-
         # replace so a repeat init (tests) never leaves two drivers ticking.
+        from evennia.server.protocol import load_event_modules
         from evennia.utils import systems
+
+        # The event catalog gates what data_out sends, so a broken
+        # PROTOCOL_EVENT_MODULES entry fails start instead of the first send.
+        load_event_modules()
 
         if self.system_driver is not None:
             self.system_driver.stop()

@@ -444,3 +444,17 @@ class RunInitHooksReloadTest(SimpleTestCase):
             service.run_init_hooks("reload")
 
         hook_lint.assert_not_called()
+
+    @patch("evennia.utils.systems.SystemDriver")
+    @patch("evennia.server.protocol.load_event_modules", side_effect=ImportError("bad module"))
+    @patch("evennia.server.service.clock")
+    def test_a_broken_event_module_fails_start(self, mock_clock, _load_events, driver_cls):
+        service = self._service()
+        service.maintenance_task = MagicMock(running=False)
+        service.system_driver = None
+        mock_clock.looping.return_value = MagicMock()
+
+        with self.assertRaises(ImportError):
+            service.run_init_hooks("reload")
+
+        driver_cls.return_value.start.assert_not_called()
