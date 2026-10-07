@@ -31,7 +31,7 @@ from evennia.actions.state import (
 )
 from evennia.commands.default.tests import BaseEvenniaCommandTest
 from evennia.utils.eveditor import EvEditor, EvEditorState
-from evennia.utils.evmore import EvMoreState
+from evennia.utils.evmore import EvMore, EvMoreState
 
 engine_mod = sys.modules["evennia.actions.engine"]
 
@@ -205,7 +205,7 @@ def _record_close(caller):
 
 
 class TestCloseRealEditor(BaseEvenniaCommandTest):
-    """close_captures on a live EvEditor, not a stand-in."""
+    """close_captures on a live EvEditor and EvMore, not a stand-in."""
 
     def _editor(self, **kwargs):
         # Module-level hooks, so a persistent editor can pickle them.
@@ -250,3 +250,9 @@ class TestCloseRealEditor(BaseEvenniaCommandTest):
         self.assertEqual(calls, ["close"])
         self.assertIsNone(self.char1.ndb._eveditor)
 
+    def test_a_closed_pager_drops_its_handle(self):
+        EvMore(self.char1, "\n".join(f"line {n}" for n in range(200)), session=self.session)
+        self.assertIsNotNone(self.char1.ndb._more)
+        self.assertTrue(close_captures(self.char1))
+        self.assertIsNone(self.char1.ndb._more)
+        self.assertFalse(has_state(self.char1, EvMoreState))

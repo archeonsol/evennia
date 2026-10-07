@@ -85,6 +85,7 @@ class EvMoreState(StateProvider):
 
     def close_capture(self, holder):
         """Exit the pager without its exit message or exit command."""
+        del self._more._caller.ndb._more
         exit_state(holder, EvMoreState)
 
     @rule(Action, phase="before", priority=9999)
