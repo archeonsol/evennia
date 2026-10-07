@@ -12,6 +12,8 @@ from evennia.utils.utils import is_iter, make_iter, to_str
 _CMDHANDLER = None
 _MSG_CONTENTS_PARSER = funcparser.FuncParser(funcparser.ACTOR_STANCE_CALLABLES)
 _TEMPLATE_KEY = re.compile(r"\{(\w+)\}")
+#: Template key for one ``{key}`` that opens a sentence and so takes a capital.
+_OPENING_KEY = "{}__opens_sentence"
 #: Template text that ends where a sentence opens: nothing yet, or a sentence end
 #: and its closing quote or bracket, then any colour codes.
 _SENTENCE_OPEN = re.compile(
@@ -432,11 +434,17 @@ class MessagingMixin:
 
         from evennia.narrative.render import capitalize_lead
 
-        opening_keys = {
-            match.group(1)
-            for match in _TEMPLATE_KEY.finditer(inmessage or "")
-            if _opens_sentence(inmessage, match)
-        }
+        opening_keys = set()
+
+        def _mark_opening(match):
+            if not _opens_sentence(inmessage, match):
+                return match.group(0)
+            opening_keys.add(match.group(1))
+            return "{" + _OPENING_KEY.format(match.group(1)) + "}"
+
+        template = (
+            _TEMPLATE_KEY.sub(_mark_opening, inmessage) if isinstance(inmessage, str) else inmessage
+        )
         display_names_by_receiver = {}
         for receiver in contents:
             display_names_by_receiver[id(receiver)] = {
@@ -450,14 +458,10 @@ class MessagingMixin:
 
         for receiver in contents:
             names = display_names_by_receiver[id(receiver)]
-            names = {
-                key: capitalize_lead(str(name)) if key in opening_keys else name
-                for key, name in names.items()
-            }
 
             if use_funcparser:
                 outmessage = _MSG_CONTENTS_PARSER.parse(
-                    inmessage,
+                    template,
                     raise_errors=raise_funcparse_errors,
                     return_string=True,
                     caller=you,
@@ -466,9 +470,16 @@ class MessagingMixin:
                     display_names=names,
                 )
             else:
-                outmessage = inmessage
+                outmessage = template
 
-            outmessage = outmessage.format_map(names)
+            outmessage = outmessage.format_map(
+                names
+                | {
+                    _OPENING_KEY.format(key): capitalize_lead(str(names[key]))
+                    for key in opening_keys
+                    if key in names
+                }
+            )
 
             from evennia.narrative.handles import handle_for
             from evennia.narrative.rendernode import EntityRef, RenderNode

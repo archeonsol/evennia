@@ -83,12 +83,14 @@ class TestSentenceOpeningNames(TestCase):
         from evennia.narrative.render import CharRef
         from evennia.objects.mixins.messaging import _template_plan
 
-        actor = SimpleNamespace(id=42, get_display_name=Mock(), is_typeclass=Mock(return_value=True))
-        target = SimpleNamespace(id=43, get_display_name=Mock(), is_typeclass=Mock(return_value=True))
+        actor = SimpleNamespace(
+            id=42, get_display_name=Mock(), is_typeclass=Mock(return_value=True)
+        )
+        target = SimpleNamespace(
+            id=43, get_display_name=Mock(), is_typeclass=Mock(return_value=True)
+        )
         built = _template_plan(template, {"name": actor, "other": target}, {}, None)
-        return [
-            (span.role, span.capitalize) for span in built.spans() if isinstance(span, CharRef)
-        ]
+        return [(span.role, span.capitalize) for span in built.spans() if isinstance(span, CharRef)]
 
     def test_a_name_at_the_start_is_capitalized(self):
         self.assertEqual(self._refs("{name} sits down."), [("name", True)])
@@ -117,3 +119,28 @@ class TestSentenceOpeningNames(TestCase):
         ):
             with self.subTest(value=value):
                 self.assertEqual(capitalize_lead(value), expected)
+
+
+class TestLegacySentenceOpeningNames(TestCase):
+    """The per-receiver path capitalizes only the occurrence that opens a sentence."""
+
+    def test_a_repeated_name_is_capitalized_only_where_it_opens(self):
+        viewers = [SimpleNamespace(ndb=SimpleNamespace())]
+        actor = SimpleNamespace(id=42, get_display_name=Mock(return_value="a stranger"))
+        room = SimpleNamespace(get_message_recipients=lambda exclude: viewers)
+        delivered = []
+
+        with (
+            patch.object(
+                plan,
+                "deliver_resolved",
+                side_effect=lambda node, viewer, **kw: delivered.append(node.body),
+            ),
+            patch.object(plan, "deliver_to"),
+        ):
+            MessagingMixin.msg_contents(
+                room,
+                "{name} sits. The {dn} shuts behind {name}.",
+                mapping={"name": actor, "dn": "steel door"},
+            )
+        self.assertEqual(delivered, ["A stranger sits. The steel door shuts behind a stranger."])
