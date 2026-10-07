@@ -461,6 +461,14 @@ class TestDeclaredCommandsOnly(TestCase):
         log_err.assert_called_once()
         self.assertIn("_internal_flag", log_err.call_args.args[0])
 
+    def test_undeclared_log_names_the_sender(self):
+        def send_with_a_stray_flag():
+            self.handler.data_out(self.session, text="a", _internal_flag=True)
+
+        with patch("evennia.server.sessionhandler.log_err") as log_err:
+            send_with_a_stray_flag()
+        self.assertIn("in send_with_a_stray_flag", log_err.call_args.args[0])
+
     def test_declared_commands_are_kept(self):
         with patch("evennia.server.sessionhandler.log_err") as log_err:
             self.handler.data_out(self.session, logged_in={}, patch=((), {}), options={})

@@ -14,6 +14,7 @@ There are two similar but separate stores of sessions:
 """
 
 import time
+import traceback
 from codecs import decode as codecs_decode
 
 from django.conf import settings
@@ -214,23 +215,35 @@ def delayed_import():
 
 
 _LOGGED_UNDECLARED = set()
+#: Frames above ``data_out`` named in the log, enough to reach the ``msg`` caller.
+_UNDECLARED_CALLER_FRAMES = 6
 
 
 def _log_undeclared(session, names):
-    """Log each undeclared command name once per process.
+    """Log each undeclared command name once per process, with its call site.
+
+    Later drops of a logged name are silent, so the one line names the
+    frames that sent it.
 
     Args:
         session (Session): The session the command was sent to.
         names (list): Command names that are not declared.
     """
+    callers = None
     for name in names:
         if name in _LOGGED_UNDECLARED:
             continue
         _LOGGED_UNDECLARED.add(name)
+        if callers is None:
+            # the last two frames are this function and data_out
+            frames = traceback.extract_stack(limit=_UNDECLARED_CALLER_FRAMES + 2)[:-2]
+            callers = "\n".join(
+                f"  {frame.filename}:{frame.lineno} in {frame.name}" for frame in reversed(frames)
+            )
         log_err(
             f"Dropped undeclared client command {name!r} sent to session "
             f"{getattr(session, 'sessid', None)}. Register it with register_event "
-            "or register_outputfunc to send it."
+            f"or register_outputfunc to send it. Sent from:\n{callers}"
         )
 
 
