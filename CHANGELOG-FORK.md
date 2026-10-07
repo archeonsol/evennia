@@ -25,7 +25,7 @@ matching release procedure.
 
 ---
 
-## Unreleased: Loud event modules, traceable drops, numbered answers
+## Unreleased: Loud event modules, traceable drops, closing captures
 
 Follow-ups to the `.307` rule that the server sends only declared commands.
 
@@ -51,6 +51,15 @@ Follow-ups to the `.307` rule that the server sends only declared commands.
 - **Numbered answers at a which-one prompt** ([`menus.py`](evennia/actions/menus.py)).
   `2:`, `2.`, `2)` and `#2` choose like `2`; out of range they cancel. Before,
   they ran as new commands and read as an unknown verb (`cc1d0eabf`).
+- **`close_captures(holder)`** ([`state.py`](evennia/actions/state.py),
+  [`menus.py`](evennia/actions/menus.py), [`engine.py`](evennia/actions/engine.py),
+  [`evmore.py`](evennia/utils/evmore.py), [`eveditor.py`](evennia/utils/eveditor.py)).
+  Ends every input capture on a holder and returns whether any was open. A
+  state that captures input defines `close_capture(holder)`: `get_input`,
+  `ask_yes_no` and the pager exit without running a callback, the editor
+  quits without saving, and a suspended `@interactive` flow receives
+  `INPUT_CLOSED`, which makes the driver close the generator at its `yield`
+  (`GeneratorExit`) and return `None`. Exported from `evennia.actions`.
 
 ### Known issues
 
@@ -85,6 +94,9 @@ Follow-ups to the `.307` rule that the server sends only declared commands.
   answer shapes choose; an out-of-range one cancels.
 - [`test_state.py`](evennia/actions/tests/test_state.py): the rule-path test
   uses the `pending_raw` style the dispatch bridge installs (`334614daa`).
+- [`test_close_captures.py`](evennia/actions/tests/test_close_captures.py):
+  each capture kind closes; a suspended text or menu flow is closed and its
+  dispatch finishes without a rule error.
 
 ---
 
