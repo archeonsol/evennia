@@ -234,6 +234,14 @@ class TestMonitoredInputfunc(BaseEvenniaTest):
             inputfuncs.monitor(self.session, name="location", outputfunc_name="_internal")
         add.assert_not_called()
 
+    def test_unmonitor_ignores_the_reply_name(self):
+        """Removal keys on the field and session, so any reply name stops it."""
+        from evennia.scripts.monitorhandler import MONITOR_HANDLER
+
+        with mock.patch.object(MONITOR_HANDLER, "remove") as remove:
+            inputfuncs.unmonitor(self.session, name="location", outputfunc_name="_internal")
+        remove.assert_called_once()
+
 
 class TestTextDispatchErrback(unittest.TestCase):
     """``text`` must consume a failed cmdhandler coroutine by logging it, not
