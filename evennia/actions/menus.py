@@ -574,14 +574,22 @@ def _candidate_label(candidate, looker=None):
     return str(candidate)
 
 
-#: A numbered answer: "2", or the prompt's own "2:" echoed, "2.", "2)" or "#2".
-_NUMBERED_CHOICE = re.compile(r"#?(\d+)[:.)]?")
+#: A number first: "2", "#2", "2:", "2.", "2)", "2-goblin", or the prompt's
+#: own line "2: goblin" echoed back.
+_NUMBER_FIRST = re.compile(r"#?(\d+)(?:\s*[-:.)]\s*(.*))?")
+#: A label then its number: "goblin-2".
+_LABEL_FIRST = re.compile(r"(.+)-(\d+)")
 
 
-def _choice_number(token):
-    """The number a stripped choice line names, or None if it is not numbered."""
-    match = _NUMBERED_CHOICE.fullmatch(token)
-    return int(match.group(1)) if match else None
+def _numbered_candidate(number, label, candidates, looker):
+    """The candidate at 1-based ``number`` if ``label`` is empty or names it."""
+    if not 1 <= number <= len(candidates):
+        return None
+    cand = candidates[number - 1]
+    label = (label or "").strip().lower()
+    if label and _candidate_label(cand, looker).lower() != label:
+        return None
+    return cand
 
 
 def _parse_choice(raw, candidates, looker=None):
@@ -589,34 +597,37 @@ def _parse_choice(raw, candidates, looker=None):
 
     Name matching uses the same viewer-aware :func:`_candidate_label` as the
     prompt, so a player picks by the sdesc/recog name they were shown — never by
-    the hidden object key. Returns the chosen candidate, or ``None`` for an
-    unrecognized choice.
+    the hidden object key. A label beside a number must name the candidate at
+    that number. Returns the chosen candidate, or ``None`` for an unrecognized
+    choice.
     """
     if raw is None:
         return None
     token = raw.strip()
     if not token:
         return None
-    idx = _choice_number(token)
-    if idx is not None:
-        if 1 <= idx <= len(candidates):
-            return candidates[idx - 1]
-        return None
+    match = _NUMBER_FIRST.fullmatch(token)
+    if match:
+        return _numbered_candidate(int(match.group(1)), match.group(2), candidates, looker)
     lowered = token.lower()
     for cand in candidates:
         if _candidate_label(cand, looker).lower() == lowered:
             return cand
+    match = _LABEL_FIRST.fullmatch(token)
+    if match:
+        return _numbered_candidate(int(match.group(2)), match.group(1), candidates, looker)
     return None
 
 
 def _reads_as_choice(raw):
-    """True when ``raw`` can only be an answer: blank or a numbered choice.
+    """True when ``raw`` can only be an answer: blank or led by a number.
 
     Any other line that names no candidate is a new command, so it runs
-    instead of being spent cancelling the prompt.
+    instead of being spent cancelling the prompt. "label-N" is not read here:
+    without the candidates, "say t-1000" would read as one.
     """
     token = (raw or "").strip()
-    return not token or _choice_number(token) is not None
+    return not token or _NUMBER_FIRST.fullmatch(token) is not None
 
 
 class DisambiguationState(StateProvider):

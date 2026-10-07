@@ -550,6 +550,46 @@ class TestDisambiguation(unittest.TestCase):
         self.assertIsNone(_dispatch(self.actor, "#9", self.parser))
         self.assertIn("Invalid choice. Cancelled.", self.char.messages)
 
+    def test_labelled_answer_shapes_choose(self):
+        answers = ("2-goblin chief", "goblin chief-2", "2: goblin chief", "2: GOBLIN CHIEF", "2-")
+        for answer in answers:
+            with self.subTest(answer=answer):
+                c1, c2 = RuleTarget("goblin"), RuleTarget("goblin chief")
+                self.char._search_hook = lambda name: self.actor._take_search_override(name)
+                self.actor.enter_state(
+                    DisambiguationState(
+                        [c1, c2], pending_raw="kick goblin", ambiguous_name="goblin"
+                    )
+                )
+                trace = _dispatch(self.actor, answer, self.parser)
+                self.assertEqual(trace.outcome, "succeeded")
+                self.assertEqual((len(c1.kicked), len(c2.kicked)), (0, 1))
+
+    def test_number_led_answer_that_names_no_candidate_cancels(self):
+        for answer in ("9-goblin", "9: goblin", "2: goblin"):
+            with self.subTest(answer=answer):
+                self.char.messages.clear()
+                c1, c2 = RuleTarget("goblin"), RuleTarget("goblin chief")
+                self.actor.enter_state(
+                    DisambiguationState(
+                        [c1, c2], pending_raw="kick goblin", ambiguous_name="goblin"
+                    )
+                )
+                self.assertIsNone(_dispatch(self.actor, answer, self.parser))
+                self.assertIn("Invalid choice. Cancelled.", self.char.messages)
+                self.assertEqual(len(c1.kicked) + len(c2.kicked), 0)
+
+    def test_hyphenated_command_naming_no_candidate_runs(self):
+        c1, c2 = RuleTarget("goblin"), RuleTarget("goblin chief")
+        droid = RuleTarget("t-1000")
+        self.char._search_hook = lambda name: droid
+        self.actor.enter_state(
+            DisambiguationState([c1, c2], pending_raw="kick goblin", ambiguous_name="goblin")
+        )
+        trace = _dispatch(self.actor, "kick t-1000", self.parser)
+        self.assertEqual(trace.outcome, "succeeded")
+        self.assertEqual(len(droid.kicked), 1)
+
 
 # --- profiling middleware ---------------------------------------------------
 class TestProfiling(unittest.TestCase):
