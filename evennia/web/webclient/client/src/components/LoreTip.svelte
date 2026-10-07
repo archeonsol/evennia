@@ -47,7 +47,8 @@
 <style>
   /* Over the floating panels (40), under the shell's own dialogs (Settings 90,
      palette 95, toasts 120): a note never covers a dialog. Small on purpose: it
-     sits over the text being read. Sized in em, so it follows the font setting. */
+     sits over the text being read. Sized in em, so it follows the font setting,
+     with a floor so a small font setting does not make it unreadable. */
   .lore-tip {
     position: fixed;
     z-index: 80;
@@ -55,22 +56,22 @@
     /* max-content, not shrink-to-fit: the width must not depend on where the
        note is placed, or one placed near the right edge would be squeezed. */
     width: max-content;
-    max-width: min(26em, calc(100vw - 16px));
-    padding: 5px 9px 7px;
+    max-width: min(24em, calc(100vw - 16px));
+    padding: 4px 8px 6px;
     background: var(--bg-deep);
     color: var(--fg);
     border: 1px solid var(--accent);
     font-family: var(--font-mono);
-    font-size: calc(var(--shell-font-size, 15px) * 0.76);
-    line-height: 1.38;
+    font-size: max(10px, calc(var(--shell-font-size, 15px) * 0.72));
+    line-height: 1.36;
     box-shadow: 0 4px 16px rgb(0 0 0 / 55%);
   }
   .head {
     display: flex;
     align-items: baseline;
     justify-content: space-between;
-    gap: 1.2em;
-    margin-bottom: 2px;
+    gap: 1em;
+    margin-bottom: 1px;
   }
   .title {
     color: var(--gold);
