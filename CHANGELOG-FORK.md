@@ -25,6 +25,69 @@ matching release procedure.
 
 ---
 
+## Unreleased: Loud event modules, traceable drops, numbered answers
+
+Follow-ups to the `.307` rule that the server sends only declared commands.
+
+### Engine
+
+- **Event modules load at start** ([`protocol/__init__.py`](evennia/server/protocol/__init__.py),
+  [`service.py`](evennia/server/service.py)). New `load_event_modules()`.
+  A `PROTOCOL_EVENT_MODULES` entry that fails to import raises and stops
+  server start, instead of logging once and leaving every name it declares
+  undeclared for the process. A failed load is retried on the next call
+  (`d91321541`).
+- **Dropped command log names the sender** ([`sessionhandler.py`](evennia/server/sessionhandler.py)).
+  The once-per-name `Dropped undeclared client command` line ends with the
+  six frames above `data_out` (`2af70be18`).
+- **`unmonitor` ignores the reply name** ([`inputfuncs.py`](evennia/server/inputfuncs.py)).
+  Only starting a monitor needs a declared `outputfunc_name`; removal never
+  reads it (`13bf09e53`).
+- **Opening name capitals on the per-receiver path** ([`messaging.py`](evennia/objects/mixins/messaging.py)).
+  A `msg_contents` template with a `$func` or a non-entity mapping value
+  capitalized every use of a key that opened any sentence, and handed the
+  capital to the funcparser too. Only the opening use takes it now
+  (`b780d2ea1`).
+- **Numbered answers at a which-one prompt** ([`menus.py`](evennia/actions/menus.py)).
+  `2:`, `2.`, `2)` and `#2` choose like `2`; out of range they cancel. Before,
+  they ran as new commands and read as an unknown verb (`cc1d0eabf`).
+
+### Known issues
+
+- **`get(pk=)` can return a row a rolled-back transaction never kept**
+  ([`managers.py`](evennia/typeclasses/managers.py)). The idmapper caches an
+  instance on `post_save` and nothing evicts it when the enclosing `atomic`
+  rolls back. Since `4773383d0`, a typeclass manager `get(pk=)` reads that
+  cache, as `ObjectDB.objects.get(pk=)` and the other idmapper managers
+  already did. No caller is known to create, roll back and then look up by
+  pk. A fix needs rollback eviction in the idmapper, which Django offers no
+  hook for. Until then, after catching a rolled-back `atomic` that created
+  typeclassed rows, flush them with `instance.flush_from_cache(force=True)`.
+
+### Migration
+
+- A game whose `PROTOCOL_EVENT_MODULES` entry fails to import no longer
+  starts. Fix the import error shown in the server log.
+
+### Tests
+
+- [`test_protocol_catalog.py`](evennia/server/tests/test_protocol_catalog.py):
+  a broken module raises and a failed load is retried.
+- [`test_server_shutdown.py`](evennia/server/tests/test_server_shutdown.py):
+  a broken event module fails `run_init_hooks` before the system driver starts.
+- [`test_sessionhandler_outbuf.py`](evennia/server/tests/test_sessionhandler_outbuf.py):
+  the drop log names the sending function.
+- [`test_inputfuncs.py`](evennia/server/tests/test_inputfuncs.py): `unmonitor`
+  removes a monitor whatever reply name it carries.
+- [`test_messaging_templates.py`](evennia/objects/tests/test_messaging_templates.py):
+  a repeated name is capitalized only where it opens a sentence.
+- [`test_dispatch.py`](evennia/actions/tests/test_dispatch.py): numbered
+  answer shapes choose; an out-of-range one cancels.
+- [`test_state.py`](evennia/actions/tests/test_state.py): the rule-path test
+  uses the `pending_raw` style the dispatch bridge installs (`334614daa`).
+
+---
+
 ## 6.0.0+underspire.308: The give line opens with a capital
 
 The default `give` told the receiver "a tall woman gives you a handset." The
