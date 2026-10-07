@@ -16,6 +16,7 @@ three lifecycle operations:
 * :func:`enter_state` — append a state instance (most-recent last).
 * :func:`exit_state` — drop every state of a given type.
 * :func:`has_state` — membership test by type.
+* :func:`close_captures` — end every input capture (prompt, pager, editor).
 
 :class:`Actor` (see ``actor.py``) exposes these as methods that delegate here,
 so rule bodies can write ``actor.exit_state(DisambiguationState)``.
@@ -32,6 +33,7 @@ __all__ = [
     "exit_state",
     "has_state",
     "get_states",
+    "close_captures",
     "capture_holder",
     "rehydrate_captures",
 ]
@@ -45,6 +47,10 @@ class StateProvider:
     and a shared home for any future common behavior. A state's ``@rule`` methods
     typically target the catch-all base ``Action`` at high priority to gate or
     intercept *every* action while the state is active.
+
+    A state that captures the next input line defines
+    ``close_capture(holder)``, which ends the capture and removes the state.
+    :func:`close_captures` calls it.
     """
 
     __slots__ = ()
@@ -121,6 +127,27 @@ def get_states(holder):
     """Return a copy of ``holder``'s active states (newest last); ``[]`` if none."""
     states = _active_list(holder)
     return list(states) if states else []
+
+
+def close_captures(holder) -> bool:
+    """End every input capture on ``holder``.
+
+    Each active state with a ``close_capture`` method closes itself: a prompt
+    or pager exits, an editor quits without saving, and a suspended
+    ``@interactive`` flow is closed at its ``yield``.
+
+    Args:
+        holder: the character/account holding the states.
+
+    Returns:
+        bool: True if any capture was closed.
+    """
+    captures = [s for s in get_states(holder) if callable(getattr(s, "close_capture", None))]
+    for capture in captures:
+        # closing one capture can remove others of its type
+        if any(s is capture for s in get_states(holder)):
+            capture.close_capture(holder)
+    return bool(captures)
 
 
 def capture_holder(caller, session=None):

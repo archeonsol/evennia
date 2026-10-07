@@ -291,6 +291,10 @@ class EvEditorState(StateProvider):
         # multi-line paste mode; see EvEditor.request_paste_mode.
         self._paste_mode = False
 
+    def close_capture(self, holder):
+        """Quit the editor without saving the buffer."""
+        self._editor.quit()
+
     @rule(Action, phase="before", priority=9999)
     def capture_input(self, action, actor):
         """Seize the next input line, redirecting it into a MenuInputAction the

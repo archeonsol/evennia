@@ -219,6 +219,22 @@ def paginate(items, page_size, page=0):
     return items[start : start + page_size], page, total
 
 
+#: Delivered to a waiting ``@interactive`` flow in place of a line when its
+#: capture is closed; the driver then closes the generator.
+INPUT_CLOSED = object()
+
+
+def _deliver(waiter, value):
+    """Complete an asyncio Future or a Deferred with ``value`` if still pending."""
+    if waiter is None:
+        return
+    if hasattr(waiter, "done"):
+        if not waiter.done():
+            waiter.set_result(value)
+    elif hasattr(waiter, "called") and not waiter.called:
+        waiter.callback(value)
+
+
 class InputCaptureState(StateProvider):
     """One-shot capture of the next input line for ``@interactive`` suspension.
 
@@ -229,6 +245,11 @@ class InputCaptureState(StateProvider):
     def __init__(self, deferred, session=None):
         self.deferred = deferred
         self.session = session
+
+    def close_capture(self, holder):
+        """Exit, and end the waiting flow with :data:`INPUT_CLOSED`."""
+        exit_state(holder, InputCaptureState)
+        _deliver(self.deferred, INPUT_CLOSED)
 
     @rule(Action, phase="before", priority=9999)
     def capture_input(self, action, actor):
@@ -243,13 +264,7 @@ class InputCaptureState(StateProvider):
         if action.menu is not self:
             return PASS
         actor.exit_state(InputCaptureState)
-        waiter = self.deferred
-        if waiter is not None:
-            if hasattr(waiter, "done"):
-                if not waiter.done():
-                    waiter.set_result(action.raw)
-            elif hasattr(waiter, "called") and not waiter.called:
-                waiter.callback(action.raw)
+        _deliver(self.deferred, action.raw)
         return CLAIM
 
 
@@ -276,6 +291,10 @@ class GetInputState(StateProvider):
         self.session = session
         self.args = tuple(args)
         self.kwargs = dict(kwargs or {})
+
+    def close_capture(self, holder):
+        """Exit without running the callback."""
+        exit_state(holder, GetInputState)
 
     @rule(Action, phase="before", priority=9999)
     def capture_input(self, action, actor):
@@ -335,6 +354,10 @@ class YesNoState(StateProvider):
         self.session = session
         self.args = tuple(args)
         self.kwargs = dict(kwargs or {})
+
+    def close_capture(self, holder):
+        """Exit without answering yes or no."""
+        exit_state(holder, YesNoState)
 
     @rule(Action, phase="before", priority=9999)
     def capture_input(self, action, actor):

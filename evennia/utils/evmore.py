@@ -83,6 +83,10 @@ class EvMoreState(StateProvider):
     def __init__(self, more):
         self._more = more
 
+    def close_capture(self, holder):
+        """Exit the pager without its exit message or exit command."""
+        exit_state(holder, EvMoreState)
+
     @rule(Action, phase="before", priority=9999)
     def capture_input(self, action, actor):
         """Seize the next input line, redirecting it into a MenuInputAction the

@@ -134,11 +134,21 @@ async def _drive_generator(gen, actor):
     * ``Deferred`` → await it; resume with its result.
     * anything else → ignored (resume with ``None``).
 
+    A capture closed by :func:`~evennia.actions.state.close_captures` closes the
+    generator at its ``yield`` (``GeneratorExit``) and returns ``None``.
+
     Returns:
         Deferred: fires with the value the generator ``return``\\s (``None`` if it
         falls off the end or a quit leaves it uncaught).
     """
-    from .menus import QUIT, MenuPrompt, MenuQuit, format_menu_prompt, parse_menu_choice
+    from .menus import (
+        INPUT_CLOSED,
+        QUIT,
+        MenuPrompt,
+        MenuQuit,
+        format_menu_prompt,
+        parse_menu_choice,
+    )
 
     caller = _caller_for(actor)
     to_send = None
@@ -161,6 +171,9 @@ async def _drive_generator(gen, actor):
             while True:
                 caller.msg(format_menu_prompt(value))
                 raw = await clock.maybe_await(_get_input_future(actor, ""))
+                if raw is INPUT_CLOSED:
+                    gen.close()
+                    return None
                 choice = parse_menu_choice(raw, value)
                 if choice == "__look__":
                     continue
@@ -174,6 +187,9 @@ async def _drive_generator(gen, actor):
                 break
         elif isinstance(value, str):
             to_send = await clock.maybe_await(_get_input_future(actor, value))
+            if to_send is INPUT_CLOSED:
+                gen.close()
+                return None
         elif isinstance(value, (int, float)):
             await clock.maybe_await(_sleep(value))
         # else: unknown yield value — resume with None

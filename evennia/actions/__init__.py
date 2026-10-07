@@ -139,7 +139,14 @@ from .result import (
     RuleResult,
 )
 from .rule import PHASES, RuleSpec, rule
-from .state import StateProvider, enter_state, exit_state, get_states, has_state
+from .state import (
+    StateProvider,
+    close_captures,
+    enter_state,
+    exit_state,
+    get_states,
+    has_state,
+)
 
 __all__ = [
     "Predicate",
@@ -225,6 +232,7 @@ __all__ = [
     "exit_state",
     "has_state",
     "get_states",
+    "close_captures",
     # interaction states
     "MenuInputAction",
     "MenuPrompt",
