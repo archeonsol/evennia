@@ -351,6 +351,17 @@ class TestStateGating(unittest.TestCase):
 
 
 # --- DisambiguationState ----------------------------------------------------
+class Performs(StateProvider):
+    """Records each ``Choice`` that reaches carry_out."""
+
+    def __init__(self):
+        self.carried_out = []
+
+    @rule(Choice, phase="carry_out")
+    def perform(self, action, actor):
+        self.carried_out.append(action)
+
+
 class TestDisambiguation(unittest.TestCase):
     def _setup(self, choice_text):
         char = FakeChar()
@@ -384,14 +395,6 @@ class TestDisambiguation(unittest.TestCase):
         """The dispatch bridge installs the pending_raw style and resolves it
         before the engine, so the rule passes the next action through."""
 
-        class Performs(StateProvider):
-            def __init__(self):
-                self.carried_out = []
-
-            @rule(Choice, phase="carry_out")
-            def perform(self, action, actor):
-                self.carried_out.append(action)
-
         char = FakeChar()
         actor = Actor(character=char)
         state = DisambiguationState(
@@ -406,6 +409,21 @@ class TestDisambiguation(unittest.TestCase):
         _sync(ENGINE.dispatch(choice, actor, ActionContext(providers=[state, performs])))
         self.assertEqual(performs.carried_out, [choice])
         self.assertNotIn("Invalid choice. Cancelled.", char.messages)
+
+    def test_pending_action_lets_a_new_command_carry_out(self):
+        actor, char, pending, _cands, ctx, choice = self._setup("look around")
+        performs = Performs()
+        ctx = ActionContext(providers=[*ctx.providers, performs])
+        _sync(ENGINE.dispatch(choice, actor, ctx))
+        self.assertEqual(performs.carried_out, [choice])
+        self.assertIsNone(pending.target)
+        self.assertFalse(actor.has_state(DisambiguationState))
+        self.assertNotIn("Invalid choice. Cancelled.", char.messages)
+
+    def test_pending_action_reads_the_echoed_prompt_line(self):
+        actor, char, pending, (c1, c2), ctx, choice = self._setup("2: goblin chief")
+        _sync(ENGINE.dispatch(choice, actor, ctx))
+        self.assertIs(pending.target, c2)
 
     def test_parser_ambiguous_target_installs_state(self):
         # actor.search raising AmbiguousTarget is the integration trigger.
