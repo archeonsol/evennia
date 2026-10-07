@@ -29,7 +29,8 @@ from evennia.actions.state import (
     get_states,
     has_state,
 )
-from evennia.utils.eveditor import EvEditorState
+from evennia.commands.default.tests import BaseEvenniaCommandTest
+from evennia.utils.eveditor import EvEditor, EvEditorState
 from evennia.utils.evmore import EvMoreState
 
 engine_mod = sys.modules["evennia.actions.engine"]
@@ -129,14 +130,6 @@ class TestCloseCaptures(unittest.TestCase):
         self.assertFalse(has_state(holder, EvMoreState))
         more.page_quit.assert_not_called()
 
-    def test_an_editor_quits_without_saving(self):
-        holder = _holder()
-        editor = mock.Mock()
-        enter_state(holder, EvEditorState(editor))
-        self.assertTrue(close_captures(holder))
-        editor.quit.assert_called_once_with()
-        editor.save_buffer.assert_not_called()
-
     def test_other_states_stay(self):
         holder = _holder()
         other = StateProvider()
@@ -196,4 +189,64 @@ class TestCloseSuspendedFlow(unittest.TestCase):
         holder, flow = self._close(MenuPrompt("Pick:", options=[("a", "Alpha")]))
         self.assertEqual(flow.events, ["closed"])
         self.assertEqual(get_states(holder), [])
+
+
+def _record_save(caller, buf):
+    caller.ndb.editor_calls.append("save")
+    return True
+
+
+def _record_quit(caller):
+    caller.ndb.editor_calls.append("quit")
+
+
+def _record_close(caller):
+    caller.ndb.editor_calls.append("close")
+
+
+class TestCloseRealEditor(BaseEvenniaCommandTest):
+    """close_captures on a live EvEditor, not a stand-in."""
+
+    def _editor(self, **kwargs):
+        # Module-level hooks, so a persistent editor can pickle them.
+        calls = self.char1.ndb.editor_calls = []
+        editor = EvEditor(
+            self.char1,
+            savefunc=_record_save,
+            quitfunc=_record_quit,
+            closefunc=_record_close,
+            **kwargs,
+        )
+        return editor, calls
+
+    def test_a_line_editor_closes_without_save_or_quitfunc(self):
+        editor, calls = self._editor()
+        editor.update_buffer("unsaved draft")
+        self.assertTrue(close_captures(self.char1))
+        self.assertEqual(calls, ["close"])
+        self.assertIsNone(self.char1.ndb._eveditor)
+        self.assertFalse(has_state(self.char1, EvEditorState))
+
+    def test_a_closed_persistent_editor_is_not_rebuilt_on_reload(self):
+        editor, calls = self._editor(persistent=True)
+        self.assertIsNotNone(self.char1.attributes.get("_eveditor_saved"))
+        close_captures(self.char1)
+        self.assertIsNone(self.char1.attributes.get("_eveditor_saved"))
+        self.assertIsNone(self.char1.attributes.get("_eveditor_buffer_temp"))
+
+    def test_a_normal_quit_still_runs_quitfunc_not_closefunc(self):
+        editor, calls = self._editor()
+        editor.quit()
+        self.assertEqual(calls, ["quit"])
+
+    def test_closing_a_web_editor_dismisses_its_panel(self):
+        for sess in self.char1.sessions.all():
+            sess.protocol_flags["CLIENT_EDITOR"] = True
+        editor, calls = self._editor()
+        self.char1.msg = mock.Mock()
+        editor.close()
+        sent = [kw for _n, _a, kw in self.char1.msg.mock_calls if "editor_close" in kw]
+        self.assertEqual(len(sent), 1)
+        self.assertEqual(calls, ["close"])
+        self.assertIsNone(self.char1.ndb._eveditor)
 

@@ -242,6 +242,12 @@ _ERROR_QUITFUNC = _("""
 |rQuit function gave an error. Skipping.|n
 """)
 
+_ERROR_CLOSEFUNC = _("""
+{error}
+
+|rClose function gave an error. Skipping.|n
+""")
+
 _ERROR_PERSISTENT_SAVING = _("""
 {error}
 
@@ -292,8 +298,8 @@ class EvEditorState(StateProvider):
         self._paste_mode = False
 
     def close_capture(self, holder):
-        """Quit the editor without saving the buffer."""
-        self._editor.quit()
+        """Close the editor without saving the buffer or running its quitfunc."""
+        self._editor.close()
 
     @rule(Action, phase="before", priority=9999)
     def capture_input(self, action, actor):
@@ -971,6 +977,7 @@ class EvEditor:
         key="",
         persistent=False,
         codefunc=False,
+        closefunc=None,
     ):
         """
         Launches a full in-game line editor, mimicking the functionality of VIM.
@@ -997,6 +1004,9 @@ class EvEditor:
                 that if this is set, all callables must be possible to pickle
             codefunc (bool, optional): If given, will run the editor in code mode.
                 This will be called as `codefunc(caller, buf)`.
+            closefunc (callable, optional): Called as `closefunc(caller)` when
+                the editor is closed from outside (see `close`), in place of
+                `quitfunc`. A caller waiting on the editor uses it to end too.
 
         Notes:
             In persistent mode, all the input callables (savefunc etc)
@@ -1026,6 +1036,7 @@ class EvEditor:
         self._nomatch_cmd = CmdLineInput()
         self._persistent = persistent
         self._codefunc = codefunc
+        self._closefunc = closefunc
 
         if loadfunc:
             self._loadfunc = loadfunc
@@ -1066,6 +1077,7 @@ class EvEditor:
                             savefunc=savefunc,
                             quitfunc=quitfunc,
                             codefunc=codefunc,
+                            closefunc=closefunc,
                             key=key,
                             persistent=persistent,
                         ),
@@ -1446,6 +1458,28 @@ class EvEditor:
             self._quitfunc(self._caller)
         except Exception as e:
             self._caller.msg(_ERROR_QUITFUNC.format(error=e))
+        self._end()
+
+    def close(self):
+        """
+        End the editor from outside: no save and no quitfunc.
+
+        Used by :func:`evennia.actions.state.close_captures`. The buffer is
+        dropped, the web panel is dismissed, and `closefunc` runs last.
+
+        """
+        if self._frontend == "web":
+            self._close_web()
+        self._end()
+        if self._closefunc:
+            try:
+                self._closefunc(self._caller)
+            except Exception as e:
+                logger.log_trace()
+                self._caller.msg(_ERROR_CLOSEFUNC.format(error=e))
+
+    def _end(self):
+        """Remove the editor, its persisted buffer and its capture state."""
         self._caller.nattributes.remove("_eveditor")
         self._caller.attributes.remove("_eveditor_buffer_temp")
         self._caller.attributes.remove("_eveditor_undo_pos")

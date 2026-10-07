@@ -133,8 +133,10 @@ def close_captures(holder) -> bool:
     """End every input capture on ``holder``.
 
     Each active state with a ``close_capture`` method closes itself: a prompt
-    or pager exits, an editor quits without saving, and a suspended
-    ``@interactive`` flow is closed at its ``yield``.
+    or pager exits, a line editor closes without saving or running its
+    ``quitfunc``, and a suspended ``@interactive`` flow is closed at its
+    ``yield``, which ends its action as ``aborted``. A web editor installs no
+    state, so it is not closed here unless its caller installs one.
 
     Args:
         holder: the character/account holding the states.
