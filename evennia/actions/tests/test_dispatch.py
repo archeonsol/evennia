@@ -196,9 +196,7 @@ class TestRouting(unittest.TestCase):
         goblin = RuleTarget("goblin")
         self.char._search_hook = lambda name: goblin
         with (
-            mock.patch.object(
-                storage, "ensure_authorization", mock.AsyncMock(return_value=False)
-            ),
+            mock.patch.object(storage, "ensure_authorization", mock.AsyncMock(return_value=False)),
             mock.patch.object(
                 storage, "authorization_snapshot_scope", return_value=nullcontext()
             ) as snapshot_scope,
@@ -516,7 +514,6 @@ class TestDisambiguation(unittest.TestCase):
         self.assertIn("Invalid choice. Cancelled.", self.char.messages)
         self.assertEqual(len(c1.kicked) + len(c2.kicked), 0)
 
-
     def test_new_command_runs_instead_of_cancelling(self):
         c1, c2 = RuleTarget("goblin"), RuleTarget("goblin chief")
         orc = RuleTarget("orc")
@@ -530,6 +527,28 @@ class TestDisambiguation(unittest.TestCase):
         self.assertNotIn("Invalid choice. Cancelled.", self.char.messages)
         self.assertEqual(len(orc.kicked), 1)
         self.assertEqual(len(c1.kicked) + len(c2.kicked), 0)
+
+    def test_numbered_answer_shapes_choose(self):
+        for answer in ("2:", "2.", "2)", "#2"):
+            with self.subTest(answer=answer):
+                c1, c2 = RuleTarget("goblin"), RuleTarget("goblin chief")
+                self.char._search_hook = lambda name: self.actor._take_search_override(name)
+                self.actor.enter_state(
+                    DisambiguationState(
+                        [c1, c2], pending_raw="kick goblin", ambiguous_name="goblin"
+                    )
+                )
+                trace = _dispatch(self.actor, answer, self.parser)
+                self.assertEqual(trace.outcome, "succeeded")
+                self.assertEqual((len(c1.kicked), len(c2.kicked)), (0, 1))
+
+    def test_numbered_answer_out_of_range_cancels(self):
+        c1, c2 = RuleTarget("goblin"), RuleTarget("goblin chief")
+        self.actor.enter_state(
+            DisambiguationState([c1, c2], pending_raw="kick goblin", ambiguous_name="goblin")
+        )
+        self.assertIsNone(_dispatch(self.actor, "#9", self.parser))
+        self.assertIn("Invalid choice. Cancelled.", self.char.messages)
 
 
 # --- profiling middleware ---------------------------------------------------

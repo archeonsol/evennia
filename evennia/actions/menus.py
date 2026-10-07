@@ -23,6 +23,7 @@ rules win. :class:`MenuInputAction` is the internal system action that captured
 raw input is redirected into (``__menuinput__``, excluded from the verb trie).
 """
 
+import re
 from dataclasses import dataclass, field
 
 from .action import Action, action
@@ -550,6 +551,16 @@ def _candidate_label(candidate, looker=None):
     return str(candidate)
 
 
+#: A numbered answer: "2", or the prompt's own "2:" echoed, "2.", "2)" or "#2".
+_NUMBERED_CHOICE = re.compile(r"#?(\d+)[:.)]?")
+
+
+def _choice_number(token):
+    """The number a stripped choice line names, or None if it is not numbered."""
+    match = _NUMBERED_CHOICE.fullmatch(token)
+    return int(match.group(1)) if match else None
+
+
 def _parse_choice(raw, candidates, looker=None):
     """Resolve ``raw`` to one of ``candidates`` (1-based index, else name).
 
@@ -563,8 +574,8 @@ def _parse_choice(raw, candidates, looker=None):
     token = raw.strip()
     if not token:
         return None
-    if token.isdigit():
-        idx = int(token)
+    idx = _choice_number(token)
+    if idx is not None:
         if 1 <= idx <= len(candidates):
             return candidates[idx - 1]
         return None
@@ -576,13 +587,13 @@ def _parse_choice(raw, candidates, looker=None):
 
 
 def _reads_as_choice(raw):
-    """True when ``raw`` can only be an answer: blank or a bare number.
+    """True when ``raw`` can only be an answer: blank or a numbered choice.
 
     Any other line that names no candidate is a new command, so it runs
     instead of being spent cancelling the prompt.
     """
     token = (raw or "").strip()
-    return not token or token.isdigit()
+    return not token or _choice_number(token) is not None
 
 
 class DisambiguationState(StateProvider):

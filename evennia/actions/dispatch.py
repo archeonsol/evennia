@@ -401,7 +401,7 @@ async def _resolve_disambiguation(
 ):
     """Resolve a pending disambiguation from the player's choice line.
 
-    A line that names no candidate and is not a bare number runs as a new
+    A line that names no candidate and is not a numbered choice runs as a new
     command once the prompt has closed.
     """
     choice = _parse_choice(raw_string, state.candidates, looker=getattr(actor, "character", None))
