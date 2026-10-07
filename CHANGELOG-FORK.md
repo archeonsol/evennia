@@ -25,7 +25,7 @@ matching release procedure.
 
 ---
 
-## Unreleased: Loud event modules, traceable drops, closing captures
+## 6.0.0+underspire.309: Loud event modules, traceable drops, closing captures
 
 Follow-ups to the `.307` rule that the server sends only declared commands.
 
