@@ -25,7 +25,7 @@ matching release procedure.
 
 ---
 
-## Unreleased
+## 6.0.0+underspire.310: Closed flows end their action, labelled answers
 
 ### Engine
 
@@ -46,11 +46,30 @@ matching release procedure.
   is out of range, runs as a new command, since `say t-1000` has the same
   shape (`c9859c1f4`).
 
+- **A closed flow ends its action** ([`engine.py`](evennia/actions/engine.py)).
+  `close_captures` now ends the action of a flow it closes. A suspended
+  `@interactive` rule closed at a prompt, a menu, or a yielded `Deferred`
+  that fires with `INPUT_CLOSED` stops its dispatch: no later `carry_out`
+  rule and no report runs, and the trace outcome is `aborted` (the rule is
+  recorded as `SILENT_FAIL`). Before, the closed rule read as `PASS`, so
+  lower rules ran without the answer (`63103e393`).
+- **`EvEditor.close()` and `closefunc`** ([`eveditor.py`](evennia/utils/eveditor.py)).
+  `close()` ends the editor with no save and no `quitfunc`, dismisses the web
+  panel, removes the persisted buffer, then calls the optional
+  `closefunc(caller)`. `EvEditorState.close_capture` uses it, so
+  `close_captures` no longer runs an editor's `quitfunc`. `quit()` is
+  unchanged. A web editor installs no capture state, so `close_captures`
+  does not close it unless its caller installs one (`e8b3caa80`).
+- **Closing a pager drops its handle** ([`evmore.py`](evennia/utils/evmore.py)).
+  Closing an EvMore pager with `close_captures` now clears
+  `caller.ndb._more` (`ab1609080`).
+
 ### Tests
 
 - [`test_sessionhandler_outbuf.py`](evennia/server/tests/test_sessionhandler_outbuf.py):
   a stray flag sent through a real `msg()` logs the test's own caller and no
-  `deliver_node` frame (`21c29ce48`).
+  `deliver_node` frame. It binds the real `data_out`, so a handler left
+  patched by an earlier test does not hide the log (`21c29ce48`, `0ae3b3f8d`).
 - [`test_dispatch.py`](evennia/actions/tests/test_dispatch.py): labelled
   answer shapes choose, number-led answers that name no candidate cancel, and
   `kick t-1000` still runs (`c9859c1f4`).
@@ -60,6 +79,11 @@ matching release procedure.
 - [`test_messaging_templates.py`](evennia/objects/tests/test_messaging_templates.py):
   a `$func` template keeps `$you(target)` lowercase mid-sentence and
   capitalizes the opening `{target}` (`5844d4ebb`).
+- [`test_close_captures.py`](evennia/actions/tests/test_close_captures.py):
+  a closed flow ends `aborted` with no later `carry_out` or report, a flow
+  waiting on a `Deferred` closes, real line, persistent and web editors close
+  without their `quitfunc`, and a closed pager clears `ndb._more`
+  (`63103e393`, `e8b3caa80`, `ab1609080`).
 
 ---
 
