@@ -24,7 +24,9 @@ import { settings } from "../src/lib/settings.svelte";
 import { dock } from "../src/lib/dock.svelte";
 import { toasts } from "../src/lib/toasts.svelte";
 import { help, type HelpPage } from "../src/lib/help.svelte";
+import { lore } from "../src/lib/lore.svelte";
 import helpFixtures from "./help-fixtures.json";
+import loreFixtures from "./lore-tips.json";
 
 const params = new URLSearchParams(location.search);
 try {
@@ -90,6 +92,7 @@ const helpSearches = helpFixtures.searches as Record<string, HelpPage>;
   if (action === "help_view") return helpViews[q] ?? { kind: "not_found", query: q, hits: [], suggestions: [] };
   if (action === "help_search") return helpSearches[q] ?? { kind: "search", query: q, hits: [] };
   if (action === "help_prefs") return { panel: true };
+  if (action === "lore_tips") return loreFixtures;
   if (action === "reading_get") return { settings: reading, colours: readingColours };
   if (action === "reading_set") return readingSet(String(data?.setting ?? ""), String(data?.value ?? ""));
   if (action === "my_tickets") return { tickets: mine };
@@ -105,6 +108,12 @@ compose.setPreviewSender((line) => {
 });
 (connection as any).init = () => {};
 connection.state = "open";
+
+// The game's lore words, as its `lore:lore_tips` request answers (tests/lore-tips.json
+// is that answer, written from the game's own registry). main.ts asks on connect; here
+// they are set up front so the lines seeded below are marked as they land.
+lore.init();
+lore.setTips(loreFixtures);
 
 scene.room = { name: "Kettle's Noodle Counter" } as any;
 scene.present = true;
@@ -132,6 +141,8 @@ const lines: [string, string][] = [
   ["say", "The lean courier says, \"You're late. The stacks flooded an hour ago.\""],
   ["say", "You say, \"Then we go in wet.\""],
   ["text", "Kettle slides a bowl across the counter without looking up."],
+  ["say", "Kettle says, \"Eat. Saint Marrow knows you need it, and so does the Hum.\""],
+  ["text", "A pilgrim in a grey coat kneels by the door and prays to Marrow, then asks the courier about the Outriders."],
   ["combat", "<span class=\"ansi-red\">A drone clips the window with a burst of static. Glass spiders across the pane.</span>"],
   ["text", "The courier pockets a folded chit and nods toward the stairs down."],
   ["handset", "[Oct 05 20:11] Mira: you still coming to the stacks?"],

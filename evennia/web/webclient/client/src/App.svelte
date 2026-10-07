@@ -8,6 +8,7 @@
   import CommandPalette from "./components/CommandPalette.svelte";
   import Hotbar from "./components/Hotbar.svelte";
   import Toasts from "./components/Toasts.svelte";
+  import LoreTip from "./components/LoreTip.svelte";
   import QuitOverlay from "./components/QuitOverlay.svelte";
   import UIHost from "./components/UIHost.svelte";
   import YoutubeBgm from "./components/YoutubeBgm.svelte";
@@ -216,6 +217,7 @@
   <UIHost />
   <YoutubeBgm />
   <Toasts />
+  <LoreTip />
 </CrtShell>
 
 <style>

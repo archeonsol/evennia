@@ -1,0 +1,563 @@
+{
+  "tips": [
+    {
+      "id": "saint_marrow",
+      "title": "Saint Marrow",
+      "blurb": "Marrow was the leader of the Founders, and the Church calls him the Prophet. He died in the first year of the city and came back three days later, and Sepulchre was started because of that. His symbol is an iron lantern in the shape of a ribcage.",
+      "help": "saints/marrow",
+      "terms": [
+        "Saint Marrow",
+        "St. Marrow",
+        "Marrow"
+      ],
+      "mid": true
+    },
+    {
+      "id": "saint_vael",
+      "title": "Saint Vael",
+      "blurb": "Vael was a Founder who looked after the sick. She worked with her hands and crude tools, since machines were forbidden at the time. She died in a plague after giving away every cure she had. Her picture hangs in every Mythos clinic.",
+      "help": "saints/vael",
+      "terms": [
+        "Saint Vael",
+        "Vael"
+      ]
+    },
+    {
+      "id": "saint_ferro",
+      "title": "Saint Ferro",
+      "blurb": "Ferro was a Founder and the first smith in Deshret. He built much of the early city himself. When a radiation breach opened on a building crew, he sealed the gap with his own body to protect an apprentice, and he died of the burns days later.",
+      "help": "saints/ferro",
+      "terms": [
+        "Saint Ferro",
+        "Ferro"
+      ]
+    },
+    {
+      "id": "saint_lyra",
+      "title": "Saint Lyra",
+      "blurb": "Lyra was one of the Founders. After the Burning she sang and told stories to give the survivors hope. Some call her a liar, but most people think the lie was worth it. She is said to have gone into Abzu and never come back out.",
+      "help": "saints/lyra",
+      "terms": [
+        "Saint Lyra",
+        "Lyra"
+      ]
+    },
+    {
+      "id": "saint_cinder",
+      "title": "Saint Cinder",
+      "blurb": "Cinder was one of the Founders. Marrow had forbidden machines and dangerous work, and Cinder took them up anyway because the city needed them. Cinder died because of that work. Sepulchre says it shows that sometimes a few people have to take the risk for everyone else.",
+      "help": "saints/cinder",
+      "terms": [
+        "Saint Cinder",
+        "Cinder"
+      ],
+      "mid": true
+    },
+    {
+      "id": "saint_vesper",
+      "title": "Saint Vesper",
+      "blurb": "Vesper was one of the Founders. She went up to the surface again and again to bring back what the city needed, and each trip changed her. One day she did not come back. There is a shrine to her at the surface gate, and Outriders leave the first thing they find on every run there.",
+      "help": "saints/vesper",
+      "terms": [
+        "Saint Vesper",
+        "Vesper"
+      ],
+      "mid": true
+    },
+    {
+      "id": "saint_severin",
+      "title": "Saint Severin",
+      "blurb": "Severin was a Founder and Marrow's enforcer. He is the patron of the city guard and the Inquisitors. In the early years he hunted down heresy, and the story goes that he only wept once, when he had to condemn his own wife and children.",
+      "help": "saints/severin",
+      "terms": [
+        "Saint Severin",
+        "Severin"
+      ]
+    },
+    {
+      "id": "saint_wren",
+      "title": "Saint Wren",
+      "blurb": "Wren was a Founder. When the guilds took over she stayed with the poor in what became the slums, and she is the Saint people pray to for everything from food to good luck. There are small shrines to her all over Suburba.",
+      "help": "saints/wren",
+      "terms": [
+        "Saint Wren",
+        "Wren"
+      ]
+    },
+    {
+      "id": "saint_cassius",
+      "title": "Saint Cassius",
+      "blurb": "Cassius was one of the Founders. He doubted Marrow and betrayed him, then was sorry and was forgiven. The Church calls him the Saint of second chances.",
+      "help": "saints/cassius",
+      "terms": [
+        "Saint Cassius",
+        "Cassius"
+      ]
+    },
+    {
+      "id": "the_saints",
+      "title": "The Saints",
+      "blurb": "The Saints are the nine Founders, whom the Church treats as holy. Most people pick one Saint to follow and wear that Saint's colour or seal.",
+      "help": "saints",
+      "terms": [
+        "the Saints",
+        "The Saints",
+        "the Nine",
+        "The Nine"
+      ]
+    },
+    {
+      "id": "the_founders",
+      "title": "The Founders",
+      "blurb": "The Founders were the nine people who led the survivors underground when the surface burned, and they set up the first laws of the city. The Church now treats them as Saints.",
+      "help": "deshret/the founders",
+      "terms": [
+        "the Founders",
+        "The Founders"
+      ]
+    },
+    {
+      "id": "church_of_the_nine",
+      "title": "Church of the Nine",
+      "blurb": "The Church of the Nine is the only religion in Deshret, and Sepulchre runs it. It teaches that technology caused the Burning, so it has to be kept under control. The nine Founders are its Saints.",
+      "help": "religion",
+      "terms": [
+        "Church of the Nine"
+      ]
+    },
+    {
+      "id": "ninefold",
+      "title": "Ninefold",
+      "blurb": "A Ninefold is a follower of the Church of the Nine. Nearly everyone in Deshret counts as one, though for most people that only means paying tithes and going to the sermons.",
+      "help": "religion",
+      "terms": [
+        "Ninefold"
+      ],
+      "any_case": true
+    },
+    {
+      "id": "the_hum",
+      "title": "The Hum",
+      "blurb": "The Hum is a low sound that can be heard all over Deshret, mostly when it is quiet. The Church says it is the breath of Saint Marrow.",
+      "help": "the hum",
+      "terms": [
+        "the Hum",
+        "The Hum"
+      ]
+    },
+    {
+      "id": "the_burning",
+      "title": "The Burning",
+      "blurb": "The Burning is the disaster that destroyed the old world about four hundred years ago. The surface was scorched, and the survivors moved underground. The city counts its years from it.",
+      "help": "deshret/the burning",
+      "terms": [
+        "the Burning",
+        "The Burning"
+      ]
+    },
+    {
+      "id": "mythos",
+      "title": "Mythos",
+      "blurb": "Mythos is the guild for anything to do with the body: healthcare, cyberware and gene-splicing. House Vesalius runs it, and its patron is Saint Vael.",
+      "help": "mythos",
+      "terms": [
+        "Mythos"
+      ]
+    },
+    {
+      "id": "vulcani",
+      "title": "Vulcani",
+      "blurb": "Vulcani is the guild that makes weapons, armour and vehicles. It treats craftsmanship almost as a religion, and its patron is Saint Ferro. It sells to everyone on every side of a war, from the same catalogue.",
+      "help": "vulcani",
+      "terms": [
+        "Vulcani"
+      ]
+    },
+    {
+      "id": "pegasus",
+      "title": "Pegasus",
+      "blurb": "Nobody has ever met a member of Pegasus. It has a seat on the Council of Six and pays its tithes, but it has no public floor and no spokespeople, and people only guess at what it does.",
+      "help": "pegasus",
+      "terms": [
+        "Pegasus"
+      ],
+      "mid": true
+    },
+    {
+      "id": "outriders",
+      "title": "Outriders",
+      "blurb": "The Outriders are the guild that goes up to the surface. They bring back things the city cannot make for itself, so the city needs them, but Sepulchre does not trust them. Their patron is Saint Vesper.",
+      "help": "outriders",
+      "terms": [
+        "Outriders",
+        "Outrider"
+      ],
+      "mid": true
+    },
+    {
+      "id": "sepulchre",
+      "title": "Sepulchre",
+      "blurb": "Sepulchre is the Church, and it holds a guild's seat on the Council of Six. It runs the creches, the schools and the ceremonies, and only it can bring the dead back, through splintering. Its Inquisitors go after forbidden technology.",
+      "help": "sepulchre",
+      "terms": [
+        "Sepulchre"
+      ],
+      "mid": true
+    },
+    {
+      "id": "symphony",
+      "title": "Symphony",
+      "blurb": "Symphony is the guild for entertainment, fashion, news, gambling, vice and blood sport. Its executives live in Abzu and call themselves gods, and they show up in the city whenever they want to.",
+      "help": "symphony",
+      "terms": [
+        "Symphony"
+      ],
+      "mid": true
+    },
+    {
+      "id": "the_guilds",
+      "title": "The Six Guilds",
+      "blurb": "There are six guilds. Each one holds a monopoly on one vital trade, in return for paying tithes to the Church and accepting the Inquisition's oversight.",
+      "help": "guilds",
+      "terms": [
+        "the Six Guilds",
+        "The Six Guilds",
+        "Six Guilds"
+      ]
+    },
+    {
+      "id": "sixer",
+      "title": "Sixer",
+      "blurb": "A sixer is a full member of a guild. Sixers put their guild's particle before their surname, and most of them live in Arcadia.",
+      "help": "guilds/sixers and yeomen",
+      "terms": [
+        "sixer",
+        "sixers"
+      ],
+      "any_case": true
+    },
+    {
+      "id": "yeoman",
+      "title": "Yeoman",
+      "blurb": "A yeoman is a contract worker for a guild or a House. Unlike a sixer, a yeoman has no membership, no benefits and no protection.",
+      "help": "guilds/sixers and yeomen",
+      "terms": [
+        "yeoman",
+        "yeomen"
+      ]
+    },
+    {
+      "id": "great_houses",
+      "title": "The Great Houses",
+      "blurb": "The Great Houses are the nine families that rule the deepest floors of the city. They sit on the Pagos, and they own the guilds in everything but name.",
+      "help": "great houses",
+      "terms": [
+        "the Great Houses",
+        "The Great Houses",
+        "Great Houses",
+        "Great House"
+      ]
+    },
+    {
+      "id": "house_amari",
+      "title": "House Amari",
+      "blurb": "House Amari has the only real garden in Deshret, with actual soil and water. People say its fruit is the closest thing left to the old world. It also sells real drugs, grown instead of made in a lab.",
+      "help": "house amari",
+      "terms": [
+        "House Amari",
+        "Amari"
+      ]
+    },
+    {
+      "id": "house_drepane",
+      "title": "House Drepane",
+      "blurb": "House Drepane serves Symphony's gods and worships them more than anyone. It keeps old arts alive, such as theatre and poetry, and it throws the best parties in the city.",
+      "help": "house drepane",
+      "terms": [
+        "House Drepane",
+        "Drepane"
+      ]
+    },
+    {
+      "id": "house_kadesh",
+      "title": "House Kadesh",
+      "blurb": "House Kadesh is the most devout of the Houses. Instead of tattoos, a Kadesh carves their seals into their own skin, and every act of devotion leaves another scar. Many of them are clergy or inquisitors.",
+      "help": "house kadesh",
+      "terms": [
+        "House Kadesh",
+        "Kadesh"
+      ]
+    },
+    {
+      "id": "house_morcant",
+      "title": "House Morcant",
+      "blurb": "Nobody knows what a Morcant looks like. When they come of age they give up their name and their face and wear masks, so you cannot tell one from another. People connect the House with death.",
+      "help": "house morcant",
+      "terms": [
+        "House Morcant",
+        "Morcant"
+      ]
+    },
+    {
+      "id": "house_qamarat",
+      "title": "House Qamarat",
+      "blurb": "House Qamarat is the richest House. It owns most of the crystals that power the city, so the other Houses have to be careful around it.",
+      "help": "house qamarat",
+      "terms": [
+        "House Qamarat",
+        "Qamarat"
+      ]
+    },
+    {
+      "id": "house_rook",
+      "title": "House Rook",
+      "blurb": "House Rook is the youngest Great House, and it came out of the city watch. Rooks wear plain grey jumpsuits to the Council while everyone else wears silk. A Rook child has to serve before anyone respects them.",
+      "help": "house rook",
+      "terms": [
+        "House Rook"
+      ]
+    },
+    {
+      "id": "house_valcora",
+      "title": "House Valcora",
+      "blurb": "House Valcora is the House of pilots and owns the biggest fleet of aircraft in the city. The other Houses stay deep underground, but Valcora wants to go up.",
+      "help": "house valcora",
+      "terms": [
+        "House Valcora",
+        "Valcora"
+      ]
+    },
+    {
+      "id": "house_varga",
+      "title": "House Varga",
+      "blurb": "House Varga owns a huge hunting ground and breeds the animals in it. Some are sold to Mythos for splicing and the rest are hunted. Varga are the roughest of the Houses, and many work as gladiators or trackers.",
+      "help": "house varga",
+      "terms": [
+        "House Varga"
+      ]
+    },
+    {
+      "id": "house_vesalius",
+      "title": "House Vesalius",
+      "blurb": "House Vesalius runs Mythos, and has since the guild started. There are always three of them alive at once, a child, an adult and an elder, all from the same genestock. They are pale and polite and cold, and everyone has heard about the gallery of preserved bodies they keep.",
+      "help": "house vesalius",
+      "terms": [
+        "House Vesalius",
+        "Vesalius"
+      ]
+    },
+    {
+      "id": "deshret",
+      "title": "Deshret",
+      "blurb": "Deshret is the city people built underground after the surface burned. The poor live near the top and the powerful live at the bottom, so getting ahead in society means going down.",
+      "help": "deshret",
+      "terms": [
+        "Deshret"
+      ],
+      "any_case": true
+    },
+    {
+      "id": "suburba",
+      "title": "Suburba",
+      "blurb": "Suburba is the top of the city, just under the surface airlocks. It is crowded, full of workshops, farms and cheap tenement pods, and the people who live there are called slummers.",
+      "help": "districts/suburba",
+      "terms": [
+        "Suburba"
+      ],
+      "any_case": true
+    },
+    {
+      "id": "arcadia",
+      "title": "Arcadia",
+      "blurb": "Arcadia is where the guild members live. You need a guild contract or a noble sponsor to live there, and in return you get clean water, steady power and security gates.",
+      "help": "districts/arcadia",
+      "terms": [
+        "Arcadia"
+      ]
+    },
+    {
+      "id": "delos",
+      "title": "Delos",
+      "blurb": "Delos is the middle of the city, where the Six Guilds have their floors. It is full of towers and trade halls, and guild security patrols it.",
+      "help": "districts/delos",
+      "terms": [
+        "Delos"
+      ]
+    },
+    {
+      "id": "palatine",
+      "title": "Palatine",
+      "blurb": "Palatine is the very bottom of the city, also called the deeps. The Great Houses have their palaces there, and so does the Cathedral of Sepulchre.",
+      "help": "districts/palatine",
+      "terms": [
+        "Palatine"
+      ],
+      "mid": true
+    },
+    {
+      "id": "abzu",
+      "title": "Abzu",
+      "blurb": "Abzu is the proper name for what many people call the Matrix. Most people in Deshret think of it as a spirit realm more than a machine, and divers go into it while their bodies sit in a rig.",
+      "help": "diving",
+      "terms": [
+        "Abzu"
+      ],
+      "any_case": true
+    },
+    {
+      "id": "pneumatikon",
+      "title": "Pneumatikon",
+      "blurb": "The Pneumatikon is the big steam engine that powers the city's lights and life support. It runs on crystals supplied by House Qamarat.",
+      "help": "materials/power",
+      "terms": [
+        "Pneumatikon"
+      ],
+      "any_case": true
+    },
+    {
+      "id": "the_pagos",
+      "title": "The Pagos",
+      "blurb": "The Pagos is the council that governs Deshret, and the nine Great Houses dominate it. The guilds have no state power of their own.",
+      "help": "deshret/who holds power",
+      "terms": [
+        "the Pagos",
+        "The Pagos"
+      ]
+    },
+    {
+      "id": "the_lictorate",
+      "title": "The Lictorate",
+      "blurb": "The Lictorate is the state's police, army and city watch all in one. Its heavy infantry are called Dragoons, and House Rook leads it.",
+      "help": "law/the lictorate",
+      "terms": [
+        "the Lictorate",
+        "The Lictorate",
+        "Lictorate"
+      ],
+      "any_case": true
+    },
+    {
+      "id": "slummer",
+      "title": "Slummer",
+      "blurb": "A slummer is someone who lives in Suburba without a guild job or a House patron. Slummers have their own culture and factions, and mostly look after themselves.",
+      "help": "life in deshret/social status",
+      "terms": [
+        "slummer",
+        "slummers"
+      ],
+      "any_case": true
+    },
+    {
+      "id": "splicer",
+      "title": "Splicer",
+      "blurb": "A splicer is someone with non-human DNA, anything from cat ears to a full animal head. Mythos makes them, and the Church allows it.",
+      "help": "splicers",
+      "terms": [
+        "splicer",
+        "splicers"
+      ],
+      "any_case": true
+    },
+    {
+      "id": "vatling",
+      "title": "Vatling",
+      "blurb": "Vatling is meat grown in vats by Mythos. Sixers can sometimes get real animal meat, though even those animals are engineered.",
+      "help": "life in deshret/food and drink",
+      "terms": [
+        "vatling",
+        "vatlings"
+      ],
+      "any_case": true
+    },
+    {
+      "id": "abkal",
+      "title": "The Abkal",
+      "blurb": "The Abkal are the divers of Suburba. They look after the Cortex, a huge data centre, and they give almost anyone access to Abzu, including people no guild would take.",
+      "help": "abkal",
+      "terms": [
+        "the Abkal",
+        "The Abkal",
+        "Abkal"
+      ]
+    },
+    {
+      "id": "cabiri",
+      "title": "The Cabiri",
+      "blurb": "The Cabiri are a loose group of mechanics and rogue engineers who run the workshops in Suburba. They believe anything can be rebuilt into something new, and the most devoted rebuild their own bodies too.",
+      "help": "cabiri",
+      "terms": [
+        "the Cabiri",
+        "The Cabiri",
+        "Cabiri"
+      ]
+    },
+    {
+      "id": "coterie",
+      "title": "The Coterie",
+      "blurb": "The Coterie is the crime syndicate that runs Suburba's underworld. Its bosses wear masks and call themselves the nobility of the slums, and they deal in vice: drugs, gambling and fight pits.",
+      "help": "coterie",
+      "terms": [
+        "the Coterie",
+        "The Coterie"
+      ]
+    },
+    {
+      "id": "kolkhos",
+      "title": "The Kolkhos",
+      "blurb": "The Kolkhos is the farming collective that feeds much of Suburba. Everything is shared, and every able member serves in the militia, so a farm shift can turn into an armed force in minutes.",
+      "help": "kolkhos",
+      "terms": [
+        "the Kolkhos",
+        "The Kolkhos",
+        "Kolkhos"
+      ]
+    },
+    {
+      "id": "ophirian_league",
+      "title": "Ophirian League",
+      "blurb": "The Ophirian League is the group of salvage traders in Suburba. It calls itself a professional association, but it works as a cartel, fixing prices and blacklisting rivals.",
+      "help": "ophirian league",
+      "terms": [
+        "Ophirian League"
+      ]
+    },
+    {
+      "id": "shinar",
+      "title": "Shinar",
+      "blurb": "Shinar is the common tongue of Deshret, spoken all over the city. Nearly every citizen learns to speak, read and write it in a Sepulchre creche. It is a blend of old-world languages, as are Babble, Harran and Nisabic.",
+      "help": "languages/shinar",
+      "terms": [
+        "Shinar"
+      ]
+    },
+    {
+      "id": "nisabic",
+      "title": "Nisabic",
+      "blurb": "Nisabic is the language of administration and record-keeping. Government records and archives are written in it.",
+      "help": "languages/nisabic",
+      "terms": [
+        "Nisabic"
+      ],
+      "any_case": true
+    },
+    {
+      "id": "harran",
+      "title": "Harran",
+      "blurb": "Harran is the language Sepulchre uses for its rites. Rumour says it is used for occult ritual too.",
+      "help": "languages/harran",
+      "terms": [
+        "Harran"
+      ]
+    },
+    {
+      "id": "babble",
+      "title": "Babble",
+      "blurb": "Babble is the pidgin the slummers of Suburba speak, and one of the four languages in common use in Deshret.",
+      "help": "languages/babble",
+      "terms": [
+        "Babble"
+      ],
+      "mid": true
+    }
+  ]
+}

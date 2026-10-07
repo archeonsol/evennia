@@ -541,6 +541,20 @@ select:focus-visible {
   --dv-overlay-z-index: 40;
 }
 
+/* Lore words: a word the game's lore notes cover, marked in the log as its line lands
+   (lib/lore.ts). Underlined only while the setting is on; the note itself is
+   components/LoreTip.svelte. The attribute is off in screen reader mode too. */
+html[data-lore-tips] .lore {
+  text-decoration: underline dotted;
+  text-decoration-color: color-mix(in srgb, currentColor 55%, transparent);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.2em;
+  cursor: help;
+}
+html[data-lore-tips] .lore:hover {
+  text-decoration-color: currentColor;
+}
+
 /* Form controls in the shell's own hand: a flat track with a square thumb,
    squared selects. The browser defaults (round pills and knobs) were the
    one part of the settings that looked like a web app. The header volume

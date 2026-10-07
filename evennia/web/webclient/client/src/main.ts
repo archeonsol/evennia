@@ -32,6 +32,7 @@ import { renderBody, renderSender } from "./lib/markup";
 import { logview } from "./lib/logview.svelte";
 import { screenSize } from "./lib/screensize";
 import { help } from "./lib/help.svelte";
+import { lore } from "./lib/lore.svelte";
 import { activity } from "./lib/activity.svelte";
 
 const OOB_TRACE_KEY = "underspire.trace.oob";
@@ -68,6 +69,7 @@ settings.init();
 commands.init();
 macros.init();
 triggers.init();
+lore.init();
 keybinds.init();
 panelPrefs.init();
 routing.init();
@@ -201,6 +203,9 @@ connection.on("connection_open", () => {
   }
   // Where help goes is a session flag too: the panel, or the log.
   help.sendPreference(settings.helpInPanel);
+  // The game's lore words, which light up in the log as lines land. Asked on every
+  // connect: the game may have changed them while this tab was away.
+  void lore.load();
 });
 
 // Every name this file routes on must exist in the server's event catalog.

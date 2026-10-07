@@ -110,6 +110,8 @@ interface Persisted {
   spellcheck: boolean;
   /** Show help in its own panel instead of printing it into the terminal. */
   helpPanel: boolean;
+  /** Underline the game's lore words in the log, and show a note on a hover or a tap. */
+  loreTips: boolean;
   customColors: Record<string, string>;
 }
 
@@ -149,6 +151,7 @@ const DEFAULTS: Persisted = {
   composeStaysOpen: false,
   spellcheck: true,
   helpPanel: true,
+  loreTips: true,
   customColors: { ...CUSTOM_DEFAULTS },
 };
 
@@ -210,6 +213,7 @@ class Settings {
   composeStaysOpen = $state(DEFAULTS.composeStaysOpen);
   spellcheck = $state(DEFAULTS.spellcheck);
   helpPanel = $state(DEFAULTS.helpPanel);
+  loreTips = $state(DEFAULTS.loreTips);
   customColors = $state<Record<string, string>>({ ...CUSTOM_DEFAULTS });
   private _lastSR: boolean | null = null;
   private _lastHelp: boolean | null = null;
@@ -257,6 +261,9 @@ class Settings {
     root.toggleAttribute("data-scene-strip", this.sceneStrip);
     root.toggleAttribute("data-kbd-sfx", this.keyboardSfx);
     root.toggleAttribute("data-screenreader", this.screenreader);
+    // A screen reader reads the words themselves, and a note that only a pointer can
+    // open would be a dead underline: lore words are not marked there at all.
+    root.toggleAttribute("data-lore-tips", this.loreTips && !this.screenreader);
     // Mirror screenreader to the server so its rendering matches (telnet parity).
     if (this._lastSR !== this.screenreader) {
       this._lastSR = this.screenreader;

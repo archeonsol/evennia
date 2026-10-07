@@ -3,6 +3,7 @@
 
 import { connection } from "./evennia.svelte";
 import { triggers } from "./triggers.svelte";
+import { lore } from "./lore.svelte";
 import { routing } from "./routing.svelte";
 import { categorize, type LogCat } from "./logcats";
 import { htmlToText } from "./text";
@@ -57,6 +58,9 @@ class GameSession {
       // the terminal also emptied the feed that was meant to collect it.
       const gagged = triggers.shouldGag(text);
       html = triggers.highlight(html);
+      // The game's lore words are marked here, before routing, so a feed that copies
+      // the line shows them too. `text` above is already plain and does not change.
+      html = lore.wrap(html);
       if (!gagged) triggers.runActions(text);
       // A move-route takes the line out of the terminal entirely; it lives in
       // its feed and in the record instead. Copy-routes fall through and the
