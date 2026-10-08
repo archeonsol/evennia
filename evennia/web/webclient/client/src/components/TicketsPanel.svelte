@@ -6,6 +6,7 @@
   // terminal beside the panel.
   import { chat, type TicketResult } from "../lib/chat.svelte";
   import { renderBody, renderSender } from "../lib/markup";
+  import { TICKET_SORTS, loadTicketSort, saveTicketSort, sortTickets, type TicketSort } from "../lib/ticketSort";
 
   type Show = "all" | "pending" | "waiting" | "unclaimed";
 
@@ -14,6 +15,7 @@
   let history = $state(false);
   let kindFilter = $state("all");
   let show = $state<Show>("all");
+  let sort = $state<TicketSort>(loadTicketSort());
   let search = $state("");
   let reason = $state("");
   let deciding = $state<"approve" | "deny" | null>(null);
@@ -27,6 +29,9 @@
     "all",
     ...Array.from(new Set(source.map((t: any) => t.kind))),
   ]);
+  // A kind filter whose last ticket closed would hide every row, and the
+  // filter bar that could clear it is gone below two kinds.
+  const kind = $derived(kinds.includes(kindFilter) ? kindFilter : "all");
   const q = $derived(search.trim().toLowerCase());
   // The open queue is small and already here, so it narrows as you type, on
   // the fields the server's search reads. The history is searched on the
@@ -36,20 +41,21 @@
     return [t.short_id, t.subject, t.requester_name, t.account_name, t.preview, t.label, t.assignee]
       .some((v) => String(v ?? "").toLowerCase().includes(q));
   }
-  // Filter by kind and state, then highest priority first, then newest first.
-  // Oldest-first buried fresh tickets behind stale ones nobody could action
-  // (blocked, or deliberately parked at low priority).
-  const rows = $derived(
-    [...source]
-      .filter((t: any) => kindFilter === "all" || t.kind === kindFilter)
+  // The history keeps the server's order: latest decision first.
+  const filtered = $derived(
+    source
+      .filter((t: any) => kind === "all" || t.kind === kind)
       .filter((t: any) =>
         history || show === "all" ? true : show === "unclaimed" ? !t.assignee : t.status === show,
       )
-      .filter((t: any) => history || matches(t))
-      .sort(
-        (a, b) => (b.priority ?? 0) - (a.priority ?? 0) || (b.created ?? 0) - (a.created ?? 0),
-      ),
+      .filter((t: any) => history || matches(t)),
   );
+  const rows = $derived(history ? filtered : sortTickets(filtered, sort));
+  const ageTitle = $derived(sort === "activity" || history ? "since last activity" : "since filed");
+  function setSort(next: TicketSort) {
+    sort = next;
+    saveTicketSort(next);
+  }
   const counts = $derived({
     pending: chat.tickets.filter((t: any) => t.status === "pending").length,
     waiting: chat.tickets.filter((t: any) => t.status === "waiting").length,
@@ -158,7 +164,8 @@
     {:else}
       <button class="sh-toggle" aria-pressed={!history} onclick={() => (history = false)}>Open</button>
       <button class="sh-toggle" aria-pressed={history} onclick={() => (history = true)}>History</button>
-      <span class="count">{rows.length}</span>
+      <span class="count" title={rows.length < source.length ? "shown of loaded" : undefined}
+        >{rows.length < source.length ? `${rows.length} / ${source.length}` : rows.length}</span>
     {/if}
   </div>
 
@@ -177,11 +184,16 @@
           <button class="sh-toggle" role="radio" aria-checked={show === "waiting"} onclick={() => (show = "waiting")}>On player<span class="sh-count">{counts.waiting}</span></button>
           <button class="sh-toggle" role="radio" aria-checked={show === "unclaimed"} onclick={() => (show = "unclaimed")}>Unclaimed<span class="sh-count">{counts.unclaimed}</span></button>
         </div>
+        <div class="fl" role="radiogroup" aria-label="Sort">
+          {#each TICKET_SORTS as o (o.key)}
+            <button class="sh-toggle" role="radio" aria-checked={sort === o.key} onclick={() => setSort(o.key)}>{o.label}</button>
+          {/each}
+        </div>
       {/if}
       {#if kinds.length > 2}
         <div class="fl">
           {#each kinds as k}
-            <button class="sh-toggle" aria-pressed={kindFilter === k} onclick={() => (kindFilter = k)}>
+            <button class="sh-toggle" aria-pressed={kind === k} onclick={() => (kindFilter = k)}>
               {kindLabel(k)}
             </button>
           {/each}
@@ -198,7 +210,7 @@
                 {#if t.priority > 0}<span class="pri" title="priority">▲{t.priority}</span>{/if}
                 {#if t.assignee}<span class="asg" title="claimed by {t.assignee}">◆ {t.assignee}</span>{/if}
                 <span class="sh-plate {PLATE[t.status] ?? ''}">{t.status}</span>
-                <span class="age">{ageOf(t.updated)}</span>
+                <span class="age" title={ageTitle}>{ageOf(sort === "activity" || history ? t.updated : t.created)}</span>
               </span>
             </span>
             <span
@@ -212,7 +224,7 @@
       {:else}
         <p class="empty">
           {#if q}No match.
-          {:else}No {kindFilter === "all" ? "" : kindLabel(kindFilter).toLowerCase() + " "}tickets{history ? " in history" : ""}.{/if}
+          {:else}No {kind === "all" ? "" : kindLabel(kind).toLowerCase() + " "}tickets{history ? " in history" : ""}.{/if}
         </p>
       {/if}
     </div>
