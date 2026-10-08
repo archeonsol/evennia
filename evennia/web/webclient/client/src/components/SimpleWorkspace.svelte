@@ -4,7 +4,6 @@
   // survives switching away; `hidden` also takes it out of the reading order.
   import { tick, untrack } from "svelte";
   import { simple } from "../lib/simpleLayout.svelte";
-  import { VIEWS } from "../lib/dock.svelte";
   import { PANELS } from "../lib/panelRegistry";
   import { chat } from "../lib/chat.svelte";
   import { puppets } from "../lib/puppets.svelte";
@@ -25,16 +24,8 @@
     });
   });
 
-  // Staff and puppeteers get their extra views the same way the docked
-  // workspace adds them: when the data that needs them first arrives.
-  $effect(() => {
-    if (chat.staff && !simple.has("tickets")) {
-      simple.views = [...simple.views, { id: "tickets", component: "tickets", title: VIEWS.tickets.title, closable: false }];
-    } else if (!chat.staff && chat.staffKnown && simple.has("tickets")) {
-      simple.views = simple.views.filter((v) => v.id !== "tickets");
-      if (simple.active === "tickets") simple.active = "log";
-    }
-  });
+  // Puppeteers get their extra view the same way the docked workspace adds
+  // it: when the data that needs it first arrives.
   $effect(() => {
     if (puppets.list.length && !simple.has("puppets")) {
       simple.views = [...simple.views, { id: "puppets", component: "puppets", title: "Puppets", closable: false }];
@@ -46,8 +37,7 @@
   // page body with it hidden. Put it on the new view's tab instead.
   $effect(() => {
     const id = simple.active;
-    chat.queueActive = id === "tickets";
-    if (chat.queueActive) chat.markQueueSeen();
+    chat.assistFocused = id === "assist";
     tick().then(() => {
       const a = document.activeElement;
       if (!a || a === document.body || a.closest("[role=tabpanel][hidden]")) tabEls[id]?.focus();
@@ -60,7 +50,7 @@
       return n ? `${title} (${n} unread)` : title;
     }
     if (id === "puppets" && puppets.totalUnread) return `${title} (${puppets.totalUnread})`;
-    if (id === "tickets" && chat.queueUnseen) return `${title} (new)`;
+    if (id === "assist" && (chat.queueUnseen || chat.mineUnseen)) return `${title} (new)`;
     return title;
   }
 

@@ -7,7 +7,7 @@
 // channel_history → kwargs {key: [{msg_id,text,sender,platform,ts}]}; channel_unread
 // / channel_online → kwargs {key: count}; channel_topic → {channel_key,topic};
 // channel_reaction → {channel_key,msg_id,emoji,sender_name,delta,count}; channel_typing
-// → {channel_key,sender_name,platform}; assist_inbox → {threads:[…]}.
+// → {channel_key,sender_name,platform}. Ticket events (ticket_*) feed the Assist panel.
 
 import { commands } from "./commands.svelte";
 import { connection } from "./evennia.svelte";
@@ -38,8 +38,10 @@ export interface ChatMsg {
 }
 
 const MAX_PER_CHANNEL = 500;
-const SEEN_KEY = "underspire.tickets.seen.v1";
-const QUEUE_SEEN_KEY = "underspire.queue.seen.v1";
+const SEEN_KEY = "underspire.tickets.seen.v2";
+const QUEUE_SEEN_KEY = "underspire.queue.seen.v2";
+/** A terminal speak line counts as echoed only if its channel line arrives this soon. */
+const ECHO_WINDOW_MS = 10000;
 
 /** The answer to a ticket action, for the panel to show. */
 export interface TicketResult {
@@ -47,18 +49,30 @@ export interface TicketResult {
   message: string;
 }
 
-function loadSeen(): Record<string, number> {
+/** Which panel of the Assist tab is showing: the caller's own tickets, or the staff queue. */
+export type AssistTab = "mine" | "queue";
+
+/** Lowercased words with single spaces, for matching a typed line to its channel line. */
+function echoWords(s: string): string {
+  return s.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+// Seen maps are per account: two people sharing a browser must not mark each
+// other's tickets read, or learn their ids.
+function loadMap(base: string, account: number | null): Record<string, number> {
+  if (account == null) return {};
   try {
-    return JSON.parse(localStorage.getItem(SEEN_KEY) || "{}");
+    return JSON.parse(localStorage.getItem(`${base}:${account}`) || "{}");
   } catch {
     return {};
   }
 }
-function loadQueueSeen(): Record<string, number> {
+function saveMap(base: string, account: number | null, map: Record<string, number>): void {
+  if (account == null) return;
   try {
-    return JSON.parse(localStorage.getItem(QUEUE_SEEN_KEY) || "{}");
+    localStorage.setItem(`${base}:${account}`, JSON.stringify(map));
   } catch {
-    return {};
+    /* ignore */
   }
 }
 const TYPING_MS = 6000;
@@ -102,20 +116,18 @@ class Chat {
   muted = $state<Record<string, boolean>>({});
   readMark = $state<Record<string, number>>({}); // ts last seen per channel (for the "new" divider)
   mentions = $state<Record<string, boolean>>({}); // channel has an unread @-mention
-  assistThreads = $state<any[]>([]);
-  assistThread = $state<{ accountId: any; accountKey: string; messages: any[] } | null>(null);
-  tickets = $state<any[]>([]); // unified ticket inbox (all kinds)
-  ticket = $state<any | null>(null); // open ticket detail
+  tickets = $state<any[]>([]); // the staff queue (all kinds the viewer may see)
+  ticket = $state<any | null>(null); // open staff-view ticket
   ticketHistory = $state<any[]>([]); // resolved/closed tickets (on demand)
   myTickets = $state<any[]>([]); // the player's own tickets
-  myTicket = $state<any | null>(null); // player's open ticket detail
+  myTicket = $state<any | null>(null); // open owner-view ticket
   /** Why the player's list could not load; shown instead of "no tickets". */
   myTicketsError = $state("");
   /** The player's current search in My Tickets ("" = none). */
   myTicketsSearch = $state("");
   /** Bumped when one of the player's tickets changes, so the list reloads. */
   myTicketsRev = $state(0);
-  /** This session works the staff ticket queue (ticket_role, or an assist/ticket inbox arriving). */
+  /** This session works the staff ticket queue (ticket_role, or a ticket inbox arriving first). */
   staff = $state(false);
   /**
    * The server has said whether this session is staff. Until then `staff`
@@ -123,7 +135,14 @@ class Chat {
    * its queue panel until the answer arrives.
    */
   staffKnown = $state(false);
-  private assistViewer = false;
+  /** The logged-in account's id, from ticket_role; keys the seen maps. */
+  account = $state<number | null>(null);
+  /** The Assist tab's panel. A player only ever has "mine". */
+  assistTab = $state<AssistTab>("mine");
+  /** The Assist panel is the focused panel (set by the layout). */
+  assistFocused = $state(false);
+  /** A speak line typed in the terminal, waiting for its channel line to echo. */
+  private pendingEcho: { key: string; text: string; at: number } | null = null;
   active = $state<string>("");
   // Per-channel overrides: colour + notify mode ("all" | "mention" | "none").
   channelPrefs = $state<Record<string, { color?: string; notify?: string }>>(loadChannelPrefs());
@@ -186,41 +205,32 @@ class Chat {
         };
         break;
       }
-      case "assist_inbox": {
-        this.staff = true;
-        this.assistViewer = true;
-        const next = kwargs.threads ?? [];
-        // Toast newly-arrived tickets (not on the initial inbox push).
-        if (this.assistThreads.length) {
-          const prev = new Set(this.assistThreads.map((t: any) => t.account_id));
-          for (const t of next) {
-            if (!prev.has(t.account_id)) {
-              toasts.push("assist", "New ticket", t.account_key || `#${t.account_id}`);
-            }
-          }
+      case "ticket_role": {
+        // The server's answer, on login, on every channel resync, and on
+        // @quell / @unquell. Losing the role drops the queue already held.
+        this.staff = !!kwargs.staff;
+        this.staffKnown = true;
+        const account = typeof kwargs.account === "number" ? kwargs.account : null;
+        if (account !== this.account) {
+          this.account = account;
+          this.seen = loadMap(SEEN_KEY, account);
+          this.queueSeen = loadMap(QUEUE_SEEN_KEY, account);
+          if (account != null) void this.loadMyTickets(false, "");
         }
-        this.assistThreads = next;
+        if (!this.staff) {
+          this.tickets = [];
+          this.ticket = null;
+          this.ticketHistory = [];
+          this.assistTab = "mine";
+        }
         break;
       }
-      case "assist_thread":
-        this.assistThread = {
-          accountId: kwargs.account_id,
-          accountKey: kwargs.account_key ?? "",
-          messages: kwargs.messages ?? [],
-        };
-        break;
-      case "ticket_role":
-        // The server's answer, on login and on every channel resync. Reading
-        // staff from an inbox arriving was never taken back, so a player who
-        // was once sent one kept the staff queue panel for good.
-        this.staff = !!kwargs.staff || this.assistViewer;
-        this.staffKnown = true;
-        break;
       case "ticket_inbox": {
         // Before the server has stated the role, an inbox is the only sign of
         // staff. After, the role stands: a stray inbox must not hand a player
         // the staff queue.
         if (!this.staffKnown) this.staff = true;
+        if (!this.staff) break;
         const next = kwargs.tickets ?? [];
         if (this.tickets.length) {
           const prev = new Set(this.tickets.map((t: any) => t.id));
@@ -244,11 +254,10 @@ class Chat {
         break;
       }
       case "ticket_thread":
-        // Staff get the help-desk view; a player's own ticket opens in My
-        // Tickets (the staff panel does not exist for them).
+        // The server says which view it built: a staff member's own ticket
+        // comes as an owner view and must never open in the queue.
         if (!kwargs || !kwargs.id) break;
-        if (this.staff) this.ticket = kwargs;
-        else this.myTicket = kwargs;
+        this.showThread(kwargs);
         break;
       case "ticket_alert": {
         const title = `Unclaimed ${kwargs.label || "ticket"}`;
@@ -276,9 +285,11 @@ class Chat {
             },
           ],
         });
-        // Live append to whichever open detail matches (staff or player view).
-        const openStaff = !!this.ticket && kwargs.id === this.ticket.id;
-        const openMine = !!this.myTicket && kwargs.id === this.myTicket.id;
+        // Live append to the open detail of the same view only: an owner's
+        // line list must never take a staff-audience message.
+        const ownerLine = kwargs.audience === "owner";
+        const openStaff = !ownerLine && !!this.ticket && kwargs.id === this.ticket.id;
+        const openMine = ownerLine && !!this.myTicket && kwargs.id === this.myTicket.id;
         if (openStaff) this.ticket = appendTo(this.ticket);
         if (openMine) this.myTicket = appendTo(this.myTicket);
         // Lists show the new status at once: a closed ticket used to read
@@ -287,11 +298,11 @@ class Chat {
           rows.map((t: any) =>
             t.id === kwargs.id ? { ...t, status: kwargs.status ?? t.status, updated: kwargs.ts ?? t.updated } : t,
           );
-        if (this.myTickets.some((t: any) => t.id === kwargs.id)) this.myTickets = restatus(this.myTickets);
-        if (this.tickets.some((t: any) => t.id === kwargs.id)) this.tickets = restatus(this.tickets);
+        if (ownerLine && this.myTickets.some((t: any) => t.id === kwargs.id)) this.myTickets = restatus(this.myTickets);
+        if (!ownerLine && this.tickets.some((t: any) => t.id === kwargs.id)) this.tickets = restatus(this.tickets);
         if (this.queueActive) this.markQueueSeen();
         // Refresh the list's status and preview for the owner's own tickets.
-        if (!this.staff || this.myTickets.some((t: any) => t.id === kwargs.id)) this.myTicketsRev += 1;
+        if (ownerLine) this.myTicketsRev += 1;
         this.announceTicket(kwargs, openStaff, openMine);
         break;
       }
@@ -384,23 +395,65 @@ class Chat {
     }
   }
 
-  // -- assist help-desk (staff) -----------------------------------------
+  // -- terminal echo of a speak line -------------------------------------
+  //
+  // With channel echo off, a speak line typed in the terminal (xooc hi) went
+  // only to the Channels panel. Arm the echo when the line is typed; the
+  // channel line it produces is echoed once, so nothing the server refused
+  // is shown as said.
 
-  openAssistThread(accountId: any): void {
-    connection.sendCommand(`@assistview #${accountId}`);
+  /** Note a line typed in the terminal; a channel speak verb arms its echo. */
+  armEcho(line: string): void {
+    const t = (line || "").trim();
+    const space = t.indexOf(" ");
+    if (space < 0) return;
+    const verb = t.slice(0, space).toLowerCase();
+    const ch = this.channels.find((c) => (c.speakCmd ?? "").toLowerCase() === verb);
+    const text = echoWords(t.slice(space + 1).replace(/^[:;]/, ""));
+    if (ch && text) this.pendingEcho = { key: ch.key, text, at: Date.now() };
   }
 
-  assistReply(accountKeyOrId: any, text: string): void {
-    const t = (text || "").trim();
-    if (t) connection.sendCommand(`xassistreply ${accountKeyOrId} ${t}`);
+  /** Whether this channel line carries the speak line typed in the terminal (consumes it). */
+  takeEcho(key: string, text: string): boolean {
+    const p = this.pendingEcho;
+    if (!p || p.key !== key || Date.now() - p.at > ECHO_WINDOW_MS) return false;
+    // A pose comes back with the speaker's name in front, so the typed words
+    // need only appear in the line.
+    if (!echoWords(String(text ?? "")).includes(p.text)) return false;
+    this.pendingEcho = null;
+    return true;
   }
 
-  assistClaim(accountId: any): void {
-    connection.sendCommand(`@assistclaim #${accountId}`);
+  // -- login ---------------------------------------------------------------
+
+  /** Forget the last account's tickets and role; a new login starts clean. */
+  resetForLogin(): void {
+    this.tickets = [];
+    this.ticket = null;
+    this.ticketHistory = [];
+    this.myTickets = [];
+    this.myTicket = null;
+    this.myTicketsError = "";
+    this.myTicketsSearch = "";
+    this.staff = false;
+    this.staffKnown = false;
+    this.account = null;
+    this.seen = {};
+    this.queueSeen = {};
+    this.assistTab = "mine";
+    this.pendingEcho = null;
   }
 
-  assistStatus(accountId: any, status: string): void {
-    connection.sendCommand(`@assiststatus #${accountId} ${status}`);
+  /** Show a ticket in the Assist tab, in the view the server built it for. */
+  private showThread(t: any): void {
+    if (t.view === "staff" && this.staff) {
+      this.ticket = t;
+      this.assistTab = "queue";
+    } else if (t.view === "owner") {
+      this.myTicket = t;
+      this.markSeen(t);
+      this.assistTab = "mine";
+    }
   }
 
   // -- unified tickets (staff) ------------------------------------------
@@ -410,14 +463,18 @@ class Chat {
   // "Ticket #... closed.") into the terminal beside the panel. The answer now
   // comes back to the panel, with the ticket as it stands.
 
-  openTicket(id: string): void {
-    connection.sendCommand(`@ticket ${id}`);
+  /** Open a staff-view ticket in the queue. */
+  async openTicket(id: string): Promise<TicketResult> {
+    const result = await this.ticketAct(id, "view");
+    if (result.ok && this.ticket?.id === id) this.assistTab = "queue";
+    return result;
   }
   /** One staff action. Resolves to the message to show; the open ticket is refreshed. */
   async ticketAct(id: string, action: string, extra: Record<string, unknown> = {}): Promise<TicketResult> {
     try {
       const r = await connection.request<any>("tickets", "ticket_act", { id, action, ...extra });
-      if (r?.ticket && (!this.ticket || this.ticket.id === r.ticket.id)) this.ticket = r.ticket;
+      if (r?.ticket?.view === "staff" && (action === "view" || !this.ticket || this.ticket.id === r.ticket.id))
+        this.ticket = r.ticket;
       return { ok: true, message: String(r?.message ?? "Done.") };
     } catch (e: any) {
       return { ok: false, message: e?.message || "That did not go through." };
@@ -512,20 +569,28 @@ class Chat {
     }
   }
 
-  // "Last seen" per ticket, so My Tickets can mark a reply the player has not
-  // read. Per browser, like the rest of the panel's conveniences.
-  seen = $state<Record<string, number>>(loadSeen());
+  // "Last seen" per ticket, so the caller's own list can mark a reply they
+  // have not read. Per browser and account (see loadMap).
+  seen = $state<Record<string, number>>({});
 
-  // Staff queue: which tickets this browser has already been shown, so the
-  // tab badge can flag arrivals and updates the viewer has not looked at.
-  queueSeen = $state<Record<string, number>>(loadQueueSeen());
-  /** The queue panel is the focused panel: news there is seen at once. */
-  queueActive = false;
+  // Staff queue: which tickets this account has already been shown here, so
+  // the tab badge can flag arrivals and updates not yet looked at.
+  queueSeen = $state<Record<string, number>>({});
+
+  /** The queue is on screen: news there is seen at once. */
+  get queueActive(): boolean {
+    return this.assistFocused && this.assistTab === "queue";
+  }
 
   /** New or changed staff-queue tickets the viewer has not opened. */
   get queueUnseen(): number {
     if (!this.staff) return 0;
     return this.tickets.filter((t: any) => (t.updated ?? 0) > (this.queueSeen[t.id] ?? 0)).length;
+  }
+
+  /** The caller's own tickets that moved since they last opened them. */
+  get mineUnseen(): number {
+    return this.myTickets.filter((t: any) => this.unseen(t)).length;
   }
 
   /** Total unread across channels (per-channel counts already exist). */
@@ -550,21 +615,13 @@ class Chat {
     }
     if (!changed) return;
     this.queueSeen = next;
-    try {
-      localStorage.setItem(QUEUE_SEEN_KEY, JSON.stringify(next));
-    } catch {
-      /* ignore */
-    }
+    saveMap(QUEUE_SEEN_KEY, this.account, next);
   }
-  private markSeen(t: any): void {
+  markSeen(t: any): void {
     if (!t?.id) return;
     const last = Math.max(t.updated ?? 0, ...(t.messages ?? []).map((m: any) => m.ts ?? 0));
     this.seen = { ...this.seen, [t.id]: last };
-    try {
-      localStorage.setItem(SEEN_KEY, JSON.stringify(this.seen));
-    } catch {
-      /* ignore */
-    }
+    saveMap(SEEN_KEY, this.account, this.seen);
   }
   /** Whether staff (or the system) moved a ticket since the player last opened it. */
   unseen(t: any): boolean {
@@ -585,14 +642,14 @@ class Chat {
       const body = k.origin === "system" ? preview : `${k.sender ?? "Staff"}: ${preview}`;
       toasts.push("ticket", title, body, 12000, true, () => {
         void this.openMyTicket(String(k.id));
-        this.openPanel?.("mytickets");
+        this.openPanel?.("assist");
       });
       notify.ping(title, body, false);
     } else if (k.audience === "assignee" && k.origin === "player" && !openStaff) {
       const title = `Player replied: ${about}`;
       toasts.push("ticket", title, `${k.sender ?? ""}: ${preview}`, 12000, true, () => {
-        this.openTicket(String(k.id));
-        this.openPanel?.("tickets");
+        void this.openTicket(String(k.id));
+        this.openPanel?.("assist");
       });
       notify.ping(title, preview, false);
     }

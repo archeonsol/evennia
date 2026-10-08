@@ -4,6 +4,8 @@
 // A layout is saved per browser, not per account, so one saved from a staff
 // session comes back for whoever logs in next on that browser.
 
+const LKEY = "underspire.layout.v2";
+
 import { mount, tick, unmount } from "svelte";
 
 import Workspace from "../src/components/Workspace.svelte";
@@ -38,34 +40,45 @@ async function settle(frames = 4): Promise<void> {
 }
 const has = (id: string) => !!dock.api?.getPanel(id);
 const title = (id: string) => (dock.api?.getPanel(id) as any)?.title ?? "";
+const assistEl = () => (dock.api?.getPanel("assist") as any)?.view?.content?.element as HTMLElement | undefined;
+const tabs = () => Array.from(assistEl()?.querySelectorAll('[role="tab"]') ?? []).map((b) => b.textContent!.trim());
 
 async function run(): Promise<void> {
-  localStorage.removeItem("underspire.layout.v2");
+  localStorage.removeItem(LKEY);
+  localStorage.removeItem("underspire.assist.added");
   const host = document.getElementById("host")!;
 
-  // A staff session: the queue panel appears and is saved into the layout.
+  // A staff session: the Assist panel appears with its Queue tab.
   let app = mount(Workspace, { target: host });
   await settle();
   chat.handleOob("ticket_role", [], { staff: true });
   await settle();
-  check("staff get the ticket queue", has("tickets"));
-  check("the staff panel is named apart from My Tickets", title("tickets") === "Ticket Queue", title("tickets"));
+  check("staff get the Assist panel", has("assist") && title("assist") === "Assist", title("assist"));
+  dock.api?.getPanel("assist")?.api.setActive();
+  await settle();
+  check("staff see the Mine and Queue tabs", tabs().join(",") === "Mine,Queue", tabs().join(","));
   dock.api?.getPanel("log")?.api.setActive(); // any layout change saves it
   await settle();
-  check("the layout was saved with the queue in it", (localStorage.getItem("underspire.layout.v2") ?? "").includes('"tickets"'));
+  const saved = localStorage.getItem(LKEY) ?? "";
+  check("the layout was saved with Assist in it", saved.includes('"assist"'));
   unmount(app);
 
-  // A player on the same browser: the saved layout brings the panel back ...
-  chat.staff = false;
-  chat.staffKnown = false;
+  // A player on the same browser, with a layout saved before the Assist
+  // panel: the old ticket queue panel becomes Assist, with no Queue tab.
+  localStorage.setItem(LKEY, saved.replaceAll('"assist"', '"tickets"'));
+  chat.resetForLogin();
   app = mount(Workspace, { target: host });
   await settle();
-  check("a restored layout keeps the queue until the role is known", has("tickets"));
-
-  // ... until the server says this session is not staff.
+  check("an old layout gets Assist in place of the ticket queue", has("assist") && !has("tickets"));
   chat.handleOob("ticket_role", [], { staff: false });
   await settle();
-  check("a player loses a queue panel restored from a staff layout", !has("tickets"));
+  dock.api?.getPanel("assist")?.api.setActive();
+  await settle();
+  check("a player sees no Queue tab", tabs().length === 0 && !assistEl()?.querySelector("#assist-queue"), tabs().join(","));
+  dock.api?.getPanel("assist")?.api.close();
+  chat.handleOob("ticket_role", [], { staff: false });
+  await settle();
+  check("a player who closed Assist is not given it again", !has("assist"));
   unmount(app);
 
   const calls: string[] = [];
@@ -104,6 +117,7 @@ async function run(): Promise<void> {
 
   app = mount(SimpleWorkspace, { target: host });
   await settle();
+  check("the simple layout has Assist", simple.has("assist"));
   activity.setRole({ allowed: true, can_puppet: false });
   await settle();
   check("observe authority adds Activity in simple layout", simple.has("activity"));

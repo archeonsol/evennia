@@ -106,10 +106,12 @@ session.onLine((line) => {
 
 // Channel echo: telnet shows channel traffic in the one stream, and the shell
 // used to keep it in the Channels panel only, where a screen reader never
-// heard it. Muted channels stay quiet here as they do there.
+// heard it. Muted channels stay quiet here as they do there. With echo off, a
+// speak line typed in the terminal still shows its own channel line there.
 function echoChannel(kw: Record<string, any>): void {
   const key = String(kw.channel ?? "");
-  if (!settings.channelEcho || !key || chat.muted[key]) return;
+  if (!key || chat.muted[key]) return;
+  if (!settings.channelEcho && !chat.takeEcho(key, String(kw.text ?? ""))) return;
   const name = chat.channels.find((c) => c.key === key)?.name ?? key;
   const sender = renderSender(kw.sender_html, kw.sender);
   const body = renderBody(kw.html, kw.text);
@@ -226,14 +228,11 @@ connection.on("oob", (env) => {
     activity.batch(env.kwargs as any);
     return;
   }
-  if (is(event, "logged_in")) activity.clear();
-  if (
-    event.startsWith("channel_") ||
-    is(event, "channels_list") ||
-    is(event, "assist_inbox") ||
-    is(event, "assist_thread") ||
-    event.startsWith("ticket_")
-  ) {
+  if (is(event, "logged_in")) {
+    activity.clear();
+    chat.resetForLogin();
+  }
+  if (event.startsWith("channel_") || is(event, "channels_list") || event.startsWith("ticket_")) {
     chat.handleOob(event, env.args ?? [], env.kwargs ?? {});
     if (is(event, "channel_msg")) {
       echoChannel(env.kwargs ?? {});
@@ -241,8 +240,8 @@ connection.on("oob", (env) => {
       if (key && !chat.muted[key]) notify.activity();
     }
     // A thread only arrives because the player asked for one (@ticket, or a
-    // click in a ticket list): bring its panel forward.
-    if (is(event, "ticket_thread")) dock.openView(chat.staff ? "tickets" : "mytickets");
+    // click in a ticket list): bring the Assist panel forward.
+    if (is(event, "ticket_thread")) dock.openView("assist");
   } else if (is(event, "ui_component")) {
     const comp = Array.isArray(env.args) ? env.args[0] : env.args;
     if (comp) ui.set(comp);

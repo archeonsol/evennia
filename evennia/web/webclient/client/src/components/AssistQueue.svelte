@@ -1,5 +1,5 @@
 <script lang="ts">
-  // The staff Ticket Queue: find a ticket, read it, act on it.
+  // The Queue tab of the Assist panel: find a ticket, read it, act on it.
   //
   // Actions go through the ticket_act RPC (chat.ticketAct), so each button's
   // answer shows here, not as "Posted." or "Ticket #... closed." in the
@@ -78,10 +78,11 @@
     };
   });
 
-  function open(t: any) {
+  async function open(t: any) {
     feedback = null;
     deciding = null;
-    chat.openTicket(t.id);
+    const result = await chat.openTicket(t.id);
+    if (!result.ok) feedback = result;
   }
   async function loadBug() {
     if (ticket) bugDetail = await chat.loadBugDetail(ticket.id);
@@ -140,6 +141,7 @@
     return `${d.getMonth() + 1}/${d.getDate()} ${p(d.getHours())}:${p(d.getMinutes())}`;
   }
   const isOpen = $derived(!!ticket && (ticket.status === "pending" || ticket.status === "waiting"));
+  const recipient = $derived(ticket ? ticket.requester_name || ticket.account_name || "player" : "");
   // The deep report fields ride in the payload too. The bug block renders them
   // from ticket_bug_detail with its own bounds; dumped inline they are an 8KB
   // traceback with collapsed newlines, one wall of text that buries the thread.
@@ -158,7 +160,6 @@
 
 <div class="tickets">
   <div class="hd">
-    <span class="title glow-text">Ticket queue</span>
     {#if ticket}
       <button class="sh-cmd back" onclick={back}>Back</button>
     {:else}
@@ -317,19 +318,26 @@
         </div>
       </div>
 
-      <div class="reply">
-        <label class="int"><input type="checkbox" bind:checked={internal} /> note</label>
-        <textarea
-          bind:value={reply}
-          onkeydown={onKey}
-          rows="2"
-          class="sh-placeholder"
-          placeholder={internal ? "Staff note" : "Reply to player"}
-          aria-label="ticket reply"
-          aria-describedby="queue-reply-keys"
-        ></textarea>
-        <span id="queue-reply-keys" class="sr-only">Enter sends. Shift+Enter starts a new line.</span>
-      </div>
+      {#if isOpen}
+        <div class="reply">
+          <div class="to" class:note={internal}>
+            {#if internal}Note to staff only{:else}To <b>{recipient}</b>{/if} · #{ticket.short_id}
+            <label class="int"><input type="checkbox" bind:checked={internal} /> note</label>
+          </div>
+          <textarea
+            bind:value={reply}
+            onkeydown={onKey}
+            rows="2"
+            class="sh-placeholder"
+            placeholder={internal ? "Staff note" : `Reply to ${recipient}`}
+            aria-label={internal ? "Staff note" : `Reply to ${recipient}`}
+            aria-describedby="queue-reply-keys"
+          ></textarea>
+          <span id="queue-reply-keys" class="sr-only">Enter sends. Shift+Enter starts a new line.</span>
+        </div>
+      {:else}
+        <div class="closed-note">{ticket.approvable ? "Decided." : "Reopen to reply."}</div>
+      {/if}
     </div>
   {/if}
 </div>
@@ -393,10 +401,14 @@
   .m.note .s::after { content: " (note)"; content: " (note)" / ""; color: var(--alert); font-size: 0.7em; letter-spacing: 0.1em; text-transform: uppercase; }
   .m .sh-plate { margin-right: 0.6ch; }
   .reply {
-    display: flex; align-items: center; gap: 0.8rem; padding: 7px 10px;
+    display: flex; flex-direction: column; gap: 4px; padding: 7px 10px;
     border-top: 1px solid var(--accent); flex: 0 0 auto;
   }
-  .int { color: var(--fg-dim); font-size: 0.6rem; letter-spacing: 0.14em; text-transform: uppercase; display: flex; align-items: center; gap: 4px; }
+  .to { display: flex; align-items: center; gap: 0.8ch; color: var(--fg-dim); font-size: 0.66rem; letter-spacing: 0.06em; }
+  .to b { color: var(--gold); font-weight: normal; }
+  .to.note { color: var(--alert); }
+  .int { margin-left: auto; color: var(--fg-dim); font-size: 0.6rem; letter-spacing: 0.14em; text-transform: uppercase; display: flex; align-items: center; gap: 4px; }
+  .closed-note { padding: 7px 10px; border-top: 1px solid var(--border); color: var(--fg-faint); font-size: 0.64rem; letter-spacing: 0.14em; text-transform: uppercase; }
   .reply textarea {
     flex: 1; background: transparent; border: none; outline: none; resize: vertical;
     color: var(--fg); font-family: inherit; font-size: 0.85rem; caret-color: var(--accent-bright);

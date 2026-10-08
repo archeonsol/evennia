@@ -1,5 +1,6 @@
 <script lang="ts">
-  // A player's own tickets: find one, read it, answer it, file a new one.
+  // The Mine tab of the Assist panel: the caller's own tickets. Find one,
+  // read it, answer it, file a new one.
   //
   // Driven by the my_tickets / my_ticket / my_ticket_act / my_ticket_open
   // RPCs, so nothing a player does here prints into their terminal. Live staff
@@ -153,7 +154,6 @@
 
 <div class="mine">
   <div class="hd">
-    <span class="title glow-text">My tickets</span>
     {#if ticket}
       <button class="sh-cmd back" onclick={back}>Back</button>
     {:else if composing}
@@ -253,6 +253,7 @@
       </div>
       {#if canReply}
         <div class="reply">
+          <div class="to">To <b>staff</b> · #{ticket.short_id}</div>
           <textarea
             class="sh-field sh-placeholder"
             bind:value={reply}
@@ -283,7 +284,8 @@
   .mine { display: flex; flex-direction: column; height: 100%; background: var(--bg-elev); }
   .hd { display: flex; align-items: center; gap: 1ch; padding: 5px 8px 5px 10px; border-bottom: 1px solid var(--accent); flex: 0 0 auto; }
   .hd .sh-cmd { margin-left: auto; }
-  .title { color: var(--accent-bright); text-transform: uppercase; letter-spacing: 0.2em; font-size: 0.74rem; }
+  .to { color: var(--fg-dim); font-size: 0.66rem; letter-spacing: 0.06em; }
+  .to b { color: var(--gold); font-weight: normal; }
   .fb { margin: 0; padding: 4px 10px; font-size: 0.72rem; letter-spacing: 0.04em; color: var(--ok, var(--accent-bright)); border-bottom: 1px solid var(--border); }
   .fb.err, .err { color: var(--alert); }
   .tools { display: flex; flex-direction: column; gap: 4px; padding: 6px 10px; border-bottom: 1px solid var(--border); flex: 0 0 auto; }

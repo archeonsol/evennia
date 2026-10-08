@@ -4,7 +4,7 @@
   import type { DockviewApi } from "dockview-core";
   import { svelteComponents } from "../lib/dockAdapter.svelte";
   import { chat } from "../lib/chat.svelte";
-  import { dock, VIEWS } from "../lib/dock.svelte";
+  import { dock, migrateAssistPanels, VIEWS } from "../lib/dock.svelte";
   import { panelPrefs } from "../lib/panelPrefs.svelte";
   import { PANELS } from "../lib/panelRegistry";
   import { puppets } from "../lib/puppets.svelte";
@@ -19,6 +19,8 @@
   }
   let api = $state<DockviewApi | null>(null);
   const LKEY = "underspire.layout.v2";
+  // Set once a player's layout has been given the Assist panel, so closing it sticks.
+  const ASSIST_ADDED_KEY = "underspire.assist.added";
 
   function applyPanelPrefs() {
     if (!api) return;
@@ -50,6 +52,7 @@
       const saved = localStorage.getItem(LKEY);
       if (saved) {
         dv.fromJSON(JSON.parse(saved));
+        migrateAssistPanels(dv);
         restored = true;
       }
     } catch {
@@ -97,11 +100,10 @@
     });
     // New panels pick up any saved per-panel overrides.
     const addSub = dv.onDidAddPanel(() => applyPanelPrefs());
-    // The queue's badge flags what has not been looked at: focusing the panel
-    // is looking at it, so its arrivals and updates count as seen from then on.
+    // The queue's badge flags what has not been looked at: a focused Assist
+    // panel on its Queue tab is looking at it (see AssistPanel).
     const activeSub = dv.onDidActivePanelChange((e: any) => {
-      chat.queueActive = e.panel?.id === "tickets";
-      if (chat.queueActive) chat.markQueueSeen();
+      chat.assistFocused = e.panel?.id === "assist";
     });
 
     return () => {
@@ -153,7 +155,7 @@
     const flagged: Record<string, [string, boolean]> = {
       puppets: ["Puppets", puppets.totalUnread > 0],
       chat: ["Channels", chat.channelsUnseen > 0],
-      tickets: [VIEWS.tickets.title, chat.queueUnseen > 0],
+      assist: [VIEWS.assist.title, chat.queueUnseen > 0 || chat.mineUnseen > 0],
     };
     for (const [id, [base, hot]] of Object.entries(flagged)) {
       const panel: any = api.getPanel(id);
@@ -169,29 +171,29 @@
     }
   });
 
-  // Staff-only: the ticket queue panel follows the server's ticket_role. A
-  // saved layout (or a named preset) can hold the panel from a staff session
-  // on this browser; once the server says this session is not staff, it goes.
+  // Staff are given the Assist panel at every login, since the queue lives
+  // there. A player is given it once per browser, so one who closes it is not
+  // handed it again.
   $effect(() => {
-    if (!api) return;
-    const panel: any = api.getPanel("tickets");
-    if (chat.staff) {
-      try {
-        if (!panel) {
-          api.addPanel({
-            id: "tickets",
-            component: "tickets",
-            title: VIEWS.tickets.title,
-            position: api.getPanel("chat")
-              ? { referencePanel: "chat", direction: "within" }
-              : undefined,
-          });
-        }
-      } catch {
-        /* ignore */
-      }
-    } else if (chat.staffKnown && panel) {
-      panel.api.close();
+    if (!api || !chat.staffKnown || api.getPanel("assist")) return;
+    let added = false;
+    try {
+      added = localStorage.getItem(ASSIST_ADDED_KEY) === "1";
+    } catch {
+      /* ignore */
+    }
+    if (added && !chat.staff) return;
+    api.addPanel({
+      id: "assist",
+      component: "assist",
+      title: VIEWS.assist.title,
+      inactive: true,
+      position: api.getPanel("chat") ? { referencePanel: "chat", direction: "within" } : undefined,
+    });
+    try {
+      localStorage.setItem(ASSIST_ADDED_KEY, "1");
+    } catch {
+      /* ignore */
     }
   });
 </script>
