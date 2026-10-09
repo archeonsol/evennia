@@ -9,6 +9,7 @@ moment it is most wanted.
 """
 
 import json
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from django.test import SimpleTestCase, TestCase, override_settings
@@ -210,6 +211,167 @@ class TestMetricsProducer(SimpleTestCase):
         self.assertFalse(first[0]["available"])
         self.assertIn("not installed", first[0]["reason"])
         self.assertEqual(second, [])
+
+
+class _Collector:
+    """A Prometheus collector that counts how often it was asked for its metric."""
+
+    def __init__(self, name, value=1.0):
+        self.name = name
+        self.value = value
+        self.collected = 0
+
+    def _family(self):
+        from prometheus_client.core import GaugeMetricFamily
+
+        return GaugeMetricFamily(self.name, "a test metric")
+
+    def describe(self):
+        return [self._family()]
+
+    def collect(self):
+        self.collected += 1
+        family = self._family()
+        family.add_metric([], self.value)
+        yield family
+
+
+class TestRestrictedCollectionLosesNothing(SimpleTestCase):
+    """Asking only the engine's collectors must return what the full collection would have."""
+
+    def test_the_same_series_come_back_as_from_collecting_everything(self):
+        try:
+            from prometheus_client import REGISTRY
+        except ImportError:
+            self.skipTest("prometheus_client is not installed")
+        from evennia.server import prometheus_metrics
+
+        if not prometheus_metrics._init_metrics():
+            self.skipTest("metrics are disabled")
+        prometheus_metrics.record_gc_pause(2, 0.01)  # a labelled series, so labels are compared
+        prometheus_metrics.record_reactor_stall(0.3, "gil")
+
+        def series(samples):
+            return {(s["name"], tuple(sorted(s["labels"].items()))) for s in samples}
+
+        everything = [
+            {"name": sample.name, "labels": dict(sample.labels or {})}
+            for metric in REGISTRY.collect()
+            if metric.name.startswith("evennia_")
+            for sample in metric.samples
+        ]
+        restricted = feed._collect_samples(REGISTRY, "evennia_")
+
+        self.assertGreater(len(everything), 50)
+        self.assertEqual(series(restricted), series(everything))
+
+
+class TestMetricsSampling(SimpleTestCase):
+    """The feed reads the engine's own metrics, once for everyone watching."""
+
+    def setUp(self):
+        super().setUp()
+        try:
+            import prometheus_client
+            from prometheus_client import CollectorRegistry
+        except ImportError:
+            self.skipTest("prometheus_client is not installed")
+        self.prometheus_client = prometheus_client
+        self.registry = CollectorRegistry()
+        feed._shared_metrics.clear()
+        self.addCleanup(feed._shared_metrics.clear)
+        self.clock = [100.0]
+        for patcher in (
+            patch.object(prometheus_client, "REGISTRY", self.registry),
+            patch.object(feed, "_monotonic", lambda: self.clock[0]),
+        ):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def _register(self, name, value=1.0):
+        collector = _Collector(name, value)
+        self.registry.register(collector)
+        return collector
+
+    def test_samples_carry_the_name_labels_and_value(self):
+        self._register("evennia_queue_depth", 3.0)
+
+        payload = MetricsProducer().sample()[0]
+
+        self.assertTrue(payload["available"])
+        self.assertEqual(
+            payload["samples"],
+            [{"name": "evennia_queue_depth", "labels": {}, "value": 3.0}],
+        )
+
+    def test_only_the_engines_own_collectors_are_asked(self):
+        """Each stream used to run every collector in the process, five times a minute."""
+        engine = self._register("evennia_queue_depth", 3.0)
+        other = self._register("django_http_requests_total", 9.0)
+
+        payload = MetricsProducer().sample()[0]
+
+        self.assertEqual({s["name"] for s in payload["samples"]}, {"evennia_queue_depth"})
+        self.assertEqual((engine.collected, other.collected), (1, 0))
+
+    def test_a_registry_that_cannot_list_its_names_is_collected_whole_and_filtered(self):
+        from prometheus_client.core import GaugeMetricFamily
+
+        engine, other = GaugeMetricFamily("evennia_a", "a"), GaugeMetricFamily("other_b", "b")
+        engine.add_metric([], 1.0)
+        other.add_metric([], 2.0)
+        bare = SimpleNamespace(collect=lambda: iter([engine, other]))
+
+        with patch.object(self.prometheus_client, "REGISTRY", bare):
+            payload = MetricsProducer().sample()[0]
+
+        self.assertEqual([s["name"] for s in payload["samples"]], ["evennia_a"])
+
+    def test_streams_share_one_sample_inside_half_an_interval(self):
+        engine = self._register("evennia_queue_depth")
+        first, second = MetricsProducer(), MetricsProducer()
+
+        first.sample()
+        self.clock[0] += 1.0
+        second.sample()
+        self.assertEqual(engine.collected, 1)
+
+        self.clock[0] += 2.0  # three seconds after the first
+        second.sample()
+
+        self.assertEqual(engine.collected, 2)
+
+    def test_a_sample_is_not_shared_with_a_different_registry(self):
+        """A registry swapped under the feed (a test, a reload) must not be served stale data."""
+        from prometheus_client import CollectorRegistry
+
+        self._register("evennia_queue_depth", 1.0)
+        MetricsProducer().sample()
+        other = CollectorRegistry()
+        other.register(_Collector("evennia_queue_depth", 7.0))
+
+        with patch.object(self.prometheus_client, "REGISTRY", other):
+            payload = MetricsProducer().sample()[0]
+
+        self.assertEqual(payload["samples"][0]["value"], 7.0)
+
+    def test_concurrent_streams_do_not_collect_twice(self):
+        import threading
+
+        engine = self._register("evennia_queue_depth")
+        results = []
+
+        def watch():
+            results.append(MetricsProducer().sample()[0]["samples"])
+
+        threads = [threading.Thread(target=watch) for _ in range(6)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+
+        self.assertEqual(engine.collected, 1)
+        self.assertEqual(len(results), 6)
 
 
 class TestLogProducer(SimpleTestCase):
