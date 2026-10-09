@@ -899,15 +899,20 @@ ENGINE_GC_FREEZE_AT_START = True
 # so a policy that only collects the young generation leaks them. A deep clean runs:
 #  - when the number of blocks the interpreter has allocated has grown
 #    ENGINE_GC_RECLAIM_GROWTH_PERCENT percent since the last full collection
-#    (0 = never). A collection that finds little (the growth was live data) doubles
-#    the growth the next one waits for, up to eight times;
+#    (0 = never), but by no more than ENGINE_GC_RECLAIM_GROWTH_MAX_BLOCKS blocks
+#    (0 = no cap): a clean costs what the garbage it finds costs, about 1.8 us an
+#    object and 2.5 blocks to an object on a production host, so on a large heap a
+#    percentage alone makes every pause longer than the one before. A collection that
+#    finds little (the growth was live data) doubles the growth the next one waits
+#    for, up to eight times;
 #  - on request (evennia.utils.gc_policy.request_reclaim), never closer than
 #    ENGINE_GC_RECLAIM_MIN_INTERVAL seconds to the previous full collection;
 #  - as a backstop, every ENGINE_GC_DEEP_CLEAN_INTERVAL seconds with no other full
-#    collection (0 = never). The backstop waits for a moment with no sessions
-#    connected and runs anyway once ENGINE_GC_DEEP_CLEAN_MAX_DEFER seconds have
-#    passed since the last one.
+#    collection (0 = never; with ENGINE_GC_REFREEZE, no other thaw, see below). The
+#    backstop waits for a moment with no sessions connected and runs anyway once
+#    ENGINE_GC_DEEP_CLEAN_MAX_DEFER seconds have passed since the last one.
 ENGINE_GC_RECLAIM_GROWTH_PERCENT = 15
+ENGINE_GC_RECLAIM_GROWTH_MAX_BLOCKS = 750000
 ENGINE_GC_RECLAIM_MIN_INTERVAL = 300
 ENGINE_GC_DEEP_CLEAN_INTERVAL = 21600
 ENGINE_GC_DEEP_CLEAN_MAX_DEFER = 43200
@@ -917,9 +922,16 @@ ENGINE_GC_DEEP_CLEAN_MAX_DEFER = 43200
 # cycle is never freed, so the two backstop cleans (reasons "scheduled" and "overdue")
 # thaw the permanent generation first, collect everything, and freeze again: a cycle
 # that was alive when frozen and has died since is freed at the next backstop, not
-# never. Leave off if the idmapper evicts often (a small IDMAPPER_CACHE_MAXSIZE), since
-# every evicted instance that was frozen waits for a backstop.
+# never. With this on, the backstop's interval is counted from the last thaw, not from
+# any full collection: growth cleans can come every half hour, and a clock they restart
+# never runs. Leave off if the idmapper evicts often (a small IDMAPPER_CACHE_MAXSIZE),
+# since every evicted instance that was frozen waits for a backstop.
 ENGINE_GC_REFREEZE = False
+# With ENGINE_GC_REFREEZE: bring the thaw forward, to the next moment with no sessions
+# connected, once the blocks held right after a clean (evennia_gc_blocks_floor) have
+# risen this many times above where the last thaw left them. A floor that climbs is live
+# growth or frozen garbage, and a thaw tells the two apart. 0 (or 1) = by schedule only.
+ENGINE_GC_THAW_FLOOR_FACTOR = 1.5
 # Log any single collection that pauses the process at least this long (ms; 0 = off).
 ENGINE_GC_PAUSE_WARN_MS = 50
 # Attach trace_id to each command for structured logs (evennia.utils.command_trace).

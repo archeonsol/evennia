@@ -18,6 +18,17 @@ A stall is not always the code that was running. When the collector accounts for
 most of it (see `evennia.utils.gc_policy`) the warning names the collection, with
 its generation and length, instead of blaming whatever frame happened to be on the
 stack when the pause landed.
+
+Nor is it always the loop's own code that is slow. A thread that holds the GIL
+through one long C call (counting a million objects, a big `json.dumps`, a regex)
+leaves the loop thread waiting at whatever frame last let go of it, which is
+usually the event loop's own idle wait: the stack names no culprit. The watchdog
+therefore also reads how much CPU every thread used between heartbeats. A stall in
+which the loop used little and one other thread used most of the window is reported
+as a GIL wait and names that thread, and the live stack sample dumps the stacks of
+the threads that were burning CPU beside the loop's. (This found a metrics gauge
+that kept the loop waiting for half a second every few seconds, while the stack of
+every stall said `loop.run_forever()`.)
 """
 
 import os
@@ -38,6 +49,19 @@ from evennia.utils import clock, gc_policy, logger
 _INTERVAL_FRACTION = 0.25
 _MIN_INTERVAL = 0.025  # seconds
 _MAX_INTERVAL = 1.0  # seconds
+
+#: A thread other than the loop is "busy" in a stalled window if it used at least this
+#: share of the window in CPU.
+_BUSY_SHARE = 0.25
+#: The loop counts as waiting, not working, if it used no more than this share of the
+#: window in CPU.
+_LOOP_IDLE_SHARE = 0.3
+#: The GIL is blamed on a thread only if it used at least this share of the window.
+_HOLDER_SHARE = 0.5
+#: Threads named in one warning, busiest first.
+_MAX_NAMED_THREADS = 3
+#: Innermost frames of a busy thread's stack kept in the live sample.
+_BUSY_STACK_FRAMES = 12
 
 _ENGINE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _LIBRARY_DIRS = tuple(
@@ -62,6 +86,33 @@ def _short_path(filename):
             # forward slashes everywhere, so a log line reads the same on any host
             return os.path.relpath(path, root).replace(os.sep, "/")
     return path
+
+
+def _thread_cpu_seconds():
+    """Return the CPU seconds each live thread has used so far, by thread ident.
+
+    Reads the clocks the operating system keeps per thread, so a reading costs one
+    system call per thread and needs nothing from the thread being read. Threads that
+    ended between listing and reading are left out.
+
+    Returns:
+        dict: ``{ident: seconds}``; empty where the platform keeps no per-thread
+        clock (Windows), which turns GIL attribution off rather than guessing.
+    """
+    clock_of = getattr(time, "pthread_getcpuclockid", None)
+    read = getattr(time, "clock_gettime", None)
+    if clock_of is None or read is None:
+        return {}
+    readings = {}
+    for thread in threading.enumerate():
+        ident = thread.ident
+        if ident is None:
+            continue
+        try:
+            readings[ident] = read(clock_of(ident))
+        except (OSError, ValueError, OverflowError):
+            continue
+    return readings
 
 
 def _frame_label(frame):
@@ -115,6 +166,10 @@ class ReactorStallWatchdog:
         _gc_probe (callable, optional): `(start, end) -> (seconds, longest)`
             reporting collector time inside a window on the same clock,
             injectable for testing. Defaults to `gc_policy.pause_overlap`.
+        _cpu_probe (callable, optional): `() -> {thread_ident: cpu_seconds}`
+            reading the CPU every live thread has used so far, injectable for
+            testing. Defaults to a reader of the operating system's per-thread
+            clocks, which reads nothing where there are none.
 
     """
 
@@ -125,6 +180,7 @@ class ReactorStallWatchdog:
         sample_threshold_ms=None,
         _now=time.perf_counter,
         _gc_probe=None,
+        _cpu_probe=None,
     ):
         if threshold_ms is None:
             threshold_ms = getattr(settings, "REACTOR_STALL_WARNING_MS", 200)
@@ -142,6 +198,9 @@ class ReactorStallWatchdog:
         self.sample_threshold_ms = float(sample_threshold_ms or 1500.0)
         self._now = _now
         self._gc_probe = _gc_probe or gc_policy.pause_overlap
+        self._cpu_probe = _cpu_probe or _thread_cpu_seconds
+        self._cpu_failed = False
+        self._cpu_base = None
         self._last = None
         self._last_heartbeat = None
         self._loop = clock.make_looping(self._tick)
@@ -177,6 +236,7 @@ class ReactorStallWatchdog:
         self._last = None
         with self._state_lock:
             self._last_heartbeat = self._now()
+            self._cpu_base = None
             self._heartbeat_episode += 1
             self._sample_episode = None
             self._last_sample_log_time = 0.0
@@ -214,6 +274,118 @@ class ReactorStallWatchdog:
             now = self._now()
             self._note_stalled_work(now)
             self._sample_stall(now)
+
+    def _cpu_now(self):
+        """Read every thread's CPU time now; an empty reading if the probe fails.
+
+        The heartbeat runs on the loop and must not fail because a diagnostic did. A
+        failure is logged once and attribution stays off.
+        """
+        try:
+            return self._cpu_probe() or {}
+        except Exception:
+            if not self._cpu_failed:
+                self._cpu_failed = True
+                logger.log_trace("reactor watchdog: the per-thread CPU probe failed")
+            return {}
+
+    def _busy_threads(self, before, after, wall):
+        """Compare two CPU readings taken ``wall`` seconds apart.
+
+        A thread that started after ``before`` was taken used all of its CPU in the
+        window; one that ended before ``after`` cannot be named. The watchdog's own
+        sampler thread is left out.
+
+        Args:
+            before (dict): Per-thread CPU seconds at the start of the window.
+            after (dict): The same at its end.
+            wall (float): Seconds between the two readings.
+
+        Returns:
+            tuple: ``(loop_cpu, busy)``. ``loop_cpu`` is the CPU the loop thread used
+            (``None`` if either reading lacks it); ``busy`` is a list of ``(name,
+            cpu_seconds, ident)`` for every other thread that used at least a
+            quarter of the window, busiest first.
+        """
+        if not before or not after or wall <= 0:
+            return None, []
+        loop_id = self._target_thread_id
+        sampler = self._sampler_thread
+        skip = {loop_id, sampler.ident if sampler is not None else None}
+        used = {ident: cpu - before.get(ident, 0.0) for ident, cpu in after.items()}
+        loop_cpu = used.get(loop_id) if loop_id in before and loop_id in after else None
+        names = {thread.ident: thread.name for thread in threading.enumerate()}
+        busy = sorted(
+            (
+                (cpu, ident)
+                for ident, cpu in used.items()
+                if ident not in skip and cpu >= _BUSY_SHARE * wall
+            ),
+            reverse=True,
+        )
+        return loop_cpu, [(names.get(ident, f"thread {ident}"), cpu, ident) for cpu, ident in busy]
+
+    @staticmethod
+    def _starved(loop_cpu, busy, wall):
+        """Whether a window looks like the loop waiting on the GIL: it idled, one thread did not."""
+        return (
+            loop_cpu is not None
+            and loop_cpu <= _LOOP_IDLE_SHARE * wall
+            and bool(busy)
+            and busy[0][1] >= _HOLDER_SHARE * wall
+        )
+
+    @staticmethod
+    def _describe_threads(busy):
+        """Name the busiest threads and where each is now, as one clause."""
+        frames = sys._current_frames()
+        parts = []
+        for name, cpu, ident in busy[:_MAX_NAMED_THREADS]:
+            frame = frames.get(ident)
+            try:
+                where = _work_label(frame) if frame is not None else "no live stack"
+            except Exception:
+                where = "a stack that could not be read"
+            parts.append(f"{name} used {cpu * 1000.0:.0f}ms of CPU, now at {where}")
+        return "; ".join(parts)
+
+    def _busy_stacks(self, now):
+        """Return the stacks of the other threads that used CPU since the last heartbeat.
+
+        This runs on the sampler thread inside the stall report, so it must not raise:
+        a failure here would end the sampler, and with it every later live sample.
+
+        Args:
+            now (float): The sampler's clock reading.
+
+        Returns:
+            str: Log text, or an empty string when there is no baseline, no busy thread
+            or the stacks could not be read.
+        """
+        try:
+            with self._state_lock:
+                before, last = self._cpu_base, self._last_heartbeat
+            if not before or last is None:
+                return ""
+            _loop_cpu, busy = self._busy_threads(before, self._cpu_now(), now - last)
+            if not busy:
+                return ""
+            frames = sys._current_frames()
+            parts = []
+            for name, cpu, ident in busy[:_MAX_NAMED_THREADS]:
+                frame = frames.get(ident)
+                stack = (
+                    "".join(traceback.format_stack(frame, limit=_BUSY_STACK_FRAMES))
+                    if frame is not None
+                    else "  (no live stack)\n"
+                )
+                parts.append(f"{name} used {cpu * 1000.0:.0f}ms of CPU, stack:\n{stack}")
+            return (
+                "Threads that used CPU while the loop waited (it may be waiting for the GIL):\n"
+                + "".join(parts)
+            )
+        except Exception:
+            return ""
 
     def _loop_frame(self):
         """The loop thread's current frame, or None."""
@@ -276,6 +448,7 @@ class ReactorStallWatchdog:
             logger.log_warn(
                 f"Live reactor stall in progress (~{elapsed_s * 1000.0:.0f}ms blocked) "
                 f"at {_work_label(frame)}! Live IO thread execution stack:\n{stack_str}"
+                f"{self._busy_stacks(now)}"
             )
             return True
         return False
@@ -283,23 +456,42 @@ class ReactorStallWatchdog:
     def _tick(self) -> None:
         """Measure the gap since the last tick; warn if it exceeds threshold."""
         now = self._now()
+        cpu = self._cpu_now()
         with self._state_lock:
             ended = self._heartbeat_episode
             work = (
                 self._stall_work[1] if self._stall_work and self._stall_work[0] == ended else None
             )
+            cpu_before, self._cpu_base = self._cpu_base, cpu
             self._last_heartbeat = now
             self._heartbeat_episode += 1
         if self._last is not None:
             stall_ms = (now - self._last - self.interval) * 1000.0
             if stall_ms > self.threshold_ms:
-                self._report_stall(stall_ms, self._last + self.interval, now, work)
+                self._report_stall(stall_ms, self._last + self.interval, now, work, cpu_before, cpu)
         self._last = now
 
-    def _report_stall(self, stall_ms, window_start, window_end, work) -> None:
-        """Log one over-threshold stall, naming the collector when it caused it."""
+    def _report_stall(
+        self, stall_ms, window_start, window_end, work, cpu_before=None, cpu_now=None
+    ) -> None:
+        """Log one over-threshold stall, naming the collector or the GIL holder when one caused it.
+
+        Args:
+            stall_ms (float): How long the turn blocked, beyond its interval.
+            window_start (float): Start of the blocked span on the watchdog clock.
+            window_end (float): End of it.
+            work (str): Where the loop was sampled during the stall, if it was.
+            cpu_before (dict, optional): Per-thread CPU at the last heartbeat.
+            cpu_now (dict, optional): Per-thread CPU at this one.
+        """
         paused, longest = self._gc_probe(window_start, window_end)
         cause = "work" if work else "unknown"
+        wall = window_end - window_start + self.interval
+        try:
+            loop_cpu, busy = self._busy_threads(cpu_before, cpu_now, wall)
+        except Exception:
+            # Attribution is a bonus; the stall must still be reported without it.
+            loop_cpu, busy = None, []
         if longest is not None and paused * 1000.0 >= stall_ms * 0.5:
             cause = "gc"
             start, end, generation, collected = longest
@@ -316,6 +508,15 @@ class ReactorStallWatchdog:
                     collected,
                     running,
                 )
+            )
+        elif self._starved(loop_cpu, busy, wall):
+            cause = "gil"
+            where = f" The loop was at {work}." if work else ""
+            message = (
+                "Reactor stall: a single reactor turn blocked for ~%.0fms (threshold %.0fms) "
+                "most likely waiting for the GIL: %s.%s Keep that work short, or move it out "
+                "of the game process."
+                % (stall_ms, self.threshold_ms, self._describe_threads(busy), where)
             )
         else:
             share = (

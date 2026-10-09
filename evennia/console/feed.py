@@ -40,13 +40,19 @@ A stream exists only while somebody is watching it, so an unattended console
 costs nothing at all -- there is no polling loop and no unconditional write.
 While one is open, each producer samples on its own interval, and every
 producer here reads plain state: no producer touches the IO owner, so the feed
-keeps working when the game server is down, exactly like the panels do.
+keeps working when the game server is down, exactly like the panels do. The
+metrics producer asks only the engine's own collectors, and the streams that are
+open share one sample for half an interval, so a second console costs next to
+nothing. (Each used to collect every metric in the process every five seconds,
+with the GIL held, and one of them kept the game loop waiting for half a second
+each time.)
 
 """
 
 from __future__ import annotations
 
 import json
+import threading
 import time
 from dataclasses import dataclass, field
 
@@ -157,12 +163,80 @@ class HealthProducer(Producer):
         return [{**state, "changed": changed}]
 
 
+#: Seam for tests: the clock a shared metrics sample is aged by.
+_monotonic = time.monotonic
+
+#: The last metrics sample per name prefix, as ``(registry, taken_at, samples)``. Every
+#: open stream reads the same process, so they share one copy instead of each
+#: collecting the registry every few seconds.
+_shared_metrics: dict = {}
+_shared_metrics_lock = threading.Lock()
+
+
+def _prefixed_names(registry, prefix):
+    """Return the sample names ``registry`` holds under ``prefix``, or ``None``.
+
+    ``None`` means the registry cannot list its names (another implementation, or a
+    ``prometheus_client`` that no longer keeps the index), and the caller collects it
+    whole.
+    """
+
+    try:
+        return [name for name in list(registry._names_to_collectors) if name.startswith(prefix)]
+    except (AttributeError, RuntimeError, TypeError):
+        return None
+
+
+def _collect_samples(registry, prefix):
+    """Collect only the metrics under ``prefix`` and flatten them to JSON-safe dicts.
+
+    ``registry.collect()`` runs every collector in the process (request histograms,
+    process and platform readings, every function gauge) to keep a few dozen
+    families, and it does so with the GIL held. A restricted registry asks only the
+    collectors that provide the names wanted.
+    """
+
+    names = _prefixed_names(registry, prefix)
+    source = registry if names is None else registry.restricted_registry(names)
+    samples = []
+    for metric in source.collect():
+        if not metric.name.startswith(prefix):
+            continue
+        for sample in metric.samples:
+            samples.append(
+                {
+                    "name": sample.name,
+                    "labels": dict(sample.labels or {}),
+                    "value": sample.value,
+                }
+            )
+    return samples
+
+
+def _shared_samples(registry, prefix, max_age):
+    """Return the samples under ``prefix``, collecting only if the held copy is too old.
+
+    One stream at a time refreshes the copy; the rest wait for it and reuse it.
+    """
+
+    with _shared_metrics_lock:
+        held = _shared_metrics.get(prefix)
+        if held is not None and held[0] is registry and _monotonic() - held[1] < max_age:
+            return held[2]
+        samples = _collect_samples(registry, prefix)
+        _shared_metrics[prefix] = (registry, _monotonic(), samples)
+        return samples
+
+
 class MetricsProducer(Producer):
     """Emit current values from the Prometheus registry.
 
     Optional by construction: the metrics module already degrades when
     ``prometheus_client`` is absent, so this reports that once and goes quiet
     rather than failing every tick.
+
+    Only the engine's own collectors are asked, and streams share a sample for up
+    to half an interval, so two consoles cost one collection, not two.
     """
 
     key = "metrics"
@@ -191,18 +265,7 @@ class MetricsProducer(Producer):
                 }
             ]
 
-        samples = []
-        for metric in REGISTRY.collect():
-            if not metric.name.startswith(self.prefix):
-                continue
-            for sample in metric.samples:
-                samples.append(
-                    {
-                        "name": sample.name,
-                        "labels": dict(sample.labels or {}),
-                        "value": sample.value,
-                    }
-                )
+        samples = _shared_samples(REGISTRY, self.prefix, self.interval / 2.0)
         return [{"available": True, "samples": samples}]
 
 

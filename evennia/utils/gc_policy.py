@@ -37,17 +37,32 @@ The ``managed`` policy keeps what the collector is good at and drops what costs:
   the system scheduler (:func:`deep_clean_if_due`). Growth is counted in allocated
   blocks, not process size: freed memory goes back to the allocator's pool, not to
   the operating system, so the process stops growing while garbage fills the pool
-  and a trigger on its size would wait ever longer. A clean that finds little (the
-  growth was live data, such as a cache filling) doubles the growth the next one
-  waits for, so it does not cost a pause every few minutes. Each reports what it
-  found and the process size before and after, so an operator can see whether the
-  trigger is right. Code that knows it just dropped a great deal can ask for one
-  with :func:`request_reclaim`.
+  and a trigger on its size would wait ever longer. The wait is capped at
+  ``ENGINE_GC_RECLAIM_GROWTH_MAX_BLOCKS``: a clean costs what the garbage it finds
+  costs, so on a big heap a percentage alone would make each pause longer than the
+  last. A clean that finds little (the growth was live data, such as a cache
+  filling) doubles the growth the next one waits for, so it does not cost a pause
+  every few minutes. Each reports what it found and the process size before and
+  after, so an operator can see whether the trigger is right. Code that knows it
+  just dropped a great deal can ask for one with :func:`request_reclaim`.
 * **Refreeze.** Optionally (``ENGINE_GC_REFREEZE``) the survivors of each full
   collection are frozen too, so the next one marks only what was allocated since
   and costs a few percent of the first. What that gives up is the freeing of a
   cycle that was alive when frozen and dies later, so the two backstop collections
-  thaw the permanent generation, collect all of it, and freeze again.
+  thaw the permanent generation, collect all of it, and freeze again. The backstop
+  is timed from the last thaw, not from the last full collection of any kind:
+  growth cleans can come every half hour, and a clock that each of them restarted
+  never ran. (On production the frozen heap grew from 1.7 to 4.8 million objects
+  and the process from 0.9 to 2.1 GB in two days that way.) A floor, the blocks
+  held right after a clean, that has risen ``ENGINE_GC_THAW_FLOOR_FACTOR`` times
+  above where the last thaw left it brings the thaw forward to the next moment
+  with no one connected.
+
+Counting the frozen generation visits every object in it with the GIL held, about
+100 ns each on a production host: half a second for 4.7 million objects, during which
+the game reads no input. The count is therefore taken only where a full pass over the
+heap is already being paid for (the boot freeze and a thaw), and everything else, the
+metrics scrape included, reads that figure with :func:`frozen_count`.
 
 Under Python 3.14 a collection's ``generation`` is 0 for a young-only pass (what
 ``gc.collect(0)`` runs), 1 for an increment (the young generation plus a slice of
@@ -112,6 +127,9 @@ class _State:
         self.booted = False
         self.was_enabled = True
         self.last_deep_clean = 0.0
+        self.last_thaw = 0.0
+        self.thaw_floor = None
+        self.frozen = 0
         self.last_reclaim = None
         self.pending = None
         self.blocks_floor = None
@@ -199,6 +217,34 @@ def pause_overlap(start, end):
         if longest is None or pause[1] - pause[0] > longest[1] - longest[0]:
             longest = pause
     return total, longest
+
+
+def frozen_count():
+    """Return how many objects were frozen out of collection, as of the last boot or thaw.
+
+    Counting the frozen generation walks every object in it with the GIL held, so it
+    is measured only where a full pass over the heap is already being paid for (the
+    boot freeze and a thaw) and this reads what they found. A growth clean freezes
+    more without recounting, so between thaws this lags; :func:`blocks_floor` is the
+    figure that keeps moving.
+
+    Returns:
+        int: Objects frozen when last counted; ``0`` before the policy has frozen any.
+    """
+    return _state.frozen
+
+
+def blocks_floor():
+    """Return the blocks the interpreter held right after the last full collection.
+
+    The floor rises when objects that should have died stay alive (a cache filling,
+    or a cycle frozen alive that has died since), which is what the thaw rule watches.
+    Reading it costs nothing: it was taken when the collection ended.
+
+    Returns:
+        int: Allocated blocks; ``0`` before any full collection.
+    """
+    return int(_state.blocks_floor or 0)
 
 
 def _warn_if_slow(seconds, generation, collected, now):
@@ -332,10 +378,11 @@ def _manage(loop):
         collected = _intentional_collect()
         if freeze:
             gc.freeze()
+            _state.frozen = gc.get_freeze_count()
         _state.booted = True
-        _state.last_deep_clean = time.time()
+        _state.last_deep_clean = _state.last_thaw = time.time()
         _state.last_reclaim = _now()
-        _state.blocks_floor = _allocated_blocks()
+        _state.blocks_floor = _state.thaw_floor = _allocated_blocks()
         logger.log_info(
             f"gc: boot heap settled in {(_now() - started) * 1000:.0f}ms "
             f"({collected} unreachable objects collected{', survivors frozen' if freeze else ''})."
@@ -425,12 +472,21 @@ def deep_clean(reason="manual"):
     collected = _intentional_collect()
     if refreeze:
         gc.freeze()
+    if thaw:
+        # A thaw has just marked every object, so counting what it froze costs a
+        # fraction of the pass and is inside the pause being reported. A growth clean
+        # does not recount: the walk is O(frozen) with the GIL held, a pause of its own
+        # for a figure that the floor already tracks.
+        _state.frozen = gc.get_freeze_count()
     ended = _now()
     seconds = ended - started
     _state.last_deep_clean = time.time()
     _state.last_reclaim = ended
     rss_after, blocks_after = _rss_mb(), _allocated_blocks()
     _state.blocks_floor = blocks_after
+    if thaw:
+        _state.last_thaw = _state.last_deep_clean
+        _state.thaw_floor = blocks_after
     if collected < _USEFUL_OBJECTS:
         _state.growth_factor = min(_state.growth_factor * 2, _MAX_GROWTH_FACTOR)
     else:
@@ -440,7 +496,7 @@ def deep_clean(reason="manual"):
         if rss_before is not None and rss_after is not None
         else ""
     )
-    frozen = f", {gc.get_freeze_count()} frozen" if refreeze else ""
+    frozen = f", {_state.frozen} frozen" if thaw else ""
     logger.log_info(
         f"gc deep clean ({reason}): {collected} unreachable objects collected "
         f"in {seconds * 1000:.0f}ms (allocated blocks {blocks_before} -> {blocks_after}"
@@ -482,12 +538,22 @@ def _reclaim_min_interval():
 
 
 def _grown_enough():
-    """Whether the object heap has grown enough since the last full collection to ask for one."""
+    """Whether the object heap has grown enough since the last full collection to ask for one.
+
+    The wait is ``ENGINE_GC_RECLAIM_GROWTH_PERCENT`` of the floor, but never more than
+    ``ENGINE_GC_RECLAIM_GROWTH_MAX_BLOCKS``: a clean costs about what the garbage it
+    finds costs (on production 1.8 us an object, 2.5 blocks to an object), so a
+    percentage of a heap that has grown would make each pause longer than the last.
+    A clean that found little widens whichever of the two applies.
+    """
     percent = float(getattr(settings, "ENGINE_GC_RECLAIM_GROWTH_PERCENT", 15) or 0)
     if percent <= 0 or not _state.blocks_floor:
         return False
-    limit = _state.blocks_floor * (1.0 + percent * _state.growth_factor / 100.0)
-    return _allocated_blocks() >= limit
+    wait = _state.blocks_floor * percent / 100.0
+    cap = float(getattr(settings, "ENGINE_GC_RECLAIM_GROWTH_MAX_BLOCKS", 750_000) or 0)
+    if cap > 0:
+        wait = min(wait, cap)
+    return _allocated_blocks() >= _state.blocks_floor + wait * _state.growth_factor
 
 
 def _reclaim_if_needed():
@@ -520,6 +586,21 @@ def _connected_sessions():
     return len(handler) if handler is not None else 0
 
 
+def _floor_inflated():
+    """Whether the floor has risen far enough above the last thaw's to suspect frozen garbage.
+
+    A thaw is the only thing that frees a cycle frozen alive and dead since, and it
+    leaves the heap at a floor that holds only what is really alive. A floor that has
+    climbed ``ENGINE_GC_THAW_FLOOR_FACTOR`` times above that is either live growth (the
+    thaw then frees little and the floor is measured afresh) or the garbage this rule
+    exists for.
+    """
+    factor = float(getattr(settings, "ENGINE_GC_THAW_FLOOR_FACTOR", 1.5) or 0)
+    if factor <= 1 or not _state.thaw_floor or not _state.blocks_floor:
+        return False
+    return _state.blocks_floor >= _state.thaw_floor * factor
+
+
 def deep_clean_if_due(now=None, session_count=None):
     """Run a deep clean when the schedule and the player count allow it.
 
@@ -527,6 +608,14 @@ def deep_clean_if_due(now=None, session_count=None):
     for a moment when no one is connected, but never longer than
     ``ENGINE_GC_DEEP_CLEAN_MAX_DEFER`` seconds after the last one. A policy other
     than ``managed`` never needs it: the automatic collector does the work.
+
+    With ``ENGINE_GC_REFREEZE`` the seconds are counted from the last thaw, not from
+    the last full collection of any kind. Growth cleans freeze their survivors and
+    leave what they froze to the next thaw, so one that restarted the clock would
+    postpone the thaw for as long as the heap kept growing. A floor that has risen
+    ``ENGINE_GC_THAW_FLOOR_FACTOR`` times above where the last thaw left it makes the
+    clean due at the next moment with no one connected, however recent the last thaw;
+    with players connected it keeps to the schedule rather than force a pause on them.
 
     Args:
         now (float, optional): Wall-clock seconds. Defaults to ``time.time()``.
@@ -541,16 +630,22 @@ def deep_clean_if_due(now=None, session_count=None):
     interval = float(getattr(settings, "ENGINE_GC_DEEP_CLEAN_INTERVAL", 86400) or 0)
     if interval <= 0:
         return False
+    refreeze = bool(getattr(settings, "ENGINE_GC_REFREEZE", False))
     now = time.time() if now is None else now
-    age = now - _state.last_deep_clean
-    if age < interval:
+    age = now - (_state.last_thaw if refreeze else _state.last_deep_clean)
+    inflated = refreeze and _floor_inflated()
+    if age < interval and not inflated:
+        return False
+    quiet = (session_count or _connected_sessions)() == 0
+    if age < interval and not quiet:
         return False
     max_defer = float(getattr(settings, "ENGINE_GC_DEEP_CLEAN_MAX_DEFER", 259200) or 0)
-    quiet = (session_count or _connected_sessions)() == 0
     if not quiet and age < max(max_defer, interval):
         return False
     deep_clean("scheduled" if quiet else "overdue")
     _state.last_deep_clean = now
+    if refreeze:
+        _state.last_thaw = now
     return True
 
 

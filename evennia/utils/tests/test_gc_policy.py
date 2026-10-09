@@ -7,6 +7,7 @@ real collection or leaves the interpreter's collector disabled.
 """
 
 import gc
+import time
 import weakref
 from unittest.mock import Mock, patch
 
@@ -446,14 +447,244 @@ class TestRefreeze(_PolicyTestCase):
         self.assertEqual(self.calls, ["collect"])
 
     @override_settings(ENGINE_GC_REFREEZE=True)
-    def test_the_log_says_how_much_is_frozen(self):
+    def test_a_growth_clean_does_not_walk_the_frozen_heap(self):
+        """Counting the permanent generation visits every object in it, GIL held."""
         with (
             patch.object(gc_policy.logger, "log_info") as info,
-            patch.object(gc_policy.gc, "get_freeze_count", return_value=1234),
+            patch.object(
+                gc_policy.gc, "get_freeze_count", side_effect=AssertionError("walked")
+            ) as count,
         ):
             gc_policy.deep_clean("growth")
 
+        count.assert_not_called()
+        self.assertNotIn("frozen", info.call_args.args[0])
+
+    @override_settings(ENGINE_GC_REFREEZE=True)
+    def test_a_thaw_clean_counts_what_it_froze_and_says_how_much(self):
+        """A thaw already marks every object, so counting them once more is cheap by comparison."""
+        count = Mock(side_effect=lambda: self.calls.append("count") or 1234)
+        with (
+            patch.object(gc_policy.logger, "log_info") as info,
+            patch.object(gc_policy.gc, "get_freeze_count", count),
+        ):
+            gc_policy.deep_clean("scheduled")
+
+        self.assertEqual(self.calls, ["unfreeze", "collect", "freeze", "count"])
         self.assertIn("1234 frozen", info.call_args.args[0])
+        self.assertEqual(gc_policy.frozen_count(), 1234)
+
+    @override_settings(ENGINE_GC_REFREEZE=True)
+    def test_a_thaw_clean_pause_includes_the_count(self):
+        """The logged time is the pause players waited, not just the collector's share."""
+        clock = self.clock
+
+        def count():
+            clock.advance(0.4)
+            return 10
+
+        with (
+            patch.object(gc_policy.logger, "log_info") as info,
+            patch.object(gc_policy.gc, "get_freeze_count", count),
+        ):
+            result = gc_policy.deep_clean("overdue")
+
+        self.assertAlmostEqual(result.seconds, 0.4)
+        self.assertIn("in 400ms", info.call_args.args[0])
+
+
+class _RecordedCollectorCase(_PolicyTestCase):
+    """Collector entry points replaced by recorders, so a test reads the order they ran in."""
+
+    def setUp(self):
+        super().setUp()
+        self.calls = []
+        self.frozen = 500
+
+        def recorder(name, result):
+            def call(*args, **kwargs):
+                self.calls.append(name)
+                return result() if callable(result) else result
+
+            return call
+
+        for name, result in (
+            ("collect", 42),
+            ("freeze", None),
+            ("unfreeze", None),
+            ("get_freeze_count", lambda: self.frozen),
+        ):
+            patcher = patch.object(gc_policy.gc, name, side_effect=recorder(name, result))
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+
+class TestFrozenCount(_PolicyTestCase):
+    """The frozen count is measured where the walk is already paid for, and only read after."""
+
+    def test_both_readings_are_zero_before_anything_ran(self):
+        self.assertEqual(gc_policy.frozen_count(), 0)
+        self.assertEqual(gc_policy.blocks_floor(), 0)
+
+    def test_reading_the_count_never_walks_the_frozen_heap(self):
+        gc_policy._state.frozen = 4_700_000
+
+        with patch.object(gc_policy.gc, "get_freeze_count", side_effect=AssertionError("walked")):
+            self.assertEqual(gc_policy.frozen_count(), 4_700_000)
+            self.assertEqual(gc_policy.frozen_count(), 4_700_000)
+
+    def test_the_floor_is_where_the_last_full_collection_left_the_heap(self):
+        gc_policy._state.blocks_floor = 6_300_000
+
+        self.assertEqual(gc_policy.blocks_floor(), 6_300_000)
+
+
+@override_settings(
+    ENGINE_GC_DEEP_CLEAN_INTERVAL=21600,
+    ENGINE_GC_DEEP_CLEAN_MAX_DEFER=43200,
+    ENGINE_GC_REFREEZE=True,
+)
+class TestThawClock(_RecordedCollectorCase):
+    """With refreeze on only a thaw frees what was frozen, so only a thaw restarts the backstop."""
+
+    HOUR = 3600.0
+
+    def setUp(self):
+        super().setUp()
+        self.sessions = 0
+        gc_policy._state.managed = True
+        gc_policy._state.last_thaw = 0.0
+        gc_policy._state.last_deep_clean = 0.0
+
+    def _due(self, now):
+        return gc_policy.deep_clean_if_due(now=now, session_count=lambda: self.sessions)
+
+    def test_a_growth_clean_a_minute_ago_does_not_postpone_the_backstop(self):
+        """The bug: growth cleans every half hour restarted the six hour clock for ever."""
+        gc_policy._state.last_deep_clean = 6 * self.HOUR - 60
+
+        self.assertTrue(self._due(now=6 * self.HOUR))
+        self.assertEqual(self.calls[:3], ["unfreeze", "collect", "freeze"])
+
+    def test_it_is_timed_from_the_last_thaw(self):
+        gc_policy._state.last_thaw = 100.0
+
+        self.assertFalse(self._due(now=100.0 + 6 * self.HOUR - 1))
+        self.assertTrue(self._due(now=100.0 + 6 * self.HOUR))
+
+    def test_a_backstop_that_ran_restarts_the_clock(self):
+        self.assertTrue(self._due(now=6 * self.HOUR))
+
+        self.assertEqual(gc_policy._state.last_thaw, 6 * self.HOUR)
+        self.assertFalse(self._due(now=6 * self.HOUR + 100))
+        self.assertTrue(self._due(now=12 * self.HOUR))
+
+    def test_players_connected_still_defer_it_up_to_the_bound(self):
+        self.sessions = 3
+
+        self.assertFalse(self._due(now=6 * self.HOUR + 1))
+        self.assertFalse(self._due(now=12 * self.HOUR - 1))
+        self.assertTrue(self._due(now=12 * self.HOUR))
+
+    def test_growth_and_requested_cleans_leave_the_thaw_clock_alone(self):
+        gc_policy._state.last_thaw = 123.0
+
+        gc_policy.deep_clean("growth")
+        gc_policy.deep_clean("requested")
+
+        self.assertEqual(gc_policy._state.last_thaw, 123.0)
+
+    def test_either_backstop_restarts_the_clock_when_it_runs_directly(self):
+        for reason in ("scheduled", "overdue"):
+            with self.subTest(reason=reason):
+                gc_policy._state.last_thaw = 123.0
+
+                gc_policy.deep_clean(reason)
+
+                self.assertGreater(gc_policy._state.last_thaw, 1e9)
+
+    @override_settings(ENGINE_GC_REFREEZE=False)
+    def test_without_refreeze_any_full_collection_still_postpones_the_backstop(self):
+        """Nothing was frozen by a clean, so a growth clean found everything a backstop would."""
+        gc_policy._state.last_deep_clean = 6 * self.HOUR - 60
+
+        self.assertFalse(self._due(now=6 * self.HOUR))
+        self.assertTrue(self._due(now=12 * self.HOUR))
+
+
+@override_settings(
+    ENGINE_GC_DEEP_CLEAN_INTERVAL=21600,
+    ENGINE_GC_DEEP_CLEAN_MAX_DEFER=43200,
+    ENGINE_GC_REFREEZE=True,
+    ENGINE_GC_THAW_FLOOR_FACTOR=1.5,
+)
+class TestInflatedFloor(_RecordedCollectorCase):
+    """Frozen garbage shows as a post-clean floor that keeps rising; thaw when it has."""
+
+    HOUR = 3600.0
+    THAW_FLOOR = 10_000_000
+
+    def setUp(self):
+        super().setUp()
+        self.sessions = 0
+        gc_policy._state.managed = True
+        gc_policy._state.last_thaw = 1000.0
+        gc_policy._state.last_deep_clean = 1000.0
+        gc_policy._state.thaw_floor = self.THAW_FLOOR
+        gc_policy._state.blocks_floor = self.THAW_FLOOR
+
+    def _due(self, now):
+        return gc_policy.deep_clean_if_due(now=now, session_count=lambda: self.sessions)
+
+    def test_a_floor_under_the_factor_waits_for_the_schedule(self):
+        gc_policy._state.blocks_floor = 14_900_000
+
+        self.assertFalse(self._due(now=1000.0 + self.HOUR))
+
+    def test_a_floor_over_the_factor_thaws_at_a_quiet_moment_before_the_interval(self):
+        gc_policy._state.blocks_floor = 15_000_000
+
+        self.assertTrue(self._due(now=1000.0 + self.HOUR))
+        self.assertEqual(self.calls[:3], ["unfreeze", "collect", "freeze"])
+
+    def test_it_never_forces_a_thaw_on_connected_players_ahead_of_the_schedule(self):
+        gc_policy._state.blocks_floor = 15_000_000
+        self.sessions = 2
+
+        self.assertFalse(self._due(now=1000.0 + self.HOUR))
+        self.assertFalse(self._due(now=1000.0 + 6 * self.HOUR))
+        self.assertTrue(self._due(now=1000.0 + 12 * self.HOUR))
+
+    def test_a_thaw_measures_the_next_floor_against_where_it_left_the_heap(self):
+        gc_policy._state.blocks_floor = 15_000_000
+
+        with patch.object(gc_policy, "_allocated_blocks", return_value=9_000_000):
+            self.assertTrue(self._due(now=1000.0 + self.HOUR))
+
+        self.assertEqual(gc_policy._state.thaw_floor, 9_000_000)
+        gc_policy._state.blocks_floor = 13_000_000  # under 1.5 x 9 million
+        self.assertFalse(self._due(now=1000.0 + 2 * self.HOUR))
+        gc_policy._state.blocks_floor = 13_500_000
+        self.assertTrue(self._due(now=1000.0 + 3 * self.HOUR))
+
+    def test_a_growth_clean_does_not_move_the_baseline(self):
+        with patch.object(gc_policy, "_allocated_blocks", return_value=14_000_000):
+            gc_policy.deep_clean("growth")
+
+        self.assertEqual(gc_policy._state.thaw_floor, self.THAW_FLOOR)
+        self.assertEqual(gc_policy._state.blocks_floor, 14_000_000)
+
+    @override_settings(ENGINE_GC_THAW_FLOOR_FACTOR=0)
+    def test_zero_turns_the_floor_rule_off(self):
+        gc_policy._state.blocks_floor = 10**9
+
+        self.assertFalse(self._due(now=1000.0 + self.HOUR))
+
+    @override_settings(ENGINE_GC_REFREEZE=False)
+    def test_without_refreeze_nothing_is_frozen_so_the_floor_proves_nothing(self):
+        gc_policy._state.blocks_floor = 10**9
+
+        self.assertFalse(self._due(now=1000.0 + self.HOUR))
 
 
 class _Cyclic:
@@ -526,11 +757,20 @@ class _ManagedCase(_PolicyTestCase):
         self.blocks = 10_000_000
         self.freed = 50_000
         self.gc = {}
-        for name in ("collect", "freeze", "disable", "enable", "get_count", "isenabled"):
+        for name in (
+            "collect",
+            "freeze",
+            "get_freeze_count",
+            "disable",
+            "enable",
+            "get_count",
+            "isenabled",
+        ):
             patcher = patch.object(gc_policy.gc, name)
             self.gc[name] = patcher.start()
             self.addCleanup(patcher.stop)
         self.gc["get_count"].return_value = (0, 0, 0)
+        self.gc["get_freeze_count"].return_value = 700
         self.gc["isenabled"].return_value = True
         self.gc["collect"].side_effect = lambda *args: self.freed
         for patcher in (
@@ -643,10 +883,92 @@ class TestRequestedReclaim(_ManagedCase):
         record.assert_called_once_with("requested", 50_000)
 
 
+@override_settings(ENGINE_GC_POLICY="managed")
+class TestBootFreezeCount(_ManagedCase):
+    """The boot freeze is the one place the frozen heap is counted without a thaw."""
+
+    def test_boot_counts_what_it_froze_once(self):
+        self.assertEqual(gc_policy.frozen_count(), 700)
+        self.assertEqual(self.gc["get_freeze_count"].call_count, 1)
+
+        gc_policy.frozen_count()
+        gc_policy.frozen_count()
+
+        self.assertEqual(self.gc["get_freeze_count"].call_count, 1)
+
+    def test_boot_starts_both_backstop_baselines(self):
+        self.assertAlmostEqual(gc_policy._state.last_thaw, time.time(), delta=5)
+        self.assertEqual(gc_policy._state.thaw_floor, self.blocks)
+        self.assertEqual(gc_policy.blocks_floor(), self.blocks)
+
+
 @override_settings(
     ENGINE_GC_POLICY="managed",
     ENGINE_GC_RECLAIM_GROWTH_PERCENT=15,
     ENGINE_GC_RECLAIM_MIN_INTERVAL=300,
+    ENGINE_GC_RECLAIM_GROWTH_MAX_BLOCKS=750_000,
+)
+class TestGrowthCap(_ManagedCase):
+    """On a big heap 15% is a long pause, so the growth a clean waits for has a ceiling."""
+
+    def test_the_trigger_is_capped_in_blocks(self):
+        self.clock.advance(400)
+        self.blocks = 10_700_000  # 700,000 over: under the cap
+        self.tick(16.0)
+        self.assertEqual(self.full_collections(), [])
+
+        self.blocks = 10_800_000  # 800,000 over: past the cap, well under 15% (1.5 million)
+        self.tick(16.0)
+
+        self.assertEqual(len(self.full_collections()), 1)
+
+    def test_the_percentage_still_decides_on_a_small_heap(self):
+        gc_policy._state.blocks_floor = 2_000_000  # 15% is 300,000, under the cap
+        self.clock.advance(400)
+        self.blocks = 2_290_000
+        self.tick(16.0)
+        self.assertEqual(self.full_collections(), [])
+
+        self.blocks = 2_300_000
+        self.tick(16.0)
+
+        self.assertEqual(len(self.full_collections()), 1)
+
+    def test_a_clean_that_found_little_widens_the_capped_wait(self):
+        self.freed = 100  # growth that was live data
+        self.clock.advance(400)
+        self.blocks = 10_800_000
+        self.tick(16.0)
+        self.assertEqual(len(self.full_collections()), 1)
+        self.assertEqual(gc_policy._state.growth_factor, 2)
+
+        self.blocks = 12_200_000  # 1.4 million over the new floor: one cap, not two
+        self.tick(400.0)
+        self.assertEqual(len(self.full_collections()), 1)
+
+        self.blocks = 12_400_000  # 1.6 million over: past two caps
+        self.tick(16.0)
+
+        self.assertEqual(len(self.full_collections()), 2)
+
+    @override_settings(ENGINE_GC_RECLAIM_GROWTH_MAX_BLOCKS=0)
+    def test_zero_removes_the_cap(self):
+        self.clock.advance(400)
+        self.blocks = 11_400_000
+        self.tick(16.0)
+        self.assertEqual(self.full_collections(), [])
+
+        self.blocks = 11_600_000
+        self.tick(16.0)
+
+        self.assertEqual(len(self.full_collections()), 1)
+
+
+@override_settings(
+    ENGINE_GC_POLICY="managed",
+    ENGINE_GC_RECLAIM_GROWTH_PERCENT=15,
+    ENGINE_GC_RECLAIM_MIN_INTERVAL=300,
+    ENGINE_GC_RECLAIM_GROWTH_MAX_BLOCKS=0,
 )
 class TestReclaimAfterGrowth(_ManagedCase):
     def test_growth_past_the_threshold_runs_a_full_collection(self):
@@ -797,6 +1119,56 @@ class TestReclaimFreesRealGarbage(SimpleTestCase):
         self.assertGreaterEqual(result.collected, 100)
 
 
+def _gauge_readers():
+    """Register the memory gauges on a fake ``Gauge`` and return each one's reader by name."""
+    from evennia.server import prometheus_metrics
+
+    readers = {}
+
+    class FakeGauge:
+        def __init__(self, name, doc):
+            self.name = name
+
+        def set_function(self, reader):
+            readers[self.name] = reader
+
+    prometheus_metrics._register_memory_gauges(FakeGauge)
+    return readers
+
+
+class TestMemoryGauges(SimpleTestCase):
+    """A gauge that reads the process runs on every scrape, on a thread that holds the GIL."""
+
+    def setUp(self):
+        super().setUp()
+        gc_policy._reset_for_tests()
+        self.addCleanup(gc_policy._reset_for_tests)
+        self.readers = _gauge_readers()
+
+    def test_the_frozen_gauge_reads_a_count_taken_earlier_and_never_walks_the_heap(self):
+        """The walk costs ~100 ns an object: 0.5 s with 4.7 million frozen, GIL held throughout."""
+        gc_policy._state.frozen = 4_700_000
+
+        with patch.object(gc, "get_freeze_count", side_effect=AssertionError("walked")):
+            value = self.readers["evennia_gc_frozen_objects"]()
+            again = self.readers["evennia_gc_frozen_objects"]()
+
+        self.assertEqual((value, again), (4_700_000.0, 4_700_000.0))
+
+    def test_the_floor_gauge_reads_where_the_last_full_collection_left_the_heap(self):
+        gc_policy._state.blocks_floor = 6_300_000
+
+        with patch.object(gc, "get_freeze_count", side_effect=AssertionError("walked")):
+            self.assertEqual(self.readers["evennia_gc_blocks_floor"](), 6_300_000.0)
+
+    def test_the_gauges_are_zero_before_the_policy_ran(self):
+        self.assertEqual(self.readers["evennia_gc_frozen_objects"](), 0.0)
+        self.assertEqual(self.readers["evennia_gc_blocks_floor"](), 0.0)
+
+    def test_the_allocated_blocks_gauge_is_a_live_reading(self):
+        self.assertGreater(self.readers["evennia_python_allocated_blocks"](), 0)
+
+
 class TestRecordMetric(SimpleTestCase):
     def test_the_memory_gauges_answer_when_scraped(self):
         from prometheus_client import REGISTRY
@@ -809,6 +1181,7 @@ class TestRecordMetric(SimpleTestCase):
         for name in (
             "evennia_idmapper_cached_instances",
             "evennia_gc_frozen_objects",
+            "evennia_gc_blocks_floor",
             "evennia_python_allocated_blocks",
         ):
             self.assertIsNotNone(REGISTRY.get_sample_value(name), name)
@@ -859,7 +1232,9 @@ class TestRecordMetric(SimpleTestCase):
             patch.object(prometheus_metrics, "REACTOR_STALL_SECONDS", histogram),
         ):
             prometheus_metrics.record_reactor_stall(0.4, "gc")
+            prometheus_metrics.record_reactor_stall(0.4, "gil")
             prometheus_metrics.record_reactor_stall(0.4, "typed by an operator")
 
         histogram.labels.assert_any_call(cause="gc")
+        histogram.labels.assert_any_call(cause="gil")
         histogram.labels.assert_any_call(cause="unknown")
