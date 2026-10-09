@@ -123,8 +123,15 @@ def _register_memory_gauges(Gauge) -> None:
     """Register gauges that read the process when scraped.
 
     These answer "where did the memory go" without a debugger: how many objects
-    the idmapper holds, how many the collector no longer looks at, and how many
-    blocks the interpreter has allocated. Each is a cheap read.
+    the idmapper holds, how many the collector no longer looks at, how many blocks
+    the interpreter has allocated, and where the heap stood after the last full
+    collection.
+
+    A reader runs on every scrape and on every open console stream, on a thread
+    that holds the GIL for as long as the reader takes. Each must be O(1): the
+    frozen-object gauge once called ``gc.get_freeze_count()``, which walks every
+    frozen object (about 100 ns each), and at 4.7 million objects it kept the game
+    loop waiting for the GIL for half a second, every few seconds.
     """
 
     def idmapper_instances() -> float:
@@ -133,9 +140,14 @@ def _register_memory_gauges(Gauge) -> None:
         return float(cache_size()[0])
 
     def frozen_objects() -> float:
-        import gc
+        from evennia.utils import gc_policy
 
-        return float(gc.get_freeze_count())
+        return float(gc_policy.frozen_count())
+
+    def blocks_floor() -> float:
+        from evennia.utils import gc_policy
+
+        return float(gc_policy.blocks_floor())
 
     def allocated_blocks() -> float:
         import sys
@@ -150,8 +162,13 @@ def _register_memory_gauges(Gauge) -> None:
         ),
         (
             "evennia_gc_frozen_objects",
-            "Objects frozen out of garbage collection after boot",
+            "Objects frozen out of garbage collection, counted at boot and at each thaw",
             frozen_objects,
+        ),
+        (
+            "evennia_gc_blocks_floor",
+            "Memory blocks the interpreter held right after the last full collection",
+            blocks_floor,
         ),
         (
             "evennia_python_allocated_blocks",
@@ -575,7 +592,7 @@ def record_gc_pause(generation: int, duration_seconds: float) -> None:
     GC_PAUSE_SECONDS.labels(generation=label).observe(max(0.0, float(duration_seconds)))
 
 
-_STALL_CAUSES = frozenset({"gc", "work", "unknown"})
+_STALL_CAUSES = frozenset({"gc", "gil", "work", "unknown"})
 _GC_RECLAIM_REASONS = frozenset({"growth", "requested", "scheduled", "overdue", "manual"})
 _DB_POOL_EVENTS = frozenset({"opened", "reused", "parked", "evicted", "discarded"})
 
@@ -585,7 +602,8 @@ def record_reactor_stall(duration_seconds: float, cause: str) -> None:
 
     Args:
         duration_seconds (float): How long the turn blocked.
-        cause (str): ``gc`` when the collector accounted for most of it, ``work``
+        cause (str): ``gc`` when the collector accounted for most of it, ``gil``
+            when the loop was waiting while another thread used the CPU, ``work``
             when the watchdog sampled the code that was running, else ``unknown``.
     """
     if not _init_metrics() or REACTOR_STALL_SECONDS is None:
