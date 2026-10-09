@@ -38,8 +38,8 @@ export interface ChatMsg {
 }
 
 const MAX_PER_CHANNEL = 500;
-const SEEN_KEY = "underspire.tickets.seen.v2";
-const QUEUE_SEEN_KEY = "underspire.queue.seen.v2";
+export const SEEN_KEY = "underspire.tickets.seen.v2";
+export const QUEUE_SEEN_KEY = "underspire.queue.seen.v2";
 /** A terminal speak line counts as echoed only if its channel line arrives this soon. */
 const ECHO_WINDOW_MS = 10000;
 /** Seen maps from before they were kept per account; they hold the last user's ticket ids. */

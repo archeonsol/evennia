@@ -1,14 +1,16 @@
 // Compose-pad state: the draft, its mode, and the live preview the server
-// returns for it. Persisted so a draft survives closing the pad and reloading
-// the page - losing a half-written pose to a stray Esc is the thing players
-// actually complain about.
+// returns for it. Persisted per account so a draft survives closing the pad and
+// reloading the page - losing a half-written pose to a stray Esc is the thing
+// players actually complain about - and the next login does not see it.
 //
 // The mode vocabulary and command mapping live in the rune-free
 // `compose-modes.ts`; this is the reactive container plus the debounce.
 
 import { composeToPreview, type ComposeMode } from "./compose-modes";
 
-const KEY = "underspire.compose.draft.v1";
+export const DRAFT_KEY = "underspire.compose.draft.v2";
+/** The draft from before it was kept per account: the last user's unsent text. */
+const LEGACY_KEY = "underspire.compose.draft.v1";
 //: The pad requests a preview this long after the last keystroke. Long enough
 //: that ordinary typing does not put a command per character on the wire.
 const PREVIEW_DEBOUNCE_MS = 520;
@@ -27,11 +29,29 @@ class Compose {
 
   private timer: ReturnType<typeof setTimeout> | null = null;
   private send: ((line: string) => void) | null = null;
+  /** The signed-in account; the draft is stored only under it. */
+  private account: number | null = null;
 
-  /** Restore the persisted draft. The pad itself never auto-reopens. */
   init(): void {
     try {
-      const d = JSON.parse(localStorage.getItem(KEY) || "{}");
+      localStorage.removeItem(LEGACY_KEY);
+    } catch {
+      /* unwritable storage */
+    }
+  }
+
+  /** Restore the draft of the account the shell is signed in as; null empties the pad. The pad never auto-reopens. */
+  useAccount(account: number | null): void {
+    if (account === this.account) return;
+    this.account = account;
+    this.cancelPreview();
+    this.open = false;
+    this.mode = "pose";
+    this.text = "";
+    this.preview = { you: "", room: "", error: "" };
+    if (account == null) return;
+    try {
+      const d = JSON.parse(localStorage.getItem(`${DRAFT_KEY}:${account}`) || "{}");
       this.mode = (d.mode as ComposeMode) || "pose";
       this.text = typeof d.text === "string" ? d.text : "";
     } catch {
@@ -98,10 +118,11 @@ class Compose {
   }
 
   private persist(): void {
+    if (this.account == null) return;
     try {
       // `open` is deliberately not persisted: a refresh should not put the pad
       // back over the game log.
-      localStorage.setItem(KEY, JSON.stringify({ mode: this.mode, text: this.text }));
+      localStorage.setItem(`${DRAFT_KEY}:${this.account}`, JSON.stringify({ mode: this.mode, text: this.text }));
     } catch {
       /* unwritable storage is not worth failing a keystroke over */
     }

@@ -216,6 +216,12 @@ connection.on("connection_open", () => {
 // catalog with `python -m evennia.server.protocol.gen_ts` after adding an event.
 const is = (event: string, name: OobEvent) => event === name;
 
+/** Drop the command history and compose draft shown for the account that was signed in. */
+function forgetAccount(): void {
+  commands.useAccount(null);
+  compose.useAccount(null);
+}
+
 // Typed OOB events - routed by name. Channel/chat events feed the chat store;
 // other events can register here as consumers land.
 connection.on("oob", (env) => {
@@ -231,9 +237,16 @@ connection.on("oob", (env) => {
   if (is(event, "logged_in")) {
     activity.clear();
     chat.resetForLogin();
+    forgetAccount();
   }
   if (event.startsWith("channel_") || is(event, "channels_list") || event.startsWith("ticket_")) {
     chat.handleOob(event, env.args ?? [], env.kwargs ?? {});
+    // ticket_role names the account on every login and resync; history and the
+    // compose draft are kept under it.
+    if (is(event, "ticket_role")) {
+      commands.useAccount(chat.account);
+      compose.useAccount(chat.account);
+    }
     if (is(event, "channel_msg")) {
       echoChannel(env.kwargs ?? {});
       const key = String(env.kwargs?.channel ?? "");
@@ -260,6 +273,10 @@ connection.on("oob", (env) => {
   } else if (is(event, "logout")) {
     activity.logout();
     chat.logout();
+    forgetAccount();
+    // Sent while the socket is still open, so the portal drops its replay
+    // window too and a reload cannot bring the scrollback back.
+    session.clear();
     // Server-side @quit: raise the quit menu instead of silently reconnecting.
     const reason = Array.isArray(env.args) ? env.args[0] : env.args;
     connection.markLoggedOut(String(reason ?? "quit"));

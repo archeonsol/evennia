@@ -210,19 +210,6 @@ export class AzabanConnection {
     this.ws?.close();
   }
 
-  /** Reconnect from the quit menu. */
-  reconnect(): void {
-    this.loggedOut = false;
-    this.logoutReason = "";
-    this.manualClose = false;
-    this.reconnectAttempt = 0;
-    if (this.reconnectTimer) {
-      clearTimeout(this.reconnectTimer);
-      this.reconnectTimer = null;
-    }
-    this.open();
-  }
-
   private sendEnvelope(obj: Record<string, any>): void {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify(obj));
