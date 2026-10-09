@@ -41,6 +41,13 @@ export function migrateAssistPanels(api: DockviewApi): boolean {
   return true;
 }
 
+/** Close the web page panels a dockview holds. */
+export function closeWebPanels(api: DockviewApi | null): void {
+  for (const p of [...(api?.panels ?? [])]) {
+    if ((p as any).view?.contentComponent === "iframe") p.api.close();
+  }
+}
+
 // The standard, reopenable panels (so closing one isn't a dead end).
 export const VIEWS: Record<string, { component: string; title: string }> = {
   log: { component: "log", title: "Terminal" },
@@ -212,6 +219,12 @@ class Dock {
       renderer: PAGE_RENDERER,
       floating: pageFloat(size, w, h),
     });
+  }
+
+  /** Close every web page panel; a page's address can name the account that opened it. */
+  closeWebPages(): void {
+    for (const v of simple.views) if (v.component === "iframe") simple.close(v.id);
+    closeWebPanels(this.api);
   }
 
   /** Pin a web page panel so the next page for its base opens beside it, or unpin it. */

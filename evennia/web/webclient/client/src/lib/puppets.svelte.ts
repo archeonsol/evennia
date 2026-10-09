@@ -102,6 +102,12 @@ export class PuppetScenes {
     if (current && current.unread) this.feeds.set(key, { ...current, unread: 0 });
   }
 
+  /** Drop every NPC terminal. */
+  clear(): void {
+    this.feeds.clear();
+    this.activeId = null;
+  }
+
   /** Populate/refresh the roster from a puppet_manifest RPC reply. */
   setManifest(entries: Array<{ npc_id: number; slot: number; name?: string }>): void {
     const keep = new Set(entries.map((entry) => String(entry.npc_id)));

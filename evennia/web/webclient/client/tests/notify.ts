@@ -57,6 +57,34 @@ async function run(): Promise<void> {
   check("direct-only mode ignores ordinary output", document.title === "Underspire", document.title);
   window.dispatchEvent(new Event("focus"));
 
+  const raised: { body: string; closed: boolean; onclose: (() => void) | null }[] = [];
+  class FakeNotification {
+    static permission = "granted";
+    body: string;
+    closed = false;
+    onclick: (() => void) | null = null;
+    onclose: (() => void) | null = null;
+    constructor(_title: string, opts: { body: string }) {
+      this.body = opts.body;
+      raised.push(this);
+    }
+    close(): void {
+      this.closed = true;
+      this.onclose?.();
+    }
+  }
+  const realNotification = (window as any).Notification;
+  (window as any).Notification = FakeNotification;
+  settings.notifyDesktop = true;
+  window.dispatchEvent(new Event("blur"));
+  notify.ping("Staff replied", "your appeal was denied", false);
+  notify.closeAll();
+  check("a desktop notification is raised while away", raised.length === 1, String(raised.length));
+  check("closeAll takes it off the screen", raised.every((n) => n.closed));
+  window.dispatchEvent(new Event("focus"));
+  settings.notifyDesktop = false;
+  (window as any).Notification = realNotification;
+
   const pre = document.getElementById("results");
   if (pre) pre.textContent = results.join("\n");
   window.__notifyTest = { done: true, failures, results };

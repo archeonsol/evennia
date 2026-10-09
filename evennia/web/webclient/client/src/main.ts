@@ -34,6 +34,7 @@ import { screenSize } from "./lib/screensize";
 import { help } from "./lib/help.svelte";
 import { lore } from "./lib/lore.svelte";
 import { activity } from "./lib/activity.svelte";
+import { handshake, loggedIn, loggedOut, roleArrived } from "./lib/accountSession";
 
 const OOB_TRACE_KEY = "underspire.trace.oob";
 
@@ -84,14 +85,6 @@ compose.setPreviewSender((line) => connection.sendCommand(line));
 // store is handed the opener rather than importing the dock.
 chat.setPanelOpener((view) => dock.openView(view));
 activity.connect((ns, action, data) => connection.request(ns, action, data), (entries) => puppets.setManifest(entries));
-
-// Local echo: the command as typed, in the terminal before the game's answer.
-commands.onRun((line) => {
-  const t = line.trim();
-  if (!settings.echoCommands || !t) return;
-  const safe = t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-  session.append(`<span class="cmd-echo">&gt; ${safe}</span>`, "echo");
-});
 
 // Speak new output. A category the player filtered out of the log is muted
 // here too, so the log's filter chips double as speech filters. The echo of
@@ -184,6 +177,7 @@ screenSize.connect((grid) =>
 // window had already moved past some of it, say so rather than leave a silent
 // hole in the log.
 connection.on("hello", (env) => {
+  handshake(env.resumed === true);
   if (env.gap === true) {
     session.append(
       `<span class="conn-note">Some output was lost while you were disconnected.</span>`,
@@ -216,12 +210,6 @@ connection.on("connection_open", () => {
 // catalog with `python -m evennia.server.protocol.gen_ts` after adding an event.
 const is = (event: string, name: OobEvent) => event === name;
 
-/** Drop the command history and compose draft shown for the account that was signed in. */
-function forgetAccount(): void {
-  commands.useAccount(null);
-  compose.useAccount(null);
-}
-
 // Typed OOB events - routed by name. Channel/chat events feed the chat store;
 // other events can register here as consumers land.
 connection.on("oob", (env) => {
@@ -234,19 +222,10 @@ connection.on("oob", (env) => {
     activity.batch(env.kwargs as any);
     return;
   }
-  if (is(event, "logged_in")) {
-    activity.clear();
-    chat.resetForLogin();
-    forgetAccount();
-  }
+  if (is(event, "logged_in")) loggedIn();
   if (event.startsWith("channel_") || is(event, "channels_list") || event.startsWith("ticket_")) {
     chat.handleOob(event, env.args ?? [], env.kwargs ?? {});
-    // ticket_role names the account on every login and resync; history and the
-    // compose draft are kept under it.
-    if (is(event, "ticket_role")) {
-      commands.useAccount(chat.account);
-      compose.useAccount(chat.account);
-    }
+    if (is(event, "ticket_role")) roleArrived();
     if (is(event, "channel_msg")) {
       echoChannel(env.kwargs ?? {});
       const key = String(env.kwargs?.channel ?? "");
@@ -271,15 +250,9 @@ connection.on("oob", (env) => {
       dock.openWebPage(id, String(spec.title ?? "Web"), url, pageSize(spec.size));
     }
   } else if (is(event, "logout")) {
-    activity.logout();
-    chat.logout();
-    forgetAccount();
-    // Sent while the socket is still open, so the portal drops its replay
-    // window too and a reload cannot bring the scrollback back.
-    session.clear();
     // Server-side @quit: raise the quit menu instead of silently reconnecting.
     const reason = Array.isArray(env.args) ? env.args[0] : env.args;
-    connection.markLoggedOut(String(reason ?? "quit"));
+    loggedOut(String(reason ?? "quit"));
   } else if (is(event, "screenreader_mode")) {
     // The server's flag was set on (a saved @option restored at login, or
     // @option now). Follow it. Only "on" is followed: turning the client's

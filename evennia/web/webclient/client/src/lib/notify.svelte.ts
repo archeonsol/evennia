@@ -17,6 +17,8 @@ class Notify {
   private iconLink: HTMLLinkElement | null = null;
   private iconOriginal: string | null = null;
   private iconBadged: string | null = null;
+  /** Desktop notifications still shown; each carries a line meant for the signed-in account. */
+  private shown = new Set<Notification>();
 
   init(): void {
     this.baseTitle = document.title || "Underspire";
@@ -138,6 +140,12 @@ class Notify {
     }
   }
 
+  /** Take every desktop notification this page raised off the screen. */
+  closeAll(): void {
+    for (const n of this.shown) n.close();
+    this.shown.clear();
+  }
+
   /** Signal an event. No-op while the tab is focused. */
   ping(title: string, body = "", sound = true): void {
     if (!this.away()) return;
@@ -156,6 +164,8 @@ class Notify {
     ) {
       try {
         const n = new Notification(title, { body, silent: true });
+        this.shown.add(n);
+        n.onclose = () => this.shown.delete(n);
         n.onclick = () => {
           window.focus();
           n.close();

@@ -77,6 +77,16 @@ class HelpStore {
     }
   }
 
+  /** Forget every page shown, since staff help is not everyone's. */
+  clear(): void {
+    this.page = null;
+    this.results = null;
+    this.error = "";
+    this.history = [];
+    this.at = -1;
+    this.cache.clear();
+  }
+
   /** Show a page (from the server push or an RPC) and record it in history. */
   show(page: HelpPage, push = true): void {
     const query = String(page?.query ?? "");
