@@ -111,7 +111,7 @@ session.onLine((line) => {
 function echoChannel(kw: Record<string, any>): void {
   const key = String(kw.channel ?? "");
   if (!key || chat.muted[key]) return;
-  if (!settings.channelEcho && !chat.takeEcho(key, String(kw.text ?? ""))) return;
+  if (!chat.takeEcho(key, !!kw.own) && !settings.channelEcho) return;
   const name = chat.channels.find((c) => c.key === key)?.name ?? key;
   const sender = renderSender(kw.sender_html, kw.sender);
   const body = renderBody(kw.html, kw.text);
@@ -259,6 +259,7 @@ connection.on("oob", (env) => {
     }
   } else if (is(event, "logout")) {
     activity.logout();
+    chat.logout();
     // Server-side @quit: raise the quit menu instead of silently reconnecting.
     const reason = Array.isArray(env.args) ? env.args[0] : env.args;
     connection.markLoggedOut(String(reason ?? "quit"));

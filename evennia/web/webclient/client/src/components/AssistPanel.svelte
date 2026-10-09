@@ -1,7 +1,8 @@
 <script lang="ts">
   // The Assist panel: the caller's own tickets (Mine), and for staff the
   // ticket queue (Queue). Both tabs stay mounted so a draft or a filter
-  // survives a switch.
+  // survives a switch; both are rebuilt for a new account, so one person's
+  // drafts and searches never reach the next.
   import { untrack } from "svelte";
   import { chat, type AssistTab } from "../lib/chat.svelte";
   import AssistMine from "./AssistMine.svelte";
@@ -26,14 +27,16 @@
         >Queue{#if chat.queueUnseen}<span class="sh-count">{chat.queueUnseen}</span>{/if}</button>
     </div>
   {/if}
-  <div class="pane" id="assist-mine" role={chat.staff ? "tabpanel" : undefined} hidden={tab !== "mine"}>
-    <AssistMine />
-  </div>
-  {#if chat.staff}
-    <div class="pane" id="assist-queue" role="tabpanel" hidden={tab !== "queue"}>
-      <AssistQueue />
+  {#key chat.account}
+    <div class="pane" id="assist-mine" role={chat.staff ? "tabpanel" : undefined} hidden={tab !== "mine"}>
+      <AssistMine />
     </div>
-  {/if}
+    {#if chat.staff}
+      <div class="pane" id="assist-queue" role="tabpanel" hidden={tab !== "queue"}>
+        <AssistQueue />
+      </div>
+    {/if}
+  {/key}
 </div>
 
 <style>

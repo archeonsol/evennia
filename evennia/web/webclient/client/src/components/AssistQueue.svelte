@@ -85,7 +85,10 @@
     if (!result.ok) feedback = result;
   }
   async function loadBug() {
-    if (ticket) bugDetail = await chat.loadBugDetail(ticket.id);
+    if (!ticket) return;
+    const id = ticket.id;
+    const detail = await chat.loadBugDetail(id);
+    if (chat.ticket?.id === id) bugDetail = detail;
   }
   // Reset the loaded bug detail whenever the open ticket changes.
   $effect(() => {

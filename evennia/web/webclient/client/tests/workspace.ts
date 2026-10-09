@@ -45,13 +45,16 @@ const tabs = () => Array.from(assistEl()?.querySelectorAll('[role="tab"]') ?? []
 
 async function run(): Promise<void> {
   localStorage.removeItem(LKEY);
-  localStorage.removeItem("underspire.assist.added");
+  localStorage.removeItem("underspire.assist.added:1");
+  localStorage.removeItem("underspire.assist.added:2");
+  localStorage.removeItem("underspire.assist.added:3");
+  localStorage.removeItem("underspire.assist.added:4");
   const host = document.getElementById("host")!;
 
   // A staff session: the Assist panel appears with its Queue tab.
   let app = mount(Workspace, { target: host });
   await settle();
-  chat.handleOob("ticket_role", [], { staff: true });
+  chat.handleOob("ticket_role", [], { staff: true, account: 1 });
   await settle();
   check("staff get the Assist panel", has("assist") && title("assist") === "Assist", title("assist"));
   dock.api?.getPanel("assist")?.api.setActive();
@@ -70,15 +73,33 @@ async function run(): Promise<void> {
   app = mount(Workspace, { target: host });
   await settle();
   check("an old layout gets Assist in place of the ticket queue", has("assist") && !has("tickets"));
-  chat.handleOob("ticket_role", [], { staff: false });
+  chat.handleOob("ticket_role", [], { staff: false, account: 2 });
   await settle();
   dock.api?.getPanel("assist")?.api.setActive();
   await settle();
   check("a player sees no Queue tab", tabs().length === 0 && !assistEl()?.querySelector("#assist-queue"), tabs().join(","));
+  const search = assistEl()?.querySelector<HTMLInputElement>(".search");
+  if (search) {
+    search.value = "harassment by someone";
+    search.dispatchEvent(new Event("input", { bubbles: true }));
+  }
+  await settle();
+  chat.resetForLogin();
+  chat.handleOob("ticket_role", [], { staff: false, account: 4 });
+  await settle();
+  const after = assistEl()?.querySelector<HTMLInputElement>(".search");
+  check("the next account does not see the last one's search", !!search && !!after && after.value === "", after?.value ?? "none");
+  chat.resetForLogin();
+  chat.handleOob("ticket_role", [], { staff: false, account: 2 });
+  await settle();
   dock.api?.getPanel("assist")?.api.close();
-  chat.handleOob("ticket_role", [], { staff: false });
+  chat.handleOob("ticket_role", [], { staff: false, account: 2 });
   await settle();
   check("a player who closed Assist is not given it again", !has("assist"));
+  chat.resetForLogin();
+  chat.handleOob("ticket_role", [], { staff: false, account: 3 });
+  await settle();
+  check("another player on the browser is still given Assist", has("assist"));
   unmount(app);
 
   const calls: string[] = [];

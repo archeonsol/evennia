@@ -44,6 +44,7 @@ export interface ChannelMsgPayload {
   platform?: string;
   ts: number;
   msg_id: string;
+  own?: boolean;
 }
 
 export interface ChannelMsgDeletePayload {

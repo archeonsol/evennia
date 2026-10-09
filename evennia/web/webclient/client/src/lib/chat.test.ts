@@ -199,34 +199,108 @@ describe("terminal echo of a speak line", () => {
     vi.useRealTimers();
   });
 
-  it("echoes the channel line a typed speak verb produced, once", () => {
-    chat.armEcho("xooc  Hello  there");
-    expect(chat.takeEcho("ooc", "hello there")).toBe(true);
-    expect(chat.takeEcho("ooc", "hello there")).toBe(false);
-  });
-
-  it("matches a pose by its words", () => {
-    chat.armEcho("xooc :waves hi");
-    expect(chat.takeEcho("ooc", "Sol waves hi")).toBe(true);
-  });
-
-  it("ignores someone else's line and other channels", () => {
+  it("echoes the sender's own channel line once", () => {
     chat.armEcho("xooc hello");
-    expect(chat.takeEcho("ooc", "goodbye")).toBe(false);
-    expect(chat.takeEcho("game", "hello")).toBe(false);
-    expect(chat.takeEcho("ooc", "hello")).toBe(true);
+    expect(chat.takeEcho("ooc", true)).toBe(true);
+    expect(chat.takeEcho("ooc", true)).toBe(false);
   });
 
-  it("does not arm for a line that is not a speak verb", () => {
+  it("never echoes someone else's line, and keeps waiting for the sender's", () => {
+    chat.armEcho("xooc hi");
+    expect(chat.takeEcho("ooc", false)).toBe(false);
+    expect(chat.takeEcho("ooc", true)).toBe(true);
+  });
+
+  it("matches the channel the line was typed for", () => {
+    chat.armEcho("xooc hello");
+    expect(chat.takeEcho("game", true)).toBe(false);
+    expect(chat.takeEcho("ooc", true)).toBe(true);
+  });
+
+  it("echoes two quick lines, one each", () => {
+    chat.armEcho("xooc one");
+    chat.armEcho("xooc two");
+    expect([chat.takeEcho("ooc", true), chat.takeEcho("ooc", true), chat.takeEcho("ooc", true)]).toEqual([
+      true,
+      true,
+      false,
+    ]);
+  });
+
+  it("does not arm for a line that is not a speak verb, or says nothing", () => {
     chat.armEcho("say hello");
-    expect(chat.takeEcho("ooc", "hello")).toBe(false);
+    chat.armEcho("xooc   ");
+    expect(chat.takeEcho("ooc", true)).toBe(false);
   });
 
   it("forgets a line whose channel line never came", () => {
     vi.useFakeTimers();
     chat.armEcho("xooc hello");
     vi.advanceTimersByTime(11000);
-    expect(chat.takeEcho("ooc", "hello")).toBe(false);
+    expect(chat.takeEcho("ooc", true)).toBe(false);
+  });
+});
+
+describe("leaving and late answers", () => {
+  let request: MockInstance<typeof connection.request>;
+  let store: Map<string, string>;
+  beforeEach(() => {
+    store = storage();
+    request = vi.spyOn(connection, "request");
+    chat.resetForLogin();
+  });
+  afterEach(() => {
+    request.mockRestore();
+    vi.unstubAllGlobals();
+  });
+
+  it("forgets the tickets and channel lines of an account that quits", () => {
+    chat.handleOob("ticket_role", [], { staff: true });
+    chat.ticket = { id: "a", view: "staff", messages: [{ text: "internal" }] };
+    chat.handleOob("channels_list", [{ key: "staff", name: "Staff" }], {});
+    chat.handleOob("channel_msg", [], { channel: "staff", text: "private", sender: "Mira", ts: 1, msg_id: "m1" });
+    chat.logout();
+    expect([chat.ticket, chat.staff, chat.channels, chat.messages]).toEqual([null, false, [], {}]);
+  });
+
+  it("drops a view answer for a ticket no longer asked for", async () => {
+    chat.handleOob("ticket_role", [], { staff: true });
+    let answerFirst: (v: any) => void = () => {};
+    request
+      .mockImplementationOnce(() => new Promise((resolve) => (answerFirst = resolve)) as any)
+      .mockResolvedValueOnce({ message: "", ticket: { id: "y", view: "staff", messages: [] } });
+    const first = chat.openTicket("x");
+    await chat.openTicket("y");
+    answerFirst({ message: "", ticket: { id: "x", view: "staff", messages: [] } });
+    await first;
+    expect(chat.ticket?.id).toBe("y");
+  });
+
+  it("drops a staff answer that lands after the role is gone", async () => {
+    chat.handleOob("ticket_role", [], { staff: true });
+    let answer: (v: any) => void = () => {};
+    request.mockImplementationOnce(() => new Promise((resolve) => (answer = resolve)) as any);
+    const pending = chat.openTicket("x");
+    chat.handleOob("ticket_role", [], { staff: false });
+    answer({ message: "", ticket: { id: "x", view: "staff", messages: [] } });
+    await pending;
+    expect(chat.ticket).toBeNull();
+  });
+
+  it("stops showing a ticket the action left unreadable", async () => {
+    chat.handleOob("ticket_role", [], { staff: true });
+    chat.ticket = { id: "x", view: "staff", messages: [] };
+    request.mockResolvedValueOnce({ message: "Approved.", ticket: null });
+    const result = await chat.ticketApprove("x");
+    expect(result).toEqual({ ok: true, message: "Approved." });
+    expect(chat.ticket).toBeNull();
+  });
+
+  it("removes the seen maps kept before they were per account", () => {
+    store.set("underspire.tickets.seen.v1", '{"a":1}');
+    store.set("underspire.queue.seen.v1", '{"b":1}');
+    chat.resetForLogin();
+    expect([...store.keys()]).toEqual([]);
   });
 });
 

@@ -42,6 +42,8 @@ const SEEN_KEY = "underspire.tickets.seen.v2";
 const QUEUE_SEEN_KEY = "underspire.queue.seen.v2";
 /** A terminal speak line counts as echoed only if its channel line arrives this soon. */
 const ECHO_WINDOW_MS = 10000;
+/** Seen maps from before they were kept per account; they hold the last user's ticket ids. */
+const LEGACY_SEEN_KEYS = ["underspire.tickets.seen.v1", "underspire.queue.seen.v1"];
 
 /** The answer to a ticket action, for the panel to show. */
 export interface TicketResult {
@@ -52,13 +54,8 @@ export interface TicketResult {
 /** Which panel of the Assist tab is showing: the caller's own tickets, or the staff queue. */
 export type AssistTab = "mine" | "queue";
 
-/** Lowercased words with single spaces, for matching a typed line to its channel line. */
-function echoWords(s: string): string {
-  return s.trim().toLowerCase().replace(/\s+/g, " ");
-}
-
-// Seen maps are per account: two people sharing a browser must not mark each
-// other's tickets read, or learn their ids.
+// Seen maps are per account, so two people sharing a browser do not mark each
+// other's tickets read.
 function loadMap(base: string, account: number | null): Record<string, number> {
   if (account == null) return {};
   try {
@@ -141,8 +138,10 @@ class Chat {
   assistTab = $state<AssistTab>("mine");
   /** The Assist panel is the focused panel (set by the layout). */
   assistFocused = $state(false);
-  /** A speak line typed in the terminal, waiting for its channel line to echo. */
-  private pendingEcho: { key: string; text: string; at: number } | null = null;
+  /** Speak lines typed in the terminal, oldest first, waiting for their channel lines to echo. */
+  private pendingEcho: { key: string; at: number }[] = [];
+  /** The staff ticket last asked for; an older answer arriving later is dropped. */
+  private viewingId: string | null = null;
   active = $state<string>("");
   // Per-channel overrides: colour + notify mode ("all" | "mention" | "none").
   channelPrefs = $state<Record<string, { color?: string; notify?: string }>>(loadChannelPrefs());
@@ -399,8 +398,9 @@ class Chat {
   //
   // With channel echo off, a speak line typed in the terminal (xooc hi) went
   // only to the Channels panel. Arm the echo when the line is typed; the
-  // channel line it produces is echoed once, so nothing the server refused
-  // is shown as said.
+  // sender's own copy of the channel line (`own`, set by the server) is
+  // echoed once, so nothing the server refused, and no one else's line, is
+  // shown as said.
 
   /** Note a line typed in the terminal; a channel speak verb arms its echo. */
   armEcho(line: string): void {
@@ -409,18 +409,17 @@ class Chat {
     if (space < 0) return;
     const verb = t.slice(0, space).toLowerCase();
     const ch = this.channels.find((c) => (c.speakCmd ?? "").toLowerCase() === verb);
-    const text = echoWords(t.slice(space + 1).replace(/^[:;]/, ""));
-    if (ch && text) this.pendingEcho = { key: ch.key, text, at: Date.now() };
+    if (ch && t.slice(space + 1).trim()) this.pendingEcho.push({ key: ch.key, at: Date.now() });
   }
 
-  /** Whether this channel line carries the speak line typed in the terminal (consumes it). */
-  takeEcho(key: string, text: string): boolean {
-    const p = this.pendingEcho;
-    if (!p || p.key !== key || Date.now() - p.at > ECHO_WINDOW_MS) return false;
-    // A pose comes back with the speaker's name in front, so the typed words
-    // need only appear in the line.
-    if (!echoWords(String(text ?? "")).includes(p.text)) return false;
-    this.pendingEcho = null;
+  /** Whether this channel line answers a speak line typed in the terminal (consumes it). */
+  takeEcho(key: string, own: boolean): boolean {
+    const now = Date.now();
+    this.pendingEcho = this.pendingEcho.filter((p) => now - p.at <= ECHO_WINDOW_MS);
+    if (!own) return false;
+    const i = this.pendingEcho.findIndex((p) => p.key === key);
+    if (i < 0) return false;
+    this.pendingEcho.splice(i, 1);
     return true;
   }
 
@@ -441,7 +440,33 @@ class Chat {
     this.seen = {};
     this.queueSeen = {};
     this.assistTab = "mine";
-    this.pendingEcho = null;
+    this.pendingEcho = [];
+    this.viewingId = null;
+    for (const key of LEGACY_SEEN_KEYS) {
+      try {
+        localStorage.removeItem(key);
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+
+  /**
+   * Forget the account that quit: its tickets and its channel lines. The shell
+   * stays drawn under the quit screen, and the next person at the browser
+   * could read it there.
+   */
+  logout(): void {
+    this.resetForLogin();
+    this.channels = [];
+    this.messages = {};
+    this.unread = {};
+    this.online = {};
+    this.topics = {};
+    this.typing = {};
+    this.pins = {};
+    this.mentions = {};
+    this.active = "";
   }
 
   /** Show a ticket in the Assist tab, in the view the server built it for. */
@@ -465,6 +490,7 @@ class Chat {
 
   /** Open a staff-view ticket in the queue. */
   async openTicket(id: string): Promise<TicketResult> {
+    this.viewingId = id;
     const result = await this.ticketAct(id, "view");
     if (result.ok && this.ticket?.id === id) this.assistTab = "queue";
     return result;
@@ -473,8 +499,14 @@ class Chat {
   async ticketAct(id: string, action: string, extra: Record<string, unknown> = {}): Promise<TicketResult> {
     try {
       const r = await connection.request<any>("tickets", "ticket_act", { id, action, ...extra });
-      if (r?.ticket?.view === "staff" && (action === "view" || !this.ticket || this.ticket.id === r.ticket.id))
-        this.ticket = r.ticket;
+      // A staff answer is shown only while the role holds, and a view only if
+      // it is still the ticket last asked for.
+      const shown =
+        action === "view" ? r?.ticket?.id === this.viewingId : !this.ticket || this.ticket.id === r?.ticket?.id;
+      if (r?.ticket?.view === "staff" && this.staff && shown) this.ticket = r.ticket;
+      // Done, and the ticket is now one this viewer may not read (a finished
+      // ticket without the history capability): stop showing it.
+      if (!r?.ticket && action !== "view" && this.ticket?.id === id) this.ticket = null;
       return { ok: true, message: String(r?.message ?? "Done.") };
     } catch (e: any) {
       return { ok: false, message: e?.message || "That did not go through." };

@@ -19,7 +19,7 @@
   }
   let api = $state<DockviewApi | null>(null);
   const LKEY = "underspire.layout.v2";
-  // Set once a player's layout has been given the Assist panel, so closing it sticks.
+  // Set once an account's layout has been given the Assist panel, so closing it sticks.
   const ASSIST_ADDED_KEY = "underspire.assist.added";
 
   function applyPanelPrefs() {
@@ -172,13 +172,14 @@
   });
 
   // Staff are given the Assist panel at every login, since the queue lives
-  // there. A player is given it once per browser, so one who closes it is not
-  // handed it again.
+  // there. A player is given it once per account on this browser, so one who
+  // closes it is not handed it again.
   $effect(() => {
-    if (!api || !chat.staffKnown || api.getPanel("assist")) return;
+    if (!api || !chat.staffKnown || chat.account == null || api.getPanel("assist")) return;
+    const addedKey = `${ASSIST_ADDED_KEY}:${chat.account}`;
     let added = false;
     try {
-      added = localStorage.getItem(ASSIST_ADDED_KEY) === "1";
+      added = localStorage.getItem(addedKey) === "1";
     } catch {
       /* ignore */
     }
@@ -191,7 +192,7 @@
       position: api.getPanel("chat") ? { referencePanel: "chat", direction: "within" } : undefined,
     });
     try {
-      localStorage.setItem(ASSIST_ADDED_KEY, "1");
+      localStorage.setItem(addedKey, "1");
     } catch {
       /* ignore */
     }
