@@ -1029,3 +1029,35 @@ class MoveInvalidationTest(TestCase):
         bump.assert_called_once_with(resource)
         record.assert_called_once_with("lookup_error")
         logger.log_trace.assert_called_once()
+
+
+class HoldsCapabilityTest(TestCase):
+    """`holds_capability` sees through quell; `has_capability` still does not."""
+
+    def tearDown(self):
+        clear_authorization_caches()
+        super().tearDown()
+
+    def _account(self, username):
+        from django.contrib.auth import get_user_model
+
+        return get_user_model().objects.create_user(username=username, email="", password="q" * 16)
+
+    def test_a_quelled_holder_still_holds_it(self):
+        from evennia.authorization.service import has_capability, holds_capability
+
+        account = self._account("holds-quelled")
+        grant_capability(f"account:{account.pk}", "engine.object.view", scope_kind="world", scope_key="*")
+        account.attributes.add("_quell", True)
+        clear_authorization_caches()
+
+        self.assertTrue(holds_capability(account, "engine.object.view"))
+        self.assertFalse(has_capability(account, "engine.object.view"))
+
+    def test_an_account_without_the_grant_does_not(self):
+        from evennia.authorization.service import holds_capability
+
+        account = self._account("holds-none")
+        account.attributes.add("_quell", True)
+
+        self.assertFalse(holds_capability(account, "engine.object.view"))

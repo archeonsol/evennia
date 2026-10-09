@@ -451,10 +451,40 @@ def _grant_snapshot(
     )
 
 
-def load_grants(principal) -> GrantSnapshot:
-    """Load or return cached positive grants for a principal."""
+def _grant_rows(refs, group_refs, now):
+    """Return the live grant rows held by these principal and group subjects."""
+
+    return (
+        AuthorizationGrant.objects.filter(
+            principal_ref__in=[*refs, *group_refs],
+            revoked_at__isnull=True,
+        )
+        .filter(models.Q(expires_at__isnull=True) | models.Q(expires_at__gt=now))
+        .values(
+            "grant_id",
+            "principal_ref",
+            "capability",
+            "scope_kind",
+            "scope_key",
+            "constraints",
+            "expires_at",
+        )
+    )
+
+
+def load_grants(principal, *, ignore_quell: bool = False) -> GrantSnapshot:
+    """Load or return cached positive grants for a principal.
+
+    ``ignore_quell`` reads the grants a quelled principal still holds. The
+    snapshot is built fresh and never cached, so no ordinary check can see it.
+    """
 
     refs = principal_refs(principal)
+    if ignore_quell and _authority_suppressed(principal):
+        group_refs = _principal_group_refs(refs)
+        return _grant_snapshot(
+            _principal_cache_key(refs), _grant_rows(refs, group_refs, timezone.now()), 0, False, group_refs
+        )
     cache_key = _principal_cache_key(refs)
     cached = _principal_cache.get(cache_key)
     # Group subjects are part of the generation check so a grant edited on a
@@ -483,21 +513,9 @@ def load_grants(principal) -> GrantSnapshot:
             for ref in group_refs
         ]
         generation = max([generation, *group_generations])
-    query = AuthorizationGrant.objects.filter(
-        principal_ref__in=[*refs, *group_refs],
-        revoked_at__isnull=True,
-    ).filter(models.Q(expires_at__isnull=True) | models.Q(expires_at__gt=now))
     snapshot = _grant_snapshot(
         cache_key,
-        query.values(
-            "grant_id",
-            "principal_ref",
-            "capability",
-            "scope_kind",
-            "scope_key",
-            "constraints",
-            "expires_at",
-        ),
+        _grant_rows(refs, group_refs, now),
         generation,
         _authority_suppressed(principal),
         group_refs,
