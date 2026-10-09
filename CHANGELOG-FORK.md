@@ -25,6 +25,88 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.312: Reactor stalls: the frozen-object gauge, the thaw clock and the stall watchdog
+
+Production on underspire.310 with `ENGINE_GC_REFREEZE` on logged 885 reactor stalls an
+hour, median half a second, about 12% of wall time. A py-spy sample of the GIL holders
+found two causes, and the watchdog could not name either.
+
+### Engine
+
+- **The frozen-object gauge no longer walks the frozen heap**
+  ([`prometheus_metrics.py`](evennia/server/prometheus_metrics.py),
+  [`gc_policy.py`](evennia/utils/gc_policy.py)). `evennia_gc_frozen_objects` called
+  `gc.get_freeze_count()`, which walks every frozen object with the GIL held. That is
+  about 100 ns each on the host, so 4.7 million objects kept the game loop waiting half a
+  second, on every Prometheus scrape and every five seconds per open console stream. A
+  py-spy sample put 80% of the GIL holders on that one line. The deep clean's log line
+  made the same call, which is why a 1.6 s collection showed as a 2 to 2.8 s stall. The
+  count is now taken at the boot freeze and in each thaw, where a full pass over the heap
+  is already being paid for, and everything else reads it with `gc_policy.frozen_count()`.
+  A new gauge, `evennia_gc_blocks_floor`, is the blocks held right after the last full
+  collection. It costs nothing to read and shows growth between thaws (`7a8ae7d15`).
+- **The backstop thaw runs** ([`gc_policy.py`](evennia/utils/gc_policy.py)).
+  `deep_clean_if_due()` counted its interval from the last full collection of any kind,
+  and growth cleans (every 15 to 160 minutes) restarted it: 57 cleans in 2.4 days, all of
+  them "growth". A cycle frozen alive and dead since was never freed, so the frozen heap
+  grew from 1.7 to 4.8 million objects, the process from 0.9 to 2.1 GB, and the growth
+  clean's pause from 0.6 to 1.65 s. With `ENGINE_GC_REFREEZE` the interval now counts from
+  the last thaw. A floor that has risen `ENGINE_GC_THAW_FLOOR_FACTOR` (1.5) times above
+  where the last thaw left it makes the thaw due at the next moment with no one connected.
+  With players connected it keeps to the schedule (`7a8ae7d15`).
+- **The growth a clean waits for is capped** at `ENGINE_GC_RECLAIM_GROWTH_MAX_BLOCKS`
+  (750,000; 0 = no cap). A clean costs about what the garbage it finds costs (1.8 us an
+  object, 2.5 blocks to an object on the host), so 15% of a heap that had grown made every
+  pause longer than the last (`7a8ae7d15`).
+- **The live console feed collects only the engine's metrics, once for every stream**
+  ([`feed.py`](evennia/console/feed.py)). Each open stream called `REGISTRY.collect()`
+  every five seconds, which runs every collector in the process with the GIL held: 70% of
+  the GIL-held time in a 60 second py-spy sample, because one of those collectors was the
+  frozen-object gauge. `MetricsProducer` now asks a restricted registry for the collectors
+  that provide `evennia_` names, and the streams that are open share one sample for half an
+  interval. A registry that cannot list its names is collected whole and filtered, as
+  before (`2b9711763`).
+- **The stall watchdog names the thread that held the GIL**
+  ([`reactor_watchdog.py`](evennia/utils/reactor_watchdog.py)). A thread that holds the GIL
+  through one long C call leaves the loop thread waiting at whatever frame last let go of
+  it, usually the event loop's own idle wait, so every stall in the production logs said
+  `loop.run_forever()` and "work not sampled". The watchdog now also reads the CPU every
+  thread has used (the operating system's per-thread clocks, 24 us a reading with 31
+  threads, taken at each heartbeat). A stall in which the loop used under 30% of the window
+  and one other thread used at least half of it is reported as a GIL wait, names the
+  busiest threads and where each is now, and is counted as cause `gil` in
+  `evennia_reactor_stall_seconds`. A stall the collector accounts for still names the
+  collection first. The live stack sample also dumps the stacks of the threads that used a
+  quarter of the window or more, beside the loop's own. Where the platform keeps no
+  per-thread clock (Windows) the reading is empty and the warnings read as before
+  (`c770adf00`).
+
+### Migration
+
+None required. `ENGINE_GC_RECLAIM_GROWTH_MAX_BLOCKS` and `ENGINE_GC_THAW_FLOOR_FACTOR` are
+new settings with defaults in [`settings_default.py`](evennia/settings_default.py). A
+dashboard gains the gauge `evennia_gc_blocks_floor`, and `evennia_reactor_stall_seconds`
+accepts `cause="gil"`. `evennia_gc_frozen_objects` now shows the count from the last boot
+freeze or thaw, not a live walk.
+
+### Tests
+
+- [`test_gc_policy.py`](evennia/utils/tests/test_gc_policy.py): a growth clean does not walk
+  the frozen heap, a thaw counts what it froze, the thaw clock counts from the last thaw and
+  growth cleans leave it alone, players connected still defer it, a floor over the factor
+  thaws at a quiet moment and never forces a thaw on connected players ahead of the schedule,
+  the growth cap, and the gauges read a stored count and never walk the heap.
+- [`test_reactor_watchdog.py`](evennia/utils/tests/test_reactor_watchdog.py): a thread
+  holding the CPU while the loop waits is named, the loop doing the work itself is not
+  blamed on the GIL, a loop blocked on I/O with every other thread idle is not the GIL, the
+  collector still takes precedence, a platform without per-thread clocks leaves the message
+  as it was, and a probe that raises never breaks the heartbeat.
+- [`test_feed.py`](evennia/console/tests/test_feed.py): a restricted collection returns the
+  same series as a full one, only the engine's own collectors are asked, streams share one
+  sample inside half an interval, and concurrent streams do not collect twice.
+
+---
+
 ## 6.0.0+underspire.311: Lore tooltips in the web client
 
 ### Webclient
