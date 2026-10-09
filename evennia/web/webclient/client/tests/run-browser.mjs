@@ -62,6 +62,12 @@ const PAGES = [
     report: () => window.__helpTest ?? null,
   },
   {
+    path: "tests/lore.html",
+    label: "lore tooltips",
+    done: () => window.__loreTest?.done === true,
+    report: () => window.__loreTest ?? null,
+  },
+  {
     path: "tests/display.html",
     label: "display regressions",
     done: () => /failures/.test(document.title),
