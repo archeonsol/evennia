@@ -25,6 +25,54 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.311: Lore tooltips in the web client
+
+### Webclient
+
+- **Lore tooltips** ([`lore.ts`](evennia/web/webclient/client/src/lib/lore.ts),
+  [`lore.svelte.ts`](evennia/web/webclient/client/src/lib/lore.svelte.ts),
+  [`LoreTip.svelte`](evennia/web/webclient/client/src/components/LoreTip.svelte)).
+  On every connect the shell asks the game for its lore words with the typed
+  request `connection.request("lore", "lore_tips")`, answered `{"tips": [...]}`.
+  A line is marked as it lands in the log (`lore.wrap` in
+  [`session.svelte.ts`](evennia/web/webclient/client/src/lib/session.svelte.ts)),
+  so a feed that copies the line shows the underline too. Resting the pointer on
+  an underlined word, or tapping it, shows a short note with a "Read more"
+  button that opens the help page behind it. The note is placed over the word
+  when there is room, under it when there is not, and never past the window's
+  edge. `parseTips` drops any tip that is not well formed, and caps a reply at
+  500 tips. A game that does not answer the request simply has no underlines, so
+  the game side can ship first.
+- **A setting to turn them off** ([`settings.svelte.ts`](evennia/web/webclient/client/src/lib/settings.svelte.ts),
+  [`SettingsPanel.svelte`](evennia/web/webclient/client/src/components/SettingsPanel.svelte)).
+  "Lore tooltips" is on by default. It is off whenever the screen reader mode is
+  on, because a note that only a pointer can open would be an underline that
+  does nothing: the words are not marked at all there.
+- The shell is rebuilt (`shell.js`, `shell.css`); the note is sized small enough
+  to sit over a line of the log without hiding the line after it.
+
+### Migration
+
+None. The game reads the request in `lore_tips` (`server/conf/inputfuncs.py`) and
+allows it as `lore:lore_tips`; a game on an earlier engine tag is unaffected.
+
+### Tests
+
+- [`lore.test.ts`](evennia/web/webclient/client/src/lib/lore.test.ts): the
+  wrapper takes the longest spelling at a word, is exact about case unless the
+  tip says any case, needs a whole word, skips a word that starts a compound,
+  and leaves a plain-English word alone where it opens a sentence; it touches
+  only text (tags, attributes, script and style stay as they were); `parseTips`
+  keeps a well formed reply and drops the rest; in the log a word is marked as
+  its line lands and in a feed's copy, a media line and the echo of a typed
+  command are left alone, and nothing is marked in screen reader mode or when
+  the game sends no words.
+- [`tests/lore.ts`](evennia/web/webclient/client/tests/lore.ts) and
+  [`tests/lore.html`](evennia/web/webclient/client/tests/lore.html): the browser
+  preview shows the underline and the note (`npm run test:browser`).
+
+---
+
 ## 6.0.0+underspire.310: Closed flows end their action, labelled answers
 
 ### Engine
