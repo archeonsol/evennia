@@ -16,6 +16,8 @@ import { notify } from "./notify.svelte";
 import { playMention } from "./audio";
 import { renderBody, renderSender } from "./markup";
 import { settings } from "./settings.svelte";
+import { triggers } from "./triggers.svelte";
+import type { TicketMsgPayload } from "./oob-events";
 
 export interface ChatChannel {
   key: string;
@@ -40,10 +42,12 @@ export interface ChatMsg {
 const MAX_PER_CHANNEL = 500;
 export const SEEN_KEY = "underspire.tickets.seen.v2";
 export const QUEUE_SEEN_KEY = "underspire.queue.seen.v2";
+/** Set per account once its layout has been given the Assist panel, so closing it sticks. */
+export const ASSIST_ADDED_KEY = "underspire.assist.added";
 /** A terminal speak line counts as echoed only if its channel line arrives this soon. */
 const ECHO_WINDOW_MS = 10000;
 /** Seen maps from before they were kept per account; they hold the last user's ticket ids. */
-const LEGACY_SEEN_KEYS = ["underspire.tickets.seen.v1", "underspire.queue.seen.v1"];
+export const LEGACY_SEEN_KEYS = ["underspire.tickets.seen.v1", "underspire.queue.seen.v1"];
 
 /** The answer to a ticket action, for the panel to show. */
 export interface TicketResult {
@@ -266,43 +270,44 @@ class Chat {
         break;
       }
       case "ticket_msg": {
+        const k = kwargs as TicketMsgPayload;
         const appendTo = (t: any) => ({
           ...t,
-          status: kwargs.status ?? t.status,
+          status: k.status ?? t.status,
           messages: [
             ...(t.messages ?? []),
             {
-              origin: kwargs.origin,
-              text: kwargs.text,
-              html: kwargs.html,
-              sender: kwargs.sender,
-              sender_html: kwargs.sender_html,
-              senderHtml: kwargs.sender_html,
-              platform: kwargs.platform,
-              visibility: kwargs.visibility,
-              ts: kwargs.ts,
+              origin: k.origin,
+              text: k.text,
+              html: k.html,
+              sender: k.sender,
+              sender_html: k.sender_html,
+              senderHtml: k.sender_html,
+              platform: k.platform,
+              visibility: k.visibility,
+              ts: k.ts,
             },
           ],
         });
         // Live append to the open detail of the same view only: an owner's
         // line list must never take a staff-audience message.
-        const ownerLine = kwargs.audience === "owner";
-        const openStaff = !ownerLine && !!this.ticket && kwargs.id === this.ticket.id;
-        const openMine = ownerLine && !!this.myTicket && kwargs.id === this.myTicket.id;
+        const ownerLine = k.audience === "owner";
+        const openStaff = !ownerLine && !!this.ticket && k.id === this.ticket.id;
+        const openMine = ownerLine && !!this.myTicket && k.id === this.myTicket.id;
         if (openStaff) this.ticket = appendTo(this.ticket);
         if (openMine) this.myTicket = appendTo(this.myTicket);
         // Lists show the new status at once: a closed ticket used to read
         // "pending" until the list was reloaded.
         const restatus = (rows: any[]) =>
           rows.map((t: any) =>
-            t.id === kwargs.id ? { ...t, status: kwargs.status ?? t.status, updated: kwargs.ts ?? t.updated } : t,
+            t.id === k.id ? { ...t, status: k.status ?? t.status, updated: k.ts ?? t.updated } : t,
           );
-        if (ownerLine && this.myTickets.some((t: any) => t.id === kwargs.id)) this.myTickets = restatus(this.myTickets);
-        if (!ownerLine && this.tickets.some((t: any) => t.id === kwargs.id)) this.tickets = restatus(this.tickets);
+        if (ownerLine && this.myTickets.some((t: any) => t.id === k.id)) this.myTickets = restatus(this.myTickets);
+        if (!ownerLine && this.tickets.some((t: any) => t.id === k.id)) this.tickets = restatus(this.tickets);
         if (this.queueActive) this.markQueueSeen();
         // Refresh the list's status and preview for the owner's own tickets.
         if (ownerLine) this.myTicketsRev += 1;
-        this.announceTicket(kwargs, openStaff, openMine);
+        this.announceTicket(k, openStaff, openMine);
         break;
       }
       default:
@@ -341,7 +346,7 @@ class Chat {
     connection.sendCommand(`@clear_unread ${key}`);
   }
 
-  /** Ask the server to (re)push the channel list, comms status, assist inbox. */
+  /** Ask the server to (re)push the channel list, comms status, ticket role and queue. */
   syncChannels(): void {
     connection.sendCommand("@sync_channels");
   }
@@ -402,9 +407,9 @@ class Chat {
   // echoed once, so nothing the server refused, and no one else's line, is
   // shown as said.
 
-  /** Note a line typed in the terminal; a channel speak verb arms its echo. */
+  /** Note a line typed in the terminal; a channel speak verb, after client aliases, arms its echo. */
   armEcho(line: string): void {
-    const t = (line || "").trim();
+    const t = triggers.expand((line || "").trim());
     const space = t.indexOf(" ");
     if (space < 0) return;
     const verb = t.slice(0, space).toLowerCase();
@@ -466,6 +471,8 @@ class Chat {
     this.typing = {};
     this.pins = {};
     this.mentions = {};
+    this.muted = {};
+    this.readMark = {};
     this.active = "";
   }
 
@@ -568,6 +575,7 @@ class Chat {
       this.myTicket = await connection.request<any>("tickets", "my_ticket", { id });
       this.myTicketsError = "";
       this.markSeen(this.myTicket);
+      this.assistTab = "mine";
     } catch (e: any) {
       this.myTicketsError = e?.message || "Could not open that ticket.";
     }
@@ -665,7 +673,7 @@ class Chat {
    * looking at it. A staff reply used to reach a web player only as an update
    * to My Tickets, so with the panel closed it arrived in silence.
    */
-  private announceTicket(k: Record<string, any>, openStaff: boolean, openMine: boolean): void {
+  private announceTicket(k: TicketMsgPayload, openStaff: boolean, openMine: boolean): void {
     const ref = `#${k.short_id ?? String(k.id ?? "").slice(0, 8)}`;
     const about = k.subject ? `${ref} ${k.subject}` : `${k.label ?? "Ticket"} ${ref}`;
     const preview = String(k.text ?? "").slice(0, 140);

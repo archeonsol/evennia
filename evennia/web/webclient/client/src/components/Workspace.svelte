@@ -3,8 +3,8 @@
   import { createDockview } from "dockview-core";
   import type { DockviewApi } from "dockview-core";
   import { svelteComponents } from "../lib/dockAdapter.svelte";
-  import { chat } from "../lib/chat.svelte";
-  import { dock, migrateAssistPanels, VIEWS } from "../lib/dock.svelte";
+  import { ASSIST_ADDED_KEY, chat } from "../lib/chat.svelte";
+  import { closeWebPanels, dock, migrateAssistPanels, VIEWS } from "../lib/dock.svelte";
   import { panelPrefs } from "../lib/panelPrefs.svelte";
   import { PANELS } from "../lib/panelRegistry";
   import { puppets } from "../lib/puppets.svelte";
@@ -19,8 +19,6 @@
   }
   let api = $state<DockviewApi | null>(null);
   const LKEY = "underspire.layout.v2";
-  // Set once an account's layout has been given the Assist panel, so closing it sticks.
-  const ASSIST_ADDED_KEY = "underspire.assist.added";
 
   function applyPanelPrefs() {
     if (!api) return;
@@ -53,6 +51,9 @@
       if (saved) {
         dv.fromJSON(JSON.parse(saved));
         migrateAssistPanels(dv);
+        // A tab closed while signed in saved its web pages, and the next
+        // person to open the shell is not that account.
+        closeWebPanels(dv);
         restored = true;
       }
     } catch {
@@ -175,7 +176,7 @@
   // there. A player is given it once per account on this browser, so one who
   // closes it is not handed it again.
   $effect(() => {
-    if (!api || !chat.staffKnown || chat.account == null || api.getPanel("assist")) return;
+    if (!api || !chat.staffKnown || chat.account == null) return;
     const addedKey = `${ASSIST_ADDED_KEY}:${chat.account}`;
     let added = false;
     try {
@@ -183,14 +184,17 @@
     } catch {
       /* ignore */
     }
-    if (added && !chat.staff) return;
-    api.addPanel({
-      id: "assist",
-      component: "assist",
-      title: VIEWS.assist.title,
-      inactive: true,
-      position: api.getPanel("chat") ? { referencePanel: "chat", direction: "within" } : undefined,
-    });
+    // A restored layout can already hold the panel; that counts as given.
+    if (!api.getPanel("assist") && !(added && !chat.staff)) {
+      api.addPanel({
+        id: "assist",
+        component: "assist",
+        title: VIEWS.assist.title,
+        inactive: true,
+        position: api.getPanel("chat") ? { referencePanel: "chat", direction: "within" } : undefined,
+      });
+    }
+    if (added) return;
     try {
       localStorage.setItem(addedKey, "1");
     } catch {

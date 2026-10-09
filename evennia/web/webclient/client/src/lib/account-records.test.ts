@@ -106,6 +106,9 @@ describe("a config export", () => {
     store.set("underspire.compose.draft.v2:1", "{}");
     store.set("underspire.tickets.seen.v2:1", "{}");
     store.set("underspire.queue.seen.v2:1", "{}");
+    store.set("underspire.assist.added:1", "1");
+    store.set("underspire.tickets.seen.v1", JSON.stringify({ abc12345: 1 }));
+    store.set("underspire.queue.seen.v1", JSON.stringify({ abc12345: 1 }));
     expect(Object.keys(configEntries())).toEqual(["underspire.settings.v1"]);
   });
 });

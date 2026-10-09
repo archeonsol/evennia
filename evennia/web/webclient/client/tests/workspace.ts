@@ -93,6 +93,9 @@ async function run(): Promise<void> {
   chat.handleOob("ticket_role", [], { staff: false, account: 2 });
   await settle();
   dock.api?.getPanel("assist")?.api.close();
+  // A new login of the same account: the role is unknown again, so the effect runs.
+  chat.resetForLogin();
+  await settle();
   chat.handleOob("ticket_role", [], { staff: false, account: 2 });
   await settle();
   check("a player who closed Assist is not given it again", !has("assist"));

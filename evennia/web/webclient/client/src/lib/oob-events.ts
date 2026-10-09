@@ -185,7 +185,12 @@ export interface TicketInboxPayload {
 
 export interface TicketMsgPayload {
   id: string;
+  short_id: string;
   kind: string;
+  label: string;
+  origin: string;
+  audience: string;
+  subject: string;
   text: string;
   html?: string;
   sender: string;

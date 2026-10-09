@@ -2,15 +2,19 @@
 // layouts, custom theme) as one JSON file, so a config can be backed up or
 // shared. Everything lives under the "underspire." localStorage namespace.
 
-import { SEEN_KEY, QUEUE_SEEN_KEY } from "./chat.svelte";
+import { ASSIST_ADDED_KEY, LEGACY_SEEN_KEYS, QUEUE_SEEN_KEY, SEEN_KEY } from "./chat.svelte";
 import { HISTORY_KEY } from "./commands.svelte";
 import { DRAFT_KEY } from "./compose.svelte";
 
 /** Per-account records of what a player typed or read. A shared config file must not carry them. */
-const ACCOUNT_RECORDS = [HISTORY_KEY, DRAFT_KEY, SEEN_KEY, QUEUE_SEEN_KEY].map((base) => `${base}:`);
+const ACCOUNT_RECORDS = [HISTORY_KEY, DRAFT_KEY, SEEN_KEY, QUEUE_SEEN_KEY, ASSIST_ADDED_KEY].map((base) => `${base}:`);
 
 function isConfigKey(k: string): boolean {
-  return k.startsWith("underspire.") && !ACCOUNT_RECORDS.some((prefix) => k.startsWith(prefix));
+  return (
+    k.startsWith("underspire.") &&
+    !LEGACY_SEEN_KEYS.includes(k) &&
+    !ACCOUNT_RECORDS.some((prefix) => k.startsWith(prefix))
+  );
 }
 
 /** The stored preferences an export writes, by key. */

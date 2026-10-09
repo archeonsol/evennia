@@ -175,6 +175,15 @@ async function run(): Promise<void> {
   queue.querySelector<HTMLInputElement>(".reply .int input")!.click();
   await settle();
   check("a note says it stays with staff", to().startsWith("Note to staff only · #aaaa1111"), to());
+  const noteBox = queue.querySelector<HTMLTextAreaElement>(".reply textarea")!;
+  noteBox.value = "she has asked before";
+  noteBox.dispatchEvent(new Event("input", { bubbles: true }));
+  await settle();
+  noteBox.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+  await wait(50);
+  await settle();
+  const noted = calls.filter((c) => c.action === "ticket_act").at(-1);
+  check("a ticked note goes to the server as a staff note", noted?.data?.action === "reply" && noted?.data?.internal === true, JSON.stringify(noted?.data));
   const before = commands.length;
   const close = Array.from(queue.querySelectorAll<HTMLButtonElement>(".act")).find((b) => b.textContent === "Close");
   close?.click();

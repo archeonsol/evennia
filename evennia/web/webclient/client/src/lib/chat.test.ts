@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } fr
 import { chat } from "./chat.svelte";
 import { connection } from "./evennia.svelte";
 import { migrateAssistPanels } from "./dock.svelte";
+import { triggers } from "./triggers.svelte";
 
 function storage(): Map<string, string> {
   const store = new Map<string, string>();
@@ -49,10 +50,12 @@ describe("chat staff role", () => {
     chat.handleOob("ticket_role", [], { staff: true });
     chat.handleOob("ticket_inbox", [], { tickets: [{ id: "a", updated: 1 }] });
     chat.ticket = { id: "a", view: "staff", messages: [] };
+    chat.ticketHistory = [{ id: "done" }];
     chat.assistTab = "queue";
     chat.handleOob("ticket_role", [], { staff: false });
     expect(chat.tickets).toEqual([]);
     expect(chat.ticket).toBeNull();
+    expect(chat.ticketHistory).toEqual([]);
     expect(chat.assistTab).toBe("mine");
   });
 });
@@ -170,8 +173,9 @@ describe("ticket state across logins", () => {
     chat.handleOob("ticket_inbox", [], { tickets: [{ id: "a", updated: 1 }] });
     chat.myTickets = [{ id: "m", updated: 1 }];
     chat.myTicket = { id: "m", view: "owner", messages: [] };
+    chat.ticketHistory = [{ id: "done" }];
     chat.resetForLogin();
-    expect([chat.tickets, chat.myTickets, chat.ticket, chat.myTicket]).toEqual([[], [], null, null]);
+    expect([chat.tickets, chat.myTickets, chat.ticket, chat.myTicket, chat.ticketHistory]).toEqual([[], [], null, null, []]);
     expect([chat.staff, chat.staffKnown, chat.account]).toEqual([false, false, null]);
   });
 
@@ -182,6 +186,14 @@ describe("ticket state across logins", () => {
     expect(chat.seen).toEqual({});
     chat.handleOob("ticket_role", [], { staff: false, account: 1 });
     expect(chat.seen).toEqual({ a: 50 });
+  });
+
+  it("shows a staff member's own ticket on the Mine tab", async () => {
+    chat.handleOob("ticket_role", [], { staff: true, account: 7 });
+    chat.assistTab = "queue";
+    request.mockResolvedValueOnce({ id: "m", view: "owner", messages: [] });
+    await chat.openMyTicket("m");
+    expect(chat.assistTab).toBe("mine");
   });
 
   it("loads the caller's own tickets when the account is known", () => {
@@ -203,6 +215,17 @@ describe("terminal echo of a speak line", () => {
     chat.armEcho("xooc hello");
     expect(chat.takeEcho("ooc", true)).toBe(true);
     expect(chat.takeEcho("ooc", true)).toBe(false);
+  });
+
+  it("arms the echo for a line sent through a client alias", () => {
+    storage();
+    triggers.aliases = [{ name: "o", command: "xooc" } as any];
+    triggers.sync();
+    chat.armEcho("o hello");
+    triggers.aliases = [];
+    triggers.sync();
+    vi.unstubAllGlobals();
+    expect(chat.takeEcho("ooc", true)).toBe(true);
   });
 
   it("never echoes someone else's line, and keeps waiting for the sender's", () => {
@@ -259,8 +282,21 @@ describe("leaving and late answers", () => {
     chat.ticket = { id: "a", view: "staff", messages: [{ text: "internal" }] };
     chat.handleOob("channels_list", [{ key: "staff", name: "Staff" }], {});
     chat.handleOob("channel_msg", [], { channel: "staff", text: "private", sender: "Mira", ts: 1, msg_id: "m1" });
+    chat.pins = { staff: { msgId: "m1", text: "private", by: "Mira" } };
+    chat.topics = { staff: "the raid on Thursday" };
+    chat.typing = { staff: ["Mira"] };
+    chat.mentions = { staff: true };
+    chat.unread = { staff: 3 };
+    chat.online = { staff: 2 };
+    chat.muted = { staff: true };
+    chat.readMark = { staff: 1 };
+    chat.active = "staff";
     chat.logout();
     expect([chat.ticket, chat.staff, chat.channels, chat.messages]).toEqual([null, false, [], {}]);
+    expect([chat.pins, chat.topics, chat.typing, chat.mentions, chat.unread, chat.online, chat.muted, chat.readMark]).toEqual([
+      {}, {}, {}, {}, {}, {}, {}, {},
+    ]);
+    expect(chat.active).toBe("");
   });
 
   it("drops a view answer for a ticket no longer asked for", async () => {
