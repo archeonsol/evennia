@@ -3,7 +3,8 @@
   import { createDockview } from "dockview-core";
   import type { DockviewApi } from "dockview-core";
   import { svelteComponents } from "../lib/dockAdapter.svelte";
-  import { ASSIST_ADDED_KEY, chat } from "../lib/chat.svelte";
+  import { chat } from "../lib/chat.svelte";
+  import { ASSIST_ADDED_KEY, tickets } from "../lib/tickets.svelte";
   import { closeWebPanels, dock, migrateAssistPanels, VIEWS } from "../lib/dock.svelte";
   import { panelPrefs } from "../lib/panelPrefs.svelte";
   import { PANELS } from "../lib/panelRegistry";
@@ -104,7 +105,7 @@
     // The queue's badge flags what has not been looked at: a focused Assist
     // panel on its Queue tab is looking at it (see AssistPanel).
     const activeSub = dv.onDidActivePanelChange((e: any) => {
-      chat.assistFocused = e.panel?.id === "assist";
+      tickets.assistFocused = e.panel?.id === "assist";
     });
 
     return () => {
@@ -156,7 +157,7 @@
     const flagged: Record<string, [string, boolean]> = {
       puppets: ["Puppets", puppets.totalUnread > 0],
       chat: ["Channels", chat.channelsUnseen > 0],
-      assist: [VIEWS.assist.title, chat.queueUnseen > 0 || chat.mineUnseen > 0],
+      assist: [VIEWS.assist.title, tickets.queueUnseen > 0 || tickets.myUnread > 0],
     };
     for (const [id, [base, hot]] of Object.entries(flagged)) {
       const panel: any = api.getPanel(id);
@@ -176,8 +177,8 @@
   // there. A player is given it once per account on this browser, so one who
   // closes it is not handed it again.
   $effect(() => {
-    if (!api || !chat.staffKnown || chat.account == null) return;
-    const addedKey = `${ASSIST_ADDED_KEY}:${chat.account}`;
+    if (!api || !tickets.staffKnown || tickets.accountId == null) return;
+    const addedKey = `${ASSIST_ADDED_KEY}:${tickets.accountId}`;
     let added = false;
     try {
       added = localStorage.getItem(addedKey) === "1";
@@ -185,7 +186,7 @@
       /* ignore */
     }
     // A restored layout can already hold the panel; that counts as given.
-    if (!api.getPanel("assist") && !(added && !chat.staff)) {
+    if (!api.getPanel("assist") && !(added && !tickets.staff)) {
       api.addPanel({
         id: "assist",
         component: "assist",

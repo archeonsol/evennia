@@ -15,6 +15,7 @@ import { routing } from "./routing.svelte";
 import { scene } from "./scene.svelte";
 import { session } from "./session.svelte";
 import { settings } from "./settings.svelte";
+import { tickets } from "./tickets.svelte";
 
 function storage(): void {
   const store = new Map<string, string>();
@@ -32,8 +33,11 @@ function signInAndFill(): void {
   roleArrived();
   chat.handleOob("channels_list", [{ key: "staff", name: "Staff" }], {});
   chat.handleOob("channel_msg", [], { channel: "staff", text: "private", sender: "Mira", ts: 1, msg_id: "m1" });
-  chat.ticketHistory = [{ id: "old" }];
-  chat.ticket = { id: "a", view: "staff", messages: [{ text: "internal" }] };
+  tickets.history = [{ id: "old" } as any];
+  tickets.rows = [{ id: "a", updated: 1 } as any];
+  tickets.ticket = { id: "a", view: "staff", messages: [{ text: "internal" }] };
+  tickets.myRows = [{ id: "m", updated: 1 } as any];
+  tickets.myTicket = { id: "m", view: "owner", messages: [{ text: "for you" }] };
   commands.run("page bob meet me at the docks");
   compose.setText("a half-written pose");
   session.append("Mira tells you: the code is 4471", "tell");
@@ -51,9 +55,12 @@ function residue(): unknown[] {
   return [
     chat.channels,
     chat.messages,
-    chat.ticket,
-    chat.ticketHistory,
+    tickets.ticket,
+    tickets.history,
     chat.staff,
+    tickets.rows,
+    tickets.myRows,
+    tickets.myTicket,
     commands.recent,
     compose.text,
     session.lines.map((l) => l.text),
@@ -65,7 +72,7 @@ function residue(): unknown[] {
   ];
 }
 
-const EMPTY = [[], {}, null, [], false, [], "", [], {}, [], false, null, null];
+const EMPTY = [[], {}, null, [], false, [], [], null, [], "", [], {}, [], false, null, null];
 
 describe("the end of a signed-in session", () => {
   let sent: string[];

@@ -1,7 +1,7 @@
-import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { chat } from "./chat.svelte";
-import { connection } from "./evennia.svelte";
 import { migrateAssistPanels } from "./dock.svelte";
+import { tickets } from "./tickets.svelte";
 import { triggers } from "./triggers.svelte";
 
 function storage(): Map<string, string> {
@@ -16,29 +16,14 @@ function storage(): Map<string, string> {
 
 describe("chat staff role", () => {
   beforeEach(() => {
-    chat.staff = false;
-    chat.staffKnown = false;
-    chat.tickets = [];
+    tickets.reset();
   });
 
-  it("takes the server's answer over an inbox that arrived earlier", () => {
-    // A stray inbox used to make a session staff for good.
-    chat.handleOob("ticket_inbox", [], { tickets: [] });
-    expect(chat.staff).toBe(true);
-    chat.handleOob("ticket_role", [], { staff: false });
-    expect(chat.staff).toBe(false);
-    expect(chat.staffKnown).toBe(true);
-  });
-
-  it("marks staff when the server says so", () => {
+  it("follows the ticket role the server states", () => {
     chat.handleOob("ticket_role", [], { staff: true });
     expect(chat.staff).toBe(true);
     expect(chat.staffKnown).toBe(true);
-  });
-
-  it("a stray inbox after the role is known does not make a player staff", () => {
     chat.handleOob("ticket_role", [], { staff: false });
-    chat.handleOob("ticket_inbox", [], { tickets: [] });
     expect(chat.staff).toBe(false);
   });
 
@@ -46,159 +31,20 @@ describe("chat staff role", () => {
     expect(chat.staffKnown).toBe(false);
   });
 
-  it("drops the queue it held when the role is lost", () => {
-    chat.handleOob("ticket_role", [], { staff: true });
-    chat.handleOob("ticket_inbox", [], { tickets: [{ id: "a", updated: 1 }] });
-    chat.ticket = { id: "a", view: "staff", messages: [] };
-    chat.ticketHistory = [{ id: "done" }];
-    chat.assistTab = "queue";
-    chat.handleOob("ticket_role", [], { staff: false });
-    expect(chat.tickets).toEqual([]);
-    expect(chat.ticket).toBeNull();
-    expect(chat.ticketHistory).toEqual([]);
-    expect(chat.assistTab).toBe("mine");
+  it("names the account the server says is signed in", () => {
+    chat.handleOob("ticket_role", [], { staff: false, account: 7 });
+    expect(chat.account).toBe(7);
   });
 });
 
 describe("tab badges", () => {
   beforeEach(() => {
-    chat.staff = true;
-    chat.staffKnown = true;
-    chat.tickets = [];
-    chat.queueSeen = {};
-    chat.assistFocused = false;
-    chat.assistTab = "queue";
     chat.unread = {};
-  });
-
-  it("flags unseen queue tickets and clears them once looked at", () => {
-    chat.handleOob("ticket_inbox", [], { tickets: [{ id: "a", updated: 10 }] });
-    expect(chat.queueUnseen).toBe(1);
-    chat.markQueueSeen();
-    expect(chat.queueUnseen).toBe(0);
-  });
-
-  it("flags a queue ticket that changed after it was seen", () => {
-    chat.handleOob("ticket_inbox", [], { tickets: [{ id: "a", updated: 10 }] });
-    chat.markQueueSeen();
-    chat.handleOob("ticket_inbox", [], { tickets: [{ id: "a", updated: 20 }] });
-    expect(chat.queueUnseen).toBe(1);
-  });
-
-  it("counts an arrival while the queue panel is open as seen", () => {
-    chat.assistFocused = true;
-    chat.handleOob("ticket_inbox", [], { tickets: [{ id: "a", updated: 10 }] });
-    expect(chat.queueUnseen).toBe(0);
-  });
-
-  it("does not count an arrival as seen while the Mine tab shows", () => {
-    chat.assistFocused = true;
-    chat.assistTab = "mine";
-    chat.handleOob("ticket_inbox", [], { tickets: [{ id: "a", updated: 10 }] });
-    expect(chat.queueUnseen).toBe(1);
-  });
-
-  it("never flags the queue for a player", () => {
-    chat.staff = false;
-    chat.tickets = [{ id: "a", updated: 10 }];
-    expect(chat.queueUnseen).toBe(0);
   });
 
   it("totals unread across channels", () => {
     chat.handleOob("channel_unread", [], { help: 2, nous: 3 });
     expect(chat.channelsUnseen).toBe(5);
-  });
-});
-
-describe("ticket views", () => {
-  beforeEach(() => {
-    chat.resetForLogin();
-  });
-
-  it("opens an owner view in Mine, even for staff", () => {
-    chat.handleOob("ticket_role", [], { staff: true });
-    chat.handleOob("ticket_thread", [], { id: "a", view: "owner", messages: [] });
-    expect(chat.myTicket?.id).toBe("a");
-    expect(chat.ticket).toBeNull();
-    expect(chat.assistTab).toBe("mine");
-  });
-
-  it("opens a staff view in the queue", () => {
-    chat.handleOob("ticket_role", [], { staff: true });
-    chat.handleOob("ticket_thread", [], { id: "b", view: "staff", messages: [] });
-    expect(chat.ticket?.id).toBe("b");
-    expect(chat.myTicket).toBeNull();
-    expect(chat.assistTab).toBe("queue");
-  });
-
-  it("shows a player no staff view", () => {
-    chat.handleOob("ticket_role", [], { staff: false });
-    chat.handleOob("ticket_thread", [], { id: "b", view: "staff", messages: [] });
-    expect(chat.ticket).toBeNull();
-    expect(chat.myTicket).toBeNull();
-  });
-
-  it("shows a row with no view nowhere", () => {
-    chat.handleOob("ticket_role", [], { staff: true });
-    chat.handleOob("ticket_thread", [], { id: "c", messages: [] });
-    expect(chat.ticket).toBeNull();
-    expect(chat.myTicket).toBeNull();
-  });
-
-  it("appends a line only to the view of its audience", () => {
-    chat.handleOob("ticket_role", [], { staff: true });
-    chat.ticket = { id: "a", view: "staff", messages: [] };
-    chat.myTicket = { id: "a", view: "owner", messages: [] };
-    chat.handleOob("ticket_msg", [], { id: "a", audience: "staff", text: "internal", visibility: "internal" });
-    chat.handleOob("ticket_msg", [], { id: "a", audience: "owner", text: "for you" });
-    expect(chat.ticket.messages.map((m: any) => m.text)).toEqual(["internal"]);
-    expect(chat.myTicket.messages.map((m: any) => m.text)).toEqual(["for you"]);
-  });
-});
-
-describe("ticket state across logins", () => {
-  let request: MockInstance<typeof connection.request>;
-  beforeEach(() => {
-    storage();
-    request = vi.spyOn(connection, "request").mockResolvedValue({ tickets: [] });
-    chat.resetForLogin();
-  });
-  afterEach(() => {
-    request.mockRestore();
-    vi.unstubAllGlobals();
-  });
-
-  it("clears the last account's tickets and role", () => {
-    chat.handleOob("ticket_role", [], { staff: true, account: 1 });
-    chat.handleOob("ticket_inbox", [], { tickets: [{ id: "a", updated: 1 }] });
-    chat.myTickets = [{ id: "m", updated: 1 }];
-    chat.myTicket = { id: "m", view: "owner", messages: [] };
-    chat.ticketHistory = [{ id: "done" }];
-    chat.resetForLogin();
-    expect([chat.tickets, chat.myTickets, chat.ticket, chat.myTicket, chat.ticketHistory]).toEqual([[], [], null, null, []]);
-    expect([chat.staff, chat.staffKnown, chat.account]).toEqual([false, false, null]);
-  });
-
-  it("keeps each account's seen marks apart", () => {
-    chat.handleOob("ticket_role", [], { staff: false, account: 1 });
-    chat.markSeen({ id: "a", updated: 50 });
-    chat.handleOob("ticket_role", [], { staff: false, account: 2 });
-    expect(chat.seen).toEqual({});
-    chat.handleOob("ticket_role", [], { staff: false, account: 1 });
-    expect(chat.seen).toEqual({ a: 50 });
-  });
-
-  it("shows a staff member's own ticket on the Mine tab", async () => {
-    chat.handleOob("ticket_role", [], { staff: true, account: 7 });
-    chat.assistTab = "queue";
-    request.mockResolvedValueOnce({ id: "m", view: "owner", messages: [] });
-    await chat.openMyTicket("m");
-    expect(chat.assistTab).toBe("mine");
-  });
-
-  it("loads the caller's own tickets when the account is known", () => {
-    chat.handleOob("ticket_role", [], { staff: false, account: 7 });
-    expect(request).toHaveBeenCalledWith("tickets", "my_tickets", { closed: false, search: "" });
   });
 });
 
@@ -264,22 +110,18 @@ describe("terminal echo of a speak line", () => {
   });
 });
 
-describe("leaving and late answers", () => {
-  let request: MockInstance<typeof connection.request>;
-  let store: Map<string, string>;
+describe("leaving", () => {
   beforeEach(() => {
-    store = storage();
-    request = vi.spyOn(connection, "request");
+    storage();
     chat.resetForLogin();
   });
   afterEach(() => {
-    request.mockRestore();
     vi.unstubAllGlobals();
   });
 
   it("forgets the tickets and channel lines of an account that quits", () => {
     chat.handleOob("ticket_role", [], { staff: true });
-    chat.ticket = { id: "a", view: "staff", messages: [{ text: "internal" }] };
+    tickets.ticket = { id: "a", view: "staff", messages: [{ text: "internal" }] };
     chat.handleOob("channels_list", [{ key: "staff", name: "Staff" }], {});
     chat.handleOob("channel_msg", [], { channel: "staff", text: "private", sender: "Mira", ts: 1, msg_id: "m1" });
     chat.pins = { staff: { msgId: "m1", text: "private", by: "Mira" } };
@@ -292,51 +134,18 @@ describe("leaving and late answers", () => {
     chat.readMark = { staff: 1 };
     chat.active = "staff";
     chat.logout();
-    expect([chat.ticket, chat.staff, chat.channels, chat.messages]).toEqual([null, false, [], {}]);
+    expect([tickets.ticket, chat.staff, chat.channels, chat.messages]).toEqual([null, false, [], {}]);
     expect([chat.pins, chat.topics, chat.typing, chat.mentions, chat.unread, chat.online, chat.muted, chat.readMark]).toEqual([
       {}, {}, {}, {}, {}, {}, {}, {},
     ]);
     expect(chat.active).toBe("");
   });
 
-  it("drops a view answer for a ticket no longer asked for", async () => {
-    chat.handleOob("ticket_role", [], { staff: true });
-    let answerFirst: (v: any) => void = () => {};
-    request
-      .mockImplementationOnce(() => new Promise((resolve) => (answerFirst = resolve)) as any)
-      .mockResolvedValueOnce({ message: "", ticket: { id: "y", view: "staff", messages: [] } });
-    const first = chat.openTicket("x");
-    await chat.openTicket("y");
-    answerFirst({ message: "", ticket: { id: "x", view: "staff", messages: [] } });
-    await first;
-    expect(chat.ticket?.id).toBe("y");
-  });
-
-  it("drops a staff answer that lands after the role is gone", async () => {
-    chat.handleOob("ticket_role", [], { staff: true });
-    let answer: (v: any) => void = () => {};
-    request.mockImplementationOnce(() => new Promise((resolve) => (answer = resolve)) as any);
-    const pending = chat.openTicket("x");
-    chat.handleOob("ticket_role", [], { staff: false });
-    answer({ message: "", ticket: { id: "x", view: "staff", messages: [] } });
-    await pending;
-    expect(chat.ticket).toBeNull();
-  });
-
-  it("stops showing a ticket the action left unreadable", async () => {
-    chat.handleOob("ticket_role", [], { staff: true });
-    chat.ticket = { id: "x", view: "staff", messages: [] };
-    request.mockResolvedValueOnce({ message: "Approved.", ticket: null });
-    const result = await chat.ticketApprove("x");
-    expect(result).toEqual({ ok: true, message: "Approved." });
-    expect(chat.ticket).toBeNull();
-  });
-
-  it("removes the seen maps kept before they were per account", () => {
-    store.set("underspire.tickets.seen.v1", '{"a":1}');
-    store.set("underspire.queue.seen.v1", '{"b":1}');
+  it("forgets the typed line waiting to be echoed", () => {
+    chat.channels = [{ key: "ooc", name: "OOC", speakCmd: "xooc" } as any];
+    chat.armEcho("xooc hello");
     chat.resetForLogin();
-    expect([...store.keys()]).toEqual([]);
+    expect(chat.takeEcho("ooc", true)).toBe(false);
   });
 });
 

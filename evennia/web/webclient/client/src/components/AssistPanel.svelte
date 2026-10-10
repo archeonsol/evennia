@@ -1,37 +1,37 @@
 <script lang="ts">
-  // The Assist panel: the caller's own tickets (Mine), and for staff the
-  // ticket queue (Queue). Both tabs stay mounted so a draft or a filter
+  // The Assist panel: the caller's own requests (My requests), and for staff the
+  // ticket queue (Tickets). Both tabs stay mounted so a draft or a filter
   // survives a switch; both are rebuilt for a new account, so one person's
   // drafts and searches never reach the next.
   import { untrack } from "svelte";
-  import { chat, type AssistTab } from "../lib/chat.svelte";
+  import { tickets, type AssistTab } from "../lib/tickets.svelte";
   import AssistMine from "./AssistMine.svelte";
   import AssistQueue from "./AssistQueue.svelte";
 
-  const tab = $derived<AssistTab>(chat.staff ? chat.assistTab : "mine");
+  const tab = $derived<AssistTab>(tickets.staff ? tickets.assistTab : "mine");
 
   // News in the queue counts as seen while the queue is on screen.
   $effect(() => {
-    if (chat.queueActive) untrack(() => chat.markQueueSeen());
+    if (tickets.queueActive) untrack(() => tickets.markQueueSeen());
   });
 </script>
 
 <div class="assist">
-  {#if chat.staff}
+  {#if tickets.staff}
     <div class="tabs" role="tablist" aria-label="Assist">
       <button class="sh-toggle" class:off={tab !== "mine"} role="tab" aria-selected={tab === "mine"} aria-controls="assist-mine"
-        onclick={() => (chat.assistTab = "mine")}
-        >Mine{#if chat.mineUnseen}<span class="sh-count">{chat.mineUnseen}</span>{/if}</button>
+        onclick={() => (tickets.assistTab = "mine")}
+        >My requests{#if tickets.myUnread}<span class="sh-count">{tickets.myUnread}</span>{/if}</button>
       <button class="sh-toggle" class:off={tab !== "queue"} role="tab" aria-selected={tab === "queue"} aria-controls="assist-queue"
-        onclick={() => (chat.assistTab = "queue")}
-        >Queue{#if chat.queueUnseen}<span class="sh-count">{chat.queueUnseen}</span>{/if}</button>
+        onclick={() => (tickets.assistTab = "queue")}
+        >Tickets{#if tickets.queueUnseen}<span class="sh-count">{tickets.queueUnseen}</span>{/if}</button>
     </div>
   {/if}
-  {#key chat.account}
-    <div class="pane" id="assist-mine" role={chat.staff ? "tabpanel" : undefined} hidden={tab !== "mine"}>
+  {#key tickets.accountId}
+    <div class="pane" id="assist-mine" role={tickets.staff ? "tabpanel" : undefined} hidden={tab !== "mine"}>
       <AssistMine />
     </div>
-    {#if chat.staff}
+    {#if tickets.staff}
       <div class="pane" id="assist-queue" role="tabpanel" hidden={tab !== "queue"}>
         <AssistQueue />
       </div>
