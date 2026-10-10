@@ -93,6 +93,9 @@ class CharRef:
             resolvers may treat roles differently.
         possessive (bool): whether the mention was possessive (``"Kade's"``), so
             the resolver picks the possessive name form.
+        standalone (bool): a possessive with nothing possessed after it
+            (``"holding Kade's."``), so the person it names reads "yours", not
+            "your".
     """
 
     char_id: int
@@ -103,6 +106,7 @@ class CharRef:
     formatted: bool = True
     # The name opens a sentence, so its first visible letter is upper-cased.
     capitalize: bool = False
+    standalone: bool = False
 
 
 @dataclass(frozen=True, slots=True)
