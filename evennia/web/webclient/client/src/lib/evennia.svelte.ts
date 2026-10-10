@@ -40,6 +40,9 @@ const CLOSE_SUPERSEDED = 4001;
 // Capabilities this shell announces to the server. As `render` / `patch` /
 // `asset` land, flip these on to opt into structured delivery for this session.
 const CLIENT_CAPS = {
+  // This bundle's generation. Raise it with SHELL_GENERATION in
+  // evennia/server/inputfuncs.py when a release breaks older open tabs.
+  shell: 1,
   rendersNodes: true, // shell renders `render` node payloads (identity anchors)
   // Shell parses node bodies itself (lib/markup.ts, parity-tested against the
   // server's parse_html), so the server omits the duplicate parsed `html`.
@@ -208,19 +211,6 @@ export class AzabanConnection {
     this.manualClose = true; // suppress the auto-reconnect on the close that follows
     this.stopLiveness();
     this.ws?.close();
-  }
-
-  /** Reconnect from the quit menu. */
-  reconnect(): void {
-    this.loggedOut = false;
-    this.logoutReason = "";
-    this.manualClose = false;
-    this.reconnectAttempt = 0;
-    if (this.reconnectTimer) {
-      clearTimeout(this.reconnectTimer);
-      this.reconnectTimer = null;
-    }
-    this.open();
   }
 
   private sendEnvelope(obj: Record<string, any>): void {

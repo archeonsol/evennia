@@ -6,11 +6,9 @@ import RoomPanel from "../components/RoomPanel.svelte";
 import ChatPanel from "../components/ChatPanel.svelte";
 import ChannelView from "../components/ChannelView.svelte";
 import AssistPanel from "../components/AssistPanel.svelte";
-import TicketsPanel from "../components/TicketsPanel.svelte";
 import IFramePanel from "../components/IFramePanel.svelte";
 import MediaPanel from "../components/MediaPanel.svelte";
 import SpawnsPanel from "../components/SpawnsPanel.svelte";
-import MyTicketsPanel from "../components/MyTicketsPanel.svelte";
 import PuppetsPanel from "../components/PuppetsPanel.svelte";
 import HelpPanel from "../components/HelpPanel.svelte";
 import ActivityPanel from "../components/ActivityPanel.svelte";
@@ -21,11 +19,13 @@ export const PANELS: Record<string, any> = {
   chat: ChatPanel,
   channel: ChannelView,
   assist: AssistPanel,
-  tickets: TicketsPanel,
+  // Saved layouts from before the Assist panel name these; a restore with an
+  // unknown component fails and resets the whole layout.
+  tickets: AssistPanel,
+  mytickets: AssistPanel,
   iframe: IFramePanel,
   media: MediaPanel,
   spawns: SpawnsPanel,
-  mytickets: MyTicketsPanel,
   puppets: PuppetsPanel,
   help: HelpPanel,
   activity: ActivityPanel,

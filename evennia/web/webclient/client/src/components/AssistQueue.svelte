@@ -62,6 +62,11 @@
     for (const r of source) seen.set(r.kind, r.label);
     return [...seen];
   });
+  // A kind filter whose last ticket closed would hide every row, and the picker
+  // that could clear it reads blank. A kind that is no longer here reads as All.
+  $effect(() => {
+    if (kind !== "all" && !kinds.some(([key]) => key === kind)) kind = "all";
+  });
   const rows = $derived.by(() => {
     let out = source.filter((r) => kind === "all" || r.kind === kind);
     if (history) return out; // the record is searched on the server
@@ -301,7 +306,6 @@
 <div class="tk" class:has-ticket={!!t} bind:this={root} use:keys role="region" aria-label="Tickets">
   <div class="tk-hd">
     {#if t}<button class="tk-btn quiet tk-back" onclick={back}>Back to the list</button>{/if}
-    <span class="tk-title">Tickets</span>
     <span class="tk-sum">{counts.all} open · {counts.unanswered} unanswered</span>
     <button
       class="tk-btn quiet"
@@ -539,10 +543,14 @@
             </div>
           </div>
 
+          {#if open}
           <div class="tk-composer">
             <div class="tk-tabs" role="tablist" aria-label="Write">
               <button class="tk-tab" role="tab" aria-selected={tab === "reply"} onclick={() => (tab = "reply")}>Reply</button>
               <button class="tk-tab note" role="tab" aria-selected={tab === "note"} onclick={() => (tab = "note")}>Staff note</button>
+            </div>
+            <div class="tk-to" class:note={tab === "note"}>
+              {#if tab === "note"}Note to staff only{:else}To <b>{whoIs(t)}</b>{/if} · {t.ref}
             </div>
             <textarea
               class="tk-box"
@@ -575,6 +583,9 @@
               </button>
             </div>
           </div>
+          {:else}
+            <p class="tk-closed">{t.approvable ? "This one is decided." : "This ticket is closed. Reopen it to reply."}</p>
+          {/if}
         </div>
       {:else}
         <p class="tk-empty">Pick a ticket to read it.</p>

@@ -7,7 +7,8 @@
 // channel_history → kwargs {key: [{msg_id,text,sender,platform,ts}]}; channel_unread
 // / channel_online → kwargs {key: count}; channel_topic → {channel_key,topic};
 // channel_reaction → {channel_key,msg_id,emoji,sender_name,delta,count}; channel_typing
-// → {channel_key,sender_name,platform}; assist_inbox → {threads:[…]}.
+// → {channel_key,sender_name,platform}. Ticket events (ticket_*) belong to the
+// tickets store (tickets.svelte.ts), which feeds the Assist panel.
 
 import { commands } from "./commands.svelte";
 import { connection } from "./evennia.svelte";
@@ -17,6 +18,11 @@ import { playMention } from "./audio";
 import { renderBody, renderSender } from "./markup";
 import { settings } from "./settings.svelte";
 import { tickets } from "./tickets.svelte";
+import { triggers } from "./triggers.svelte";
+
+// The keys the tickets store keeps per account. They are re-exported here
+// because the config export and the layout read them from the chat store.
+export { ASSIST_ADDED_KEY, LEGACY_SEEN_KEYS, QUEUE_SEEN_KEY, SEEN_KEY, type AssistTab } from "./tickets.svelte";
 
 export interface ChatChannel {
   key: string;
@@ -39,6 +45,8 @@ export interface ChatMsg {
 }
 
 const MAX_PER_CHANNEL = 500;
+/** A terminal speak line counts as echoed only if its channel line arrives this soon. */
+const ECHO_WINDOW_MS = 10000;
 const TYPING_MS = 6000;
 const PREFS_KEY = "underspire.channelprefs.v1";
 
@@ -80,14 +88,12 @@ class Chat {
   muted = $state<Record<string, boolean>>({});
   readMark = $state<Record<string, number>>({}); // ts last seen per channel (for the "new" divider)
   mentions = $state<Record<string, boolean>>({}); // channel has an unread @-mention
-  assistThreads = $state<any[]>([]);
-  assistThread = $state<{ accountId: any; accountKey: string; messages: any[] } | null>(null);
-  /** An assist inbox arrived: this session works the help desk, whatever the ticket role says. */
-  private assistViewer = $state(false);
   active = $state<string>("");
   // Per-channel overrides: colour + notify mode ("all" | "mention" | "none").
   channelPrefs = $state<Record<string, { color?: string; notify?: string }>>(loadChannelPrefs());
 
+  /** Speak lines typed in the terminal, oldest first, waiting for their channel lines to echo. */
+  private pendingEcho: { key: string; at: number }[] = [];
   private typingTimers: Record<string, ReturnType<typeof setTimeout>> = {};
   /** Opens a panel by view id. Set from main.ts: dock imports this store. */
   private openPanel: ((view: string) => void) | null = null;
@@ -97,14 +103,19 @@ class Chat {
     tickets.setPanelOpener(fn);
   }
 
-  /** This session works staff queues: the ticket role, or the assist help desk. */
+  /** This session works the staff ticket queue (the server's answer; see the tickets store). */
   get staff(): boolean {
-    return tickets.staff || this.assistViewer;
+    return tickets.staff;
   }
 
-  /** The server has said whether this session is staff (see the tickets store). */
+  /** The server has said whether this session is staff. */
   get staffKnown(): boolean {
     return tickets.staffKnown;
+  }
+
+  /** The signed-in account's id, from ticket_role; keys what the shell keeps per account. */
+  get account(): number | null {
+    return tickets.accountId;
   }
 
   /** Total unread across channels (per-channel counts already exist). */
@@ -164,28 +175,6 @@ class Chat {
         };
         break;
       }
-      case "assist_inbox": {
-        this.assistViewer = true;
-        const next = kwargs.threads ?? [];
-        // Toast newly-arrived tickets (not on the initial inbox push).
-        if (this.assistThreads.length) {
-          const prev = new Set(this.assistThreads.map((t: any) => t.account_id));
-          for (const t of next) {
-            if (!prev.has(t.account_id)) {
-              toasts.push("assist", "New ticket", t.account_key || `#${t.account_id}`);
-            }
-          }
-        }
-        this.assistThreads = next;
-        break;
-      }
-      case "assist_thread":
-        this.assistThread = {
-          accountId: kwargs.account_id,
-          accountKey: kwargs.account_key ?? "",
-          messages: kwargs.messages ?? [],
-        };
-        break;
       default:
         // Every ticket event belongs to the tickets store.
         if (event.startsWith("ticket_")) tickets.handleOob(event, args, kwargs);
@@ -224,7 +213,7 @@ class Chat {
     connection.sendCommand(`@clear_unread ${key}`);
   }
 
-  /** Ask the server to (re)push the channel list, comms status, assist inbox. */
+  /** Ask the server to (re)push the channel list, comms status, ticket role and queue. */
   syncChannels(): void {
     connection.sendCommand("@sync_channels");
   }
@@ -277,23 +266,61 @@ class Chat {
     }
   }
 
-  // -- assist help-desk (staff) -----------------------------------------
+  // -- terminal echo of a speak line -------------------------------------
+  //
+  // With channel echo off, a speak line typed in the terminal (xooc hi) went
+  // only to the Channels panel. Arm the echo when the line is typed; the
+  // sender's own copy of the channel line (`own`, set by the server) is
+  // echoed once, so nothing the server refused, and no one else's line, is
+  // shown as said.
 
-  openAssistThread(accountId: any): void {
-    connection.sendCommand(`@assistview #${accountId}`);
+  /** Note a line typed in the terminal; a channel speak verb, after client aliases, arms its echo. */
+  armEcho(line: string): void {
+    const t = triggers.expand((line || "").trim());
+    const space = t.indexOf(" ");
+    if (space < 0) return;
+    const verb = t.slice(0, space).toLowerCase();
+    const ch = this.channels.find((c) => (c.speakCmd ?? "").toLowerCase() === verb);
+    if (ch && t.slice(space + 1).trim()) this.pendingEcho.push({ key: ch.key, at: Date.now() });
   }
 
-  assistReply(accountKeyOrId: any, text: string): void {
-    const t = (text || "").trim();
-    if (t) connection.sendCommand(`xassistreply ${accountKeyOrId} ${t}`);
+  /** Whether this channel line answers a speak line typed in the terminal (consumes it). */
+  takeEcho(key: string, own: boolean): boolean {
+    const now = Date.now();
+    this.pendingEcho = this.pendingEcho.filter((p) => now - p.at <= ECHO_WINDOW_MS);
+    if (!own) return false;
+    const i = this.pendingEcho.findIndex((p) => p.key === key);
+    if (i < 0) return false;
+    this.pendingEcho.splice(i, 1);
+    return true;
   }
 
-  assistClaim(accountId: any): void {
-    connection.sendCommand(`@assistclaim #${accountId}`);
+  // -- login ---------------------------------------------------------------
+
+  /** Forget the last account's tickets and role; a new login starts clean. */
+  resetForLogin(): void {
+    tickets.reset();
+    this.pendingEcho = [];
   }
 
-  assistStatus(accountId: any, status: string): void {
-    connection.sendCommand(`@assiststatus #${accountId} ${status}`);
+  /**
+   * Forget the account that quit: its tickets and its channel lines. The shell
+   * stays drawn under the quit screen, and the next person at the browser
+   * could read it there.
+   */
+  logout(): void {
+    this.resetForLogin();
+    this.channels = [];
+    this.messages = {};
+    this.unread = {};
+    this.online = {};
+    this.topics = {};
+    this.typing = {};
+    this.pins = {};
+    this.mentions = {};
+    this.muted = {};
+    this.readMark = {};
+    this.active = "";
   }
 
   // -- event handlers ----------------------------------------------------

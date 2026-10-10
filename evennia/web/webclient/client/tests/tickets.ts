@@ -8,8 +8,8 @@
 
 import { mount, tick, unmount } from "svelte";
 
-import MyTicketsPanel from "../src/components/MyTicketsPanel.svelte";
-import TicketsPanel from "../src/components/TicketsPanel.svelte";
+import AssistMine from "../src/components/AssistMine.svelte";
+import AssistQueue from "../src/components/AssistQueue.svelte";
 import Toasts from "../src/components/Toasts.svelte";
 import { connection } from "../src/lib/evennia.svelte";
 import { tickets } from "../src/lib/tickets.svelte";
@@ -239,12 +239,12 @@ async function run(): Promise<void> {
   mount(Toasts, { target: document.getElementById("toasts")! });
 
   // ---- staff, a wide panel -------------------------------------------------
-  tickets.handleOob("ticket_role", [], { staff: true, account_id: 7, duty: true });
+  tickets.handleOob("ticket_role", [], { staff: true, account: 7, duty: true });
   tickets.canHistory = true;
   // Handed over in the wrong order on purpose: the server's key is the order.
   tickets.handleOob("ticket_inbox", [], { tickets: [clerk, door, answered, crash, dov] });
   const queue = document.getElementById("queue")!;
-  const wide = mount(TicketsPanel, { target: queue });
+  const wide = mount(AssistQueue, { target: queue });
   await settle();
 
   const titles = () => Array.from(queue.querySelectorAll(".tk-row-title")).map((e) => e.textContent?.trim());
@@ -340,6 +340,7 @@ async function run(): Promise<void> {
   queue.querySelectorAll<HTMLButtonElement>(".tk-tab")[1].click();
   await settle();
   check("the note tab changes what the box says it is for", queue.querySelector<HTMLTextAreaElement>(".tk-box")!.placeholder.includes("Only staff see it"), queue.querySelector<HTMLTextAreaElement>(".tk-box")!.placeholder);
+  check("a note says it goes to staff only", queue.querySelector(".tk-to")?.textContent?.includes("Note to staff only") === true, queue.querySelector(".tk-to")?.textContent ?? "");
   type(box, "Check the lift.");
   await settle();
   Array.from(queue.querySelectorAll<HTMLButtonElement>(".tk-btn")).find((b) => b.textContent?.trim() === "Save note")?.click();
@@ -349,6 +350,8 @@ async function run(): Promise<void> {
   check("a note goes as a note", noted?.data?.action === "reply" && noted?.data?.internal === true, JSON.stringify(noted?.data));
   queue.querySelectorAll<HTMLButtonElement>(".tk-tab")[0].click();
   await settle();
+  const to = queue.querySelector(".tk-to")?.textContent ?? "";
+  check("a reply names who it goes to and the ticket", to.includes("To Mira Thane") && to.includes("#1042"), to);
 
   // Saved replies are filled in for this ticket, then edited or sent.
   Array.from(queue.querySelectorAll<HTMLButtonElement>(".tk-btn")).find((b) => b.textContent?.trim() === "Saved replies")?.click();
@@ -376,6 +379,24 @@ async function run(): Promise<void> {
   await settle();
   check("Close goes through the request", calls.filter((c) => c.action === "ticket_act").at(-1)?.data?.action === "close");
   check("Close types no command", commands.length === typedBefore, commands.slice(typedBefore).join("|"));
+
+  // A closed ticket has no box to write in; it says how to write again.
+  tickets.ticket = { ...dovThread, status: "closed", state: "closed" };
+  await settle();
+  check("a closed ticket offers no reply box and says to reopen it", !queue.querySelector(".tk-composer") && (queue.querySelector(".tk-closed")?.textContent ?? "").includes("Reopen it to reply"), queue.querySelector(".tk-closed")?.textContent ?? "no note");
+  tickets.ticket = { ...dovThread, assignee: "Mira", assignee_id: 7 };
+  await settle();
+  check("an open ticket has its box back", !!queue.querySelector(".tk-composer") && !queue.querySelector(".tk-closed"));
+
+  // A kind that no ticket has any more reads as All, not as an empty list.
+  const kindPick = queue.querySelector<HTMLSelectElement>(".tk-tools .tk-select")!;
+  kindPick.value = "bug";
+  kindPick.dispatchEvent(new Event("change", { bubbles: true }));
+  await settle();
+  check("a kind filter shows only that kind", titles().join("|") === "Crash when I look at the market board", titles().join("|"));
+  tickets.handleOob("ticket_remove", [], { id: "crash" });
+  await settle();
+  check("when that kind's last ticket leaves, the filter reads All and the list is not empty", queue.querySelector<HTMLSelectElement>(".tk-tools .tk-select")?.value === "all" && titles().length > 1, `${queue.querySelector<HTMLSelectElement>(".tk-tools .tk-select")?.value}|${titles().length}`);
 
   // A player logging in moves their row up, live.
   tickets.handleOob("ticket_presence", [], { id: "clerk", presence: "room", seen: 0, sort: [0, 0, 0, now - 20000, 1000], account_online: true });
@@ -408,7 +429,7 @@ async function run(): Promise<void> {
 
   // ---- staff, a narrow panel ------------------------------------------------
   const narrow = document.getElementById("narrow")!;
-  const slim = mount(TicketsPanel, { target: narrow });
+  const slim = mount(AssistQueue, { target: narrow });
   await settle();
   check("a narrow panel shows the list alone", shown(narrow.querySelector(".tk-pane-list")) && !shown(narrow.querySelector(".tk-pane-detail")));
   narrow.querySelectorAll<HTMLElement>(".tk-row")[1].click();
@@ -426,7 +447,7 @@ async function run(): Promise<void> {
   // ---- a player: My requests -----------------------------------------------
   tickets.handleOob("ticket_role", [], { staff: false });
   const mine = document.getElementById("mine")!;
-  mount(MyTicketsPanel, { target: mine });
+  mount(AssistMine, { target: mine });
   await settle();
   await wait(60);
   await settle();
@@ -436,6 +457,7 @@ async function run(): Promise<void> {
   check("each request carries a number a person can say", mineRowsEls()[0].textContent!.includes("#1043"));
   check("the player never sees an internal word", !/pending|waiting|with staff|short_id/i.test(mine.textContent ?? ""), mine.textContent ?? "");
   check("the player's panel sets no text below 12px", smallText(mine).length === 0, smallText(mine).slice(0, 5).join(" | "));
+  check("a player, who has no tab bar, sees what the panel is", mine.querySelector(".tk-title")?.textContent === "My requests", mine.querySelector(".tk-title")?.textContent ?? "none");
 
   const mineViews = Array.from(mine.querySelectorAll<HTMLButtonElement>(".tk-view"));
   check("the views are Open, Answered and All", mineViews.map((b) => b.textContent!.replace(/\d+/g, "").trim()).join("|") === "Open|Answered|All");
@@ -451,6 +473,7 @@ async function run(): Promise<void> {
   check("opening a request reads it and shows who wrote what", mine.querySelectorAll(".tk-msg").length === 2 && !!mine.querySelector(".tk-sys") && !!mine.querySelector(".tk-msg.staff"), `${mine.querySelectorAll(".tk-msg").length}`);
   check("reading it clears the new mark", tickets.myRows.find((r) => r.id === "m1")?.unread === false);
   check("the header says it is answered", mine.querySelector(".tk-ds")!.textContent!.includes("Answered"));
+  check("the reply box says it goes to staff, and which request", (mine.querySelector(".tk-to")?.textContent ?? "").includes("To staff") && (mine.querySelector(".tk-to")?.textContent ?? "").includes("#1043"), mine.querySelector(".tk-to")?.textContent ?? "none");
 
   const reply = mine.querySelector<HTMLTextAreaElement>(".tk-box")!;
   type(reply, "It is the east door, and the rent is paid.");

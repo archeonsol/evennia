@@ -11,7 +11,7 @@ export interface SimpleView {
   component: string;
   title: string;
   params?: Record<string, unknown>;
-  /** The base three stay; anything opened later can be closed again. */
+  /** The base views stay; anything opened later can be closed again. */
   closable: boolean;
 }
 
@@ -19,6 +19,7 @@ const BASE: SimpleView[] = [
   { id: "log", component: "log", title: "Terminal", closable: false },
   { id: "scene", component: "scene", title: "Scene", closable: false },
   { id: "chat", component: "chat", title: "Channels", closable: false },
+  { id: "assist", component: "assist", title: "Assist", closable: false },
 ];
 
 class SimpleLayout {

@@ -54,7 +54,10 @@ connection.sendCommand = (line: string) => {
 // Tab-completion warms its cache as words are typed; answer with nothing.
 (connection as any).request = async () => ({ names: [] });
 
-// A clean slate: nothing persisted from an earlier run of this page.
+// A clean slate: nothing persisted from an earlier run of this page. History
+// is recorded only for a signed-in account.
+commands.useAccount(1);
+compose.useAccount(1);
 commands.recent = [];
 compose.setText("");
 compose.setMode("pose");

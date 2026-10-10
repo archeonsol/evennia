@@ -27,9 +27,19 @@ import {
   type ViewKey,
 } from "./ticketModel";
 
-const QUEUE_SEEN_KEY = "underspire.queue.seen.v1";
+/** What the queue badge has been shown, kept per account (`<key>:<account id>`), so two people sharing a browser do not mark each other's tickets seen. */
+export const QUEUE_SEEN_KEY = "underspire.queue.seen.v2";
+/** Kept by the client that read a player's replies from the browser. The server holds that mark now; nothing writes this, but a config export still leaves it out. */
+export const SEEN_KEY = "underspire.tickets.seen.v2";
+/** Set per account once its layout has been given the Assist panel, so closing it sticks. */
+export const ASSIST_ADDED_KEY = "underspire.assist.added";
+/** Seen maps from before they were kept per account; they hold the last user's ticket ids. */
+export const LEGACY_SEEN_KEYS = ["underspire.tickets.seen.v1", "underspire.queue.seen.v1"];
 const VIEW_KEY = "underspire.tickets.view.v2";
 const VIEWS: ViewKey[] = ["mine", "unanswered", "answered", "online", "all"];
+
+/** Which tab of the Assist panel is showing: the caller's own requests, or the staff queue. */
+export type AssistTab = "mine" | "queue";
 
 /** The answer to a ticket action, for the panel to show. */
 export interface TicketResult {
@@ -62,11 +72,21 @@ export interface NewRequest {
   contact?: string;
 }
 
-function loadQueueSeen(): Record<string, number> {
+function loadQueueSeen(account: number | null): Record<string, number> {
+  if (account == null) return {};
   try {
-    return JSON.parse(localStorage.getItem(QUEUE_SEEN_KEY) || "{}");
+    return JSON.parse(localStorage.getItem(`${QUEUE_SEEN_KEY}:${account}`) || "{}");
   } catch {
     return {};
+  }
+}
+
+function saveQueueSeen(account: number | null, map: Record<string, number>): void {
+  if (account == null) return;
+  try {
+    localStorage.setItem(`${QUEUE_SEEN_KEY}:${account}`, JSON.stringify(map));
+  } catch {
+    /* ignore */
   }
 }
 
@@ -136,17 +156,29 @@ class Tickets {
   form = $state<TicketForm>(DEFAULT_FORM);
   private formLoaded = false;
 
-  // -- the tab badge --------------------------------------------------------
+  // -- the Assist panel and its tab badge -----------------------------------
 
-  queueSeen = $state<Record<string, number>>(loadQueueSeen());
-  /** The queue panel is the focused panel: news there is seen at once. */
-  queueActive = false;
+  /** The Assist panel's tab. A player only ever has "mine". */
+  assistTab = $state<AssistTab>("mine");
+  /** The Assist panel is the focused panel (set by the layout). */
+  assistFocused = $state(false);
+  /** What the queue badge has been shown, for this account. */
+  queueSeen = $state<Record<string, number>>({});
+  /** The staff ticket last asked for; an older answer arriving later is dropped. */
+  private viewingId: string | null = null;
+  /** Counts the times the store was emptied for a new login; an answer that began before one is dropped. */
+  private epoch = 0;
 
   /** Opens a panel by view id. Set from main.ts: the dock imports the stores. */
   private openPanel: ((view: string) => void) | null = null;
 
   setPanelOpener(fn: (view: string) => void): void {
     this.openPanel = fn;
+  }
+
+  /** The queue is on screen, so news there is seen at once. */
+  get queueActive(): boolean {
+    return this.assistFocused && this.assistTab === "queue";
   }
 
   /** How many requests hold a reply the player has not read. */
@@ -158,6 +190,49 @@ class Tickets {
   get queueUnseen(): number {
     if (!this.staff) return 0;
     return this.rows.filter((t) => t.status === "pending" && (t.updated ?? 0) > (this.queueSeen[t.id] ?? 0)).length;
+  }
+
+  /** Show a tab of the Assist panel and bring the panel forward. */
+  showTab(tab: AssistTab): void {
+    this.assistTab = tab === "queue" && !this.staff ? "mine" : tab;
+    this.openPanel?.("assist");
+  }
+
+  /** Forget the last account's tickets, role and badges; a new login starts clean. */
+  reset(): void {
+    this.epoch += 1;
+    this.staff = false;
+    this.staffKnown = false;
+    this.accountId = null;
+    this.duty = true;
+    this.canHistory = false;
+    this.lean = false;
+    this.rows = [];
+    this.ticket = null;
+    this.error = "";
+    this.history = [];
+    this.historyMore = false;
+    this.historyCapped = false;
+    this.replies = [];
+    this.priorities = DEFAULT_PRIORITIES;
+    this.loaded = false;
+    this.myRows = [];
+    this.myTicket = null;
+    this.myError = "";
+    this.mySearch = "";
+    this.myRev = 0;
+    this.form = DEFAULT_FORM;
+    this.formLoaded = false;
+    this.queueSeen = {};
+    this.assistTab = "mine";
+    this.viewingId = null;
+    for (const key of LEGACY_SEEN_KEYS) {
+      try {
+        localStorage.removeItem(key);
+      } catch {
+        /* ignore */
+      }
+    }
   }
 
   setView(view: ViewKey): void {
@@ -178,13 +253,19 @@ class Tickets {
    * which is handled below, so a failure here is not an error.
    */
   async hello(): Promise<void> {
+    const epoch = this.epoch;
     try {
       const r = await connection.request<any>("tickets", "ticket_hello");
-      this.accountId = r?.account_id ?? this.accountId;
+      if (epoch !== this.epoch) return;
+      this.useAccount(typeof r?.account_id === "number" ? r.account_id : null);
       this.duty = r?.duty !== false;
       this.canHistory = !!r?.history;
-      this.staff = !!r?.staff;
-      this.staffKnown = true;
+      // The role the server pushed (ticket_role) stands; this answer states it
+      // only when nothing else has, so a late answer cannot undo a quell.
+      if (!this.staffKnown) {
+        this.staff = !!r?.staff;
+        this.staffKnown = true;
+      }
       this.lean = Number(r?.v) >= 2;
       if (Array.isArray(r?.priorities) && r.priorities.length) this.priorities = r.priorities;
       // A new session may be a new game build: ask for the form's words again.
@@ -196,16 +277,55 @@ class Tickets {
     }
   }
 
+  /**
+   * The server's answer on login, on every channel resync, and on @quell and
+   * @unquell. Reading staff from an inbox arriving was never taken back, so a
+   * player who was once sent one kept the staff queue panel for good: the role
+   * stands, and losing it drops the queue already held.
+   */
+  private onRole(k: Record<string, any>): void {
+    this.staff = !!k.staff;
+    this.staffKnown = true;
+    if ("duty" in k) this.duty = k.duty !== false;
+    this.useAccount(typeof k.account === "number" ? k.account : null);
+    if (!this.staff) {
+      this.rows = [];
+      this.ticket = null;
+      this.history = [];
+      this.viewingId = null;
+      this.assistTab = "mine";
+    } else if (!this.lean) {
+      // The first hello can fail when the account signs in after the socket opens.
+      void this.hello();
+    }
+  }
+
+  /** Keep what is held per account under the account that is signed in. */
+  private useAccount(account: number | null): void {
+    if (account == null || account === this.accountId) return;
+    this.accountId = account;
+    this.queueSeen = loadQueueSeen(account);
+    // The tab badge counts the player's unread replies, so the list is loaded
+    // as soon as the account is known and not when the panel is first opened.
+    void this.loadMine(false, "");
+  }
+
+  /** Show a pushed thread in the view the server built it for, or by the role when it names none. */
+  private showThread(t: any): void {
+    const view = t.view ?? (this.staff ? "staff" : "owner");
+    if (view === "staff" && this.staff) {
+      this.ticket = t;
+      this.assistTab = "queue";
+    } else if (view === "owner") {
+      this.myTicket = t;
+      this.assistTab = "mine";
+    }
+  }
+
   handleOob(event: string, _args: any[], kwargs: Record<string, any>): void {
     switch (event) {
       case "ticket_role":
-        // The server's answer, on login and on every channel resync. Reading
-        // staff from an inbox arriving was never taken back, so a player who
-        // was once sent one kept the staff queue panel for good.
-        this.staff = !!kwargs.staff;
-        this.staffKnown = true;
-        if (kwargs.account_id != null) this.accountId = kwargs.account_id;
-        if ("duty" in kwargs) this.duty = kwargs.duty !== false;
+        this.onRole(kwargs);
         break;
       case "ticket_inbox":
         // Before the server has stated the role, an inbox is the only sign of
@@ -232,11 +352,8 @@ class Tickets {
         }
         break;
       case "ticket_thread":
-        // Staff get the workbench; a player's own ticket opens in My requests
-        // (the staff panel does not exist for them).
         if (!kwargs || !kwargs.id) break;
-        if (this.staff) this.ticket = kwargs;
-        else this.myTicket = kwargs;
+        this.showThread(kwargs);
         break;
       case "ticket_alert":
         this.onAlert(kwargs);
@@ -297,7 +414,7 @@ class Tickets {
         : `${row.title || row.label} (${presenceText(row, nowSeconds)})`;
     toasts.push("ticket", title, body, 12000, true, () => {
       void this.openStaff(row.id);
-      this.openPanel?.("tickets");
+      this.showTab("queue");
     });
     notify.ping(title, body, false);
   }
@@ -311,7 +428,7 @@ class Tickets {
     }`;
     toasts.push("ticket", title, body, 12000, true, () => {
       if (k.id) void this.openStaff(String(k.id));
-      this.openPanel?.("tickets");
+      this.showTab("queue");
     });
     notify.ping(title, body);
   }
@@ -320,7 +437,7 @@ class Tickets {
     const mine = Number(k.mine ?? 0);
     if (mine > 0) {
       const title = `${mine} ${mine === 1 ? "request has" : "requests have"} a reply you have not read`;
-      toasts.push("ticket", title, "Open My requests to read it.", 12000, true, () => this.openPanel?.("mytickets"));
+      toasts.push("ticket", title, "Open My requests to read it.", 12000, true, () => this.showTab("mine"));
     }
     const open = Number(k.unanswered ?? 0);
     if (open > 0 && this.staff) {
@@ -331,7 +448,7 @@ class Tickets {
         nobody ? `${nobody} nobody has picked up.` : "",
         12000,
         true,
-        () => this.openPanel?.("tickets"),
+        () => this.showTab("queue"),
       );
     }
   }
@@ -355,9 +472,12 @@ class Tickets {
         },
       ],
     });
-    // Live append to whichever open detail matches (staff or player view).
-    const openStaff = !!this.ticket && k.id === this.ticket.id;
-    const openMine = !!this.myTicket && k.id === this.myTicket.id;
+    // Live append to the open detail of the same view only: a line meant for
+    // the owner must not land in a staff view of the same ticket, and a note
+    // meant for staff must never land in the owner's.
+    const ownerLine = k.audience === "owner";
+    const openStaff = !ownerLine && !!this.ticket && k.id === this.ticket.id;
+    const openMine = ownerLine && !!this.myTicket && k.id === this.myTicket.id;
     if (openStaff) this.ticket = appendTo(this.ticket);
     if (openMine) this.myTicket = appendTo(this.myTicket);
     // Lists show the new state at once: a closed ticket used to read "pending"
@@ -377,11 +497,11 @@ class Tickets {
     // News to the owner: a staff reply, or a closed, decided or reopened notice.
     // Picking a ticket up is in the thread but does not make it unread.
     const ours = k.audience === "owner" && !!k.origin && k.origin !== "player" && k.news !== false;
-    if (this.myRows.some((t) => t.id === k.id)) this.myRows = touch(this.myRows, ours && !openMine);
-    if (this.rows.some((t) => t.id === k.id)) this.rows = touch(this.rows, false);
+    if (ownerLine && this.myRows.some((t) => t.id === k.id)) this.myRows = touch(this.myRows, ours && !openMine);
+    if (!ownerLine && this.rows.some((t) => t.id === k.id)) this.rows = touch(this.rows, false);
     if (this.queueActive) this.markQueueSeen();
     // Refresh the list's state and preview for the owner's own requests.
-    if (!this.staff || this.myRows.some((t) => t.id === k.id)) this.myRev += 1;
+    if (ownerLine) this.myRev += 1;
     this.announce(k, openStaff, openMine);
   }
 
@@ -399,14 +519,14 @@ class Tickets {
       const body = k.origin === "system" ? preview : `${k.sender ?? "Staff"}: ${preview}`;
       toasts.push("ticket", title, body, 12000, true, () => {
         void this.openMine(String(k.id));
-        this.openPanel?.("mytickets");
+        this.showTab("mine");
       });
       notify.ping(title, body, false);
     } else if (k.audience === "assignee" && k.origin === "player" && !openStaff) {
       const title = `${whoIs({ requester_name: k.sender, account_name: "" })} replied: ${about}`;
       toasts.push("ticket", title, preview, 12000, true, () => {
         void this.openStaff(String(k.id));
-        this.openPanel?.("tickets");
+        this.showTab("queue");
       });
       notify.ping(title, preview, false);
     }
@@ -416,27 +536,39 @@ class Tickets {
 
   /** Open a ticket in the workbench. The thread comes back as the request's answer. */
   async openStaff(id: string): Promise<boolean> {
+    this.viewingId = id;
     try {
-      this.ticket = await connection.request<any>("tickets", "ticket_get", { id });
+      const t = await connection.request<any>("tickets", "ticket_get", { id });
+      // A later request, a Back, or the loss of the role makes this answer stale.
+      if (this.viewingId !== id || !this.staff) return false;
+      this.showThread({ view: "staff", ...t });
       this.error = "";
       return true;
     } catch (e: any) {
-      this.error = String(e?.message || "Could not open that ticket.");
+      if (this.viewingId === id) this.error = String(e?.message || "Could not open that ticket.");
       return false;
     }
   }
 
   closeStaff(): void {
+    this.viewingId = null;
     this.ticket = null;
   }
 
   /** One staff action. Resolves to the message to show; the open ticket is refreshed. */
   async act(id: string, action: string, extra: Record<string, unknown> = {}): Promise<TicketResult> {
+    const epoch = this.epoch;
     try {
       const r = await connection.request<any>("tickets", "ticket_act", { id, action, ...extra });
-      if (r?.ticket && (!this.ticket || this.ticket.id === r.ticket.id)) this.ticket = r.ticket;
+      const result = { ok: true, message: String(r?.message ?? "Done."), puppet: r?.puppet ?? null };
+      // An answer that lands after the account left is not shown to the next one.
+      if (epoch !== this.epoch) return result;
+      if (r?.ticket && this.staff && (!this.ticket || this.ticket.id === r.ticket.id)) this.ticket = r.ticket;
+      // Done, and the ticket is now one this viewer may not read (a finished
+      // ticket without the capability for the record): stop showing it.
+      if (r && "ticket" in r && !r.ticket && id && this.ticket?.id === id) this.ticket = null;
       if (typeof r?.duty === "boolean") this.duty = r.duty;
-      return { ok: true, message: String(r?.message ?? "Done."), puppet: r?.puppet ?? null };
+      return result;
     } catch (e: any) {
       return fail(e);
     }
@@ -487,12 +619,14 @@ class Tickets {
   }
 
   async loadHistory(search = "", offset = 0): Promise<void> {
+    const epoch = this.epoch;
     try {
       const r = await connection.request<any>("tickets", "ticket_list", {
         history: true,
         search,
         offset,
       });
+      if (epoch !== this.epoch) return;
       const rows: TicketRow[] = r?.tickets ?? [];
       this.history = offset ? [...this.history, ...rows] : rows;
       this.historyMore = !!r?.has_next;
@@ -513,8 +647,10 @@ class Tickets {
   }
 
   async loadReplies(): Promise<void> {
+    const epoch = this.epoch;
     try {
       const r = await connection.request<any>("tickets", "ticket_replies", { op: "list" });
+      if (epoch !== this.epoch) return;
       this.replies = r?.replies ?? [];
     } catch {
       this.replies = [];
@@ -566,11 +702,7 @@ class Tickets {
     }
     if (!changed) return;
     this.queueSeen = next;
-    try {
-      localStorage.setItem(QUEUE_SEEN_KEY, JSON.stringify(next));
-    } catch {
-      /* ignore */
-    }
+    saveQueueSeen(this.accountId, next);
   }
 
   // -- a player's own requests ---------------------------------------------
@@ -582,23 +714,29 @@ class Tickets {
    * covers finished requests too, and never a staff-only note.
    */
   async loadMine(includeClosed = false, search = this.mySearch): Promise<void> {
+    const epoch = this.epoch;
     try {
       const r = await connection.request<any>("tickets", "my_tickets", { closed: includeClosed, search });
+      if (epoch !== this.epoch) return;
       this.myRows = r?.tickets ?? [];
       this.myError = "";
     } catch (e: any) {
-      this.myError = String(e?.message || "Could not load your requests.");
+      if (epoch === this.epoch) this.myError = String(e?.message || "Could not load your requests.");
     }
   }
 
   /** Open one request. Reading it is the server's mark, so another device agrees. */
   async openMine(id: string): Promise<void> {
+    const epoch = this.epoch;
     try {
-      this.myTicket = await connection.request<any>("tickets", "my_ticket", { id });
+      const t = await connection.request<any>("tickets", "my_ticket", { id });
+      if (epoch !== this.epoch) return;
+      this.myTicket = t;
       this.myError = "";
-      this.myRows = this.myRows.map((t) => (t.id === id ? { ...t, unread: false } : t));
+      this.assistTab = "mine";
+      this.myRows = this.myRows.map((r) => (r.id === id ? { ...r, unread: false } : r));
     } catch (e: any) {
-      this.myError = String(e?.message || "Could not open that request.");
+      if (epoch === this.epoch) this.myError = String(e?.message || "Could not open that request.");
     }
   }
 
@@ -609,8 +747,10 @@ class Tickets {
 
   /** Reply to, or withdraw, one of the player's own requests. */
   async mineAct(id: string, action: "reply" | "withdraw", text = ""): Promise<TicketResult> {
+    const epoch = this.epoch;
     try {
       const r = await connection.request<any>("tickets", "my_ticket_act", { id, action, text });
+      if (epoch !== this.epoch) return { ok: true, message: String(r?.message ?? "Done.") };
       if (r?.ticket) {
         this.myTicket = r.ticket;
         this.myRows = this.myRows.map((t) => (t.id === id ? { ...t, unread: false } : t));
@@ -624,9 +764,14 @@ class Tickets {
 
   /** File a new request of any kind a player may open. */
   async file(request: NewRequest): Promise<TicketResult> {
+    const epoch = this.epoch;
     try {
       const r = await connection.request<any>("tickets", "ticket_open", request);
-      if (r?.ticket) this.myTicket = r.ticket;
+      if (epoch !== this.epoch) return { ok: true, message: String(r?.message ?? "Sent.") };
+      if (r?.ticket) {
+        this.myTicket = r.ticket;
+        this.assistTab = "mine";
+      }
       this.myRev += 1;
       return { ok: true, message: String(r?.message ?? "Sent.") };
     } catch (e: any) {

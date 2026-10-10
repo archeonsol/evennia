@@ -2,6 +2,10 @@
   import { connection } from "../lib/evennia.svelte";
   import { modal } from "../lib/modal";
 
+  // Reconnect reloads the page: every store starts empty, so the next login
+  // cannot read what the last account had on screen. The scrim is opaque for
+  // the same reason.
+
   let reconnectBtn = $state<HTMLButtonElement | null>(null);
   // The portal handed this session to another window (a copied tab).
   const moved = $derived(connection.logoutReason === "superseded");
@@ -16,7 +20,7 @@
       {moved ? "Your session has moved to another window." : "You have left Underspire."}
     </p>
     <div class="acts">
-      <button class="sh-cmd primary" bind:this={reconnectBtn} onclick={() => connection.reconnect()}>Reconnect</button>
+      <button class="sh-cmd primary" bind:this={reconnectBtn} onclick={() => location.reload()}>Reconnect</button>
       <a class="sh-cmd" href="/">Leave</a>
     </div>
   </div>
@@ -26,7 +30,7 @@
   .scrim {
     position: fixed; inset: 0; z-index: 200;
     display: flex; align-items: center; justify-content: center;
-    background: rgba(0, 0, 0, 0.86);
+    background: var(--bg);
   }
   .quit {
     width: min(22rem, 92vw); padding: 1.6rem 1.6rem 1.3rem;

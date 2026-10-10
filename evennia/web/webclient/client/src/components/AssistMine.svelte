@@ -175,7 +175,8 @@
 
 <div class="tk" role="region" aria-label="My requests">
   <div class="tk-hd">
-    <span class="tk-title">My requests</span>
+    <!-- Staff have the tab bar above to say whose requests these are. -->
+    {#if !tickets.staff}<span class="tk-title">My requests</span>{/if}
     {#if ticket}
       <button class="tk-btn quiet" style="margin-left:auto" onclick={back}>Back to the list</button>
     {:else if composing}
@@ -339,6 +340,7 @@
       </div>
       {#if canReply}
         <div class="tk-composer">
+          <div class="tk-to">To <b>staff</b> · {ticket.ref}</div>
           <textarea
             class="tk-box"
             bind:value={reply}

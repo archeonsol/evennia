@@ -2,7 +2,7 @@
 // believable session so the chrome can be judged with content in it.
 //
 //   npx vite --port 5300   then open /tests/preview.html
-//   ?panel=tickets  opens My Tickets; ?theme=<id> picks a theme.
+//   ?panel=assist   opens Assist; ?theme=<id> picks a theme.
 //   ?help=<query>   opens the help panel on a recorded page ("" is the index).
 //   ?settings=<view>  opens Settings, on a page when one is named (reading).
 //

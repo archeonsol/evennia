@@ -539,6 +539,25 @@
 .tk-tab.note {
   color: var(--gold);
 }
+/* Who a reply goes to, above the box, so a note is never mistaken for a reply. */
+.tk-to {
+  color: var(--fg-dim);
+  font-size: 0.8rem;
+}
+.tk-to b {
+  color: var(--gold);
+  font-weight: normal;
+}
+.tk-to.note {
+  color: var(--gold);
+}
+.tk-closed {
+  margin: 0;
+  padding: 8px 12px;
+  border-top: 1px solid var(--border);
+  color: var(--fg-dim);
+  font-size: 0.8rem;
+}
 .tk-box {
   width: 100%;
   min-height: 62px;

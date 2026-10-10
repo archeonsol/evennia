@@ -208,6 +208,8 @@ export interface TicketMsgPayload {
   visibility?: string;
   ts: number;
   status?: string;
+  short_id?: string;
+  number?: number;
   ref?: string;
   label?: string;
   title?: string;
@@ -234,7 +236,7 @@ export interface TicketRemovePayload {
 /** Whether this session works the staff ticket queue, who it is, and whether it is on duty. Sent at login and on @sync_channels. */
 export interface TicketRolePayload {
   staff: boolean;
-  account_id?: number;
+  account?: number;
   duty?: boolean;
 }
 

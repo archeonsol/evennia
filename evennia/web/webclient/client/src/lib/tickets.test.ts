@@ -47,23 +47,8 @@ let commands: string[];
 let pushed: { kind: string; title: string; body: string; open?: () => void }[];
 
 function reset(): void {
-  tickets.staff = false;
-  tickets.staffKnown = false;
-  tickets.accountId = null;
-  tickets.duty = true;
-  tickets.canHistory = false;
-  tickets.lean = false;
-  tickets.rows = [];
-  tickets.ticket = null;
-  tickets.error = "";
-  tickets.history = [];
-  tickets.myRows = [];
-  tickets.myTicket = null;
-  tickets.myError = "";
-  tickets.queueSeen = {};
-  tickets.queueActive = false;
-  // The first full queue is the baseline, not news.
-  (tickets as any).loaded = false;
+  tickets.reset();
+  tickets.assistFocused = false;
 }
 
 beforeEach(() => {
@@ -93,7 +78,7 @@ afterEach(() => {
 
 describe("who the server says this tab is", () => {
   it("takes the role from the server", () => {
-    tickets.handleOob("ticket_role", [], { staff: true, account_id: 7, duty: false });
+    tickets.handleOob("ticket_role", [], { staff: true, account: 7, duty: false });
     expect(tickets.staff).toBe(true);
     expect(tickets.staffKnown).toBe(true);
     expect(tickets.accountId).toBe(7);
@@ -156,7 +141,7 @@ describe("asking for the lean protocol", () => {
 
 describe("a change to the queue", () => {
   beforeEach(() => {
-    tickets.handleOob("ticket_role", [], { staff: true, account_id: 7 });
+    tickets.handleOob("ticket_role", [], { staff: true, account: 7 });
     tickets.handleOob("ticket_inbox", [], { tickets: [row({ id: "a" })] });
     pushed.length = 0;
   });
@@ -223,7 +208,7 @@ describe("a change to the queue", () => {
 
 describe("the whole-queue protocol", () => {
   beforeEach(() => {
-    tickets.handleOob("ticket_role", [], { staff: true, account_id: 7 });
+    tickets.handleOob("ticket_role", [], { staff: true, account: 7 });
   });
 
   it("does not call the first queue news", () => {
@@ -370,13 +355,15 @@ describe("alerts and the login line", () => {
     tickets.setPanelOpener((v) => opened.push(v));
     tickets.handleOob("ticket_unread", [], { mine: 1 });
     pushed[0].open?.();
-    expect(opened).toEqual(["mytickets"]);
+    expect(opened).toEqual(["assist"]);
   });
 });
 
 describe("staff actions", () => {
   beforeEach(() => {
-    tickets.handleOob("ticket_role", [], { staff: true, account_id: 7 });
+    tickets.handleOob("ticket_role", [], { staff: true, account: 7 });
+    // Learning the account loads the lists; these tests are about what a click asks.
+    calls.length = 0;
   });
 
   it("sends the id, the action and what it needs, and shows the ticket that comes back", async () => {
@@ -566,7 +553,7 @@ describe("the words of the new-request form", () => {
 
 describe("the queue tab badge", () => {
   beforeEach(() => {
-    tickets.handleOob("ticket_role", [], { staff: true, account_id: 7 });
+    tickets.handleOob("ticket_role", [], { staff: true, account: 7 });
   });
 
   it("flags unseen unanswered tickets and clears them once looked at", () => {
@@ -584,9 +571,19 @@ describe("the queue tab badge", () => {
   });
 
   it("counts an arrival while the queue panel is open as seen", () => {
-    tickets.queueActive = true;
+    tickets.assistFocused = true;
+    tickets.assistTab = "queue";
     tickets.handleOob("ticket_inbox", [], { tickets: [row({ id: "a", updated: 10 })] });
+    expect(tickets.queueActive).toBe(true);
     expect(tickets.queueUnseen).toBe(0);
+  });
+
+  it("does not count an arrival as seen while the other tab shows", () => {
+    tickets.assistFocused = true;
+    tickets.assistTab = "mine";
+    tickets.handleOob("ticket_inbox", [], { tickets: [row({ id: "a", updated: 10 })] });
+    expect(tickets.queueActive).toBe(false);
+    expect(tickets.queueUnseen).toBe(1);
   });
 
   it("does not flag an answered ticket", () => {
@@ -598,5 +595,242 @@ describe("the queue tab badge", () => {
     tickets.handleOob("ticket_role", [], { staff: false });
     tickets.rows = [row({ id: "a", updated: 10 })];
     expect(tickets.queueUnseen).toBe(0);
+  });
+});
+
+function storage(): Map<string, string> {
+  const store = new Map<string, string>();
+  vi.stubGlobal("localStorage", {
+    getItem: (k: string) => store.get(k) ?? null,
+    setItem: (k: string, v: string) => void store.set(k, v),
+    removeItem: (k: string) => void store.delete(k),
+  });
+  return store;
+}
+
+describe("losing the role", () => {
+  it("drops the queue it held when the role is lost", () => {
+    tickets.handleOob("ticket_role", [], { staff: true, account: 7 });
+    tickets.handleOob("ticket_inbox", [], { tickets: [row({ id: "a" })] });
+    tickets.ticket = { id: "a", view: "staff", messages: [] };
+    tickets.history = [row({ id: "done" })];
+    tickets.assistTab = "queue";
+    tickets.handleOob("ticket_role", [], { staff: false, account: 7 });
+    expect(tickets.rows).toEqual([]);
+    expect(tickets.ticket).toBeNull();
+    expect(tickets.history).toEqual([]);
+    expect(tickets.assistTab).toBe("mine");
+  });
+
+  it("asks for the lean protocol when staff arrive and it has not begun", () => {
+    tickets.handleOob("ticket_role", [], { staff: true, account: 7 });
+    expect(calls.some((c) => c.action === "ticket_hello")).toBe(true);
+  });
+
+  it("does not ask again once it has begun", () => {
+    tickets.lean = true;
+    tickets.handleOob("ticket_role", [], { staff: true, account: 7 });
+    expect(calls.some((c) => c.action === "ticket_hello")).toBe(false);
+  });
+
+  it("does not let a late hello answer undo a role the server pushed", async () => {
+    tickets.handleOob("ticket_role", [], { staff: true, account: 7 });
+    tickets.handleOob("ticket_role", [], { staff: false, account: 7 });
+    answer = () => ({ v: 2, staff: true, account_id: 7 });
+    await tickets.hello();
+    expect(tickets.staff).toBe(false);
+  });
+});
+
+describe("ticket views", () => {
+  it("opens an owner view on the My requests tab, even for staff", () => {
+    tickets.handleOob("ticket_role", [], { staff: true, account: 7 });
+    tickets.handleOob("ticket_thread", [], { id: "a", view: "owner", messages: [] });
+    expect(tickets.myTicket?.id).toBe("a");
+    expect(tickets.ticket).toBeNull();
+    expect(tickets.assistTab).toBe("mine");
+  });
+
+  it("opens a staff view in the queue", () => {
+    tickets.handleOob("ticket_role", [], { staff: true, account: 7 });
+    tickets.handleOob("ticket_thread", [], { id: "b", view: "staff", messages: [] });
+    expect(tickets.ticket?.id).toBe("b");
+    expect(tickets.myTicket).toBeNull();
+    expect(tickets.assistTab).toBe("queue");
+  });
+
+  it("shows a player no staff view", () => {
+    tickets.handleOob("ticket_role", [], { staff: false, account: 7 });
+    tickets.handleOob("ticket_thread", [], { id: "b", view: "staff", messages: [] });
+    expect(tickets.ticket).toBeNull();
+    expect(tickets.myTicket).toBeNull();
+  });
+
+  it("goes by the role when the thread names no view", () => {
+    tickets.handleOob("ticket_role", [], { staff: true, account: 7 });
+    tickets.handleOob("ticket_thread", [], { id: "c", messages: [] });
+    expect(tickets.ticket?.id).toBe("c");
+    tickets.handleOob("ticket_role", [], { staff: false, account: 7 });
+    tickets.handleOob("ticket_thread", [], { id: "d", messages: [] });
+    expect(tickets.myTicket?.id).toBe("d");
+  });
+
+  it("appends a line only to the view of its audience", () => {
+    tickets.handleOob("ticket_role", [], { staff: true, account: 7 });
+    tickets.ticket = { id: "a", view: "staff", messages: [] };
+    tickets.myTicket = { id: "a", view: "owner", messages: [] };
+    tickets.handleOob("ticket_msg", [], { id: "a", audience: "staff", text: "internal", visibility: "internal" });
+    tickets.handleOob("ticket_msg", [], { id: "a", audience: "owner", origin: "staff", text: "for you" });
+    expect(tickets.ticket.messages.map((m: any) => m.text)).toEqual(["internal"]);
+    expect(tickets.myTicket.messages.map((m: any) => m.text)).toEqual(["for you"]);
+  });
+
+  it("keeps a staff-audience line out of the owner's list rows", () => {
+    tickets.handleOob("ticket_role", [], { staff: true, account: 7 });
+    tickets.myRows = [row({ id: "a", preview: "first", unread: false })];
+    tickets.handleOob("ticket_msg", [], { id: "a", audience: "staff", text: "a private note", visibility: "internal" });
+    expect(tickets.myRows[0].preview).toBe("first");
+    expect(tickets.myRows[0].unread).toBe(false);
+  });
+});
+
+describe("state across logins", () => {
+  let store: Map<string, string>;
+  beforeEach(() => {
+    store = storage();
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("clears the last account's tickets and role", () => {
+    tickets.handleOob("ticket_role", [], { staff: true, account: 1 });
+    tickets.handleOob("ticket_inbox", [], { tickets: [row({ id: "a" })] });
+    tickets.myRows = [row({ id: "m" })];
+    tickets.myTicket = { id: "m", view: "owner", messages: [] };
+    tickets.history = [row({ id: "done" })];
+    tickets.replies = [{ id: 1, name: "hello", body: "Hi", shared: false, mine: true }];
+    tickets.reset();
+    expect([tickets.rows, tickets.myRows, tickets.ticket, tickets.myTicket, tickets.history, tickets.replies]).toEqual([[], [], null, null, [], []]);
+    expect([tickets.staff, tickets.staffKnown, tickets.accountId]).toEqual([false, false, null]);
+  });
+
+  it("keeps each account's queue marks apart", () => {
+    tickets.handleOob("ticket_role", [], { staff: true, account: 1 });
+    tickets.handleOob("ticket_inbox", [], { tickets: [row({ id: "a", updated: 50 })] });
+    tickets.markQueueSeen();
+    expect(JSON.parse(store.get("underspire.queue.seen.v2:1") ?? "{}")).toEqual({ a: 50 });
+    tickets.handleOob("ticket_role", [], { staff: true, account: 2 });
+    expect(tickets.queueSeen).toEqual({});
+    expect(tickets.queueUnseen).toBe(1);
+    tickets.handleOob("ticket_role", [], { staff: true, account: 1 });
+    expect(tickets.queueSeen).toEqual({ a: 50 });
+  });
+
+  it("loads the caller's own requests when the account is known", () => {
+    tickets.handleOob("ticket_role", [], { staff: false, account: 7 });
+    const mine = calls.find((c) => c.action === "my_tickets");
+    expect(mine?.data).toEqual({ closed: false, search: "" });
+  });
+
+  it("does not load them again for the same account", () => {
+    tickets.handleOob("ticket_role", [], { staff: false, account: 7 });
+    tickets.handleOob("ticket_role", [], { staff: false, account: 7 });
+    expect(calls.filter((c) => c.action === "my_tickets")).toHaveLength(1);
+  });
+
+  it("removes the seen maps kept before they were per account", () => {
+    store.set("underspire.tickets.seen.v1", '{"a":1}');
+    store.set("underspire.queue.seen.v1", '{"b":1}');
+    tickets.reset();
+    expect([...store.keys()]).toEqual([]);
+  });
+
+  it("drops an answer that lands after the account left", async () => {
+    let finish: (v: any) => void = () => {};
+    answer = (_ns, action) => (action === "my_tickets" ? new Promise((resolve) => (finish = resolve)) : {});
+    const pending = tickets.loadMine();
+    tickets.reset();
+    finish({ tickets: [row({ id: "last-account" })] });
+    await pending;
+    expect(tickets.myRows).toEqual([]);
+  });
+});
+
+describe("late answers", () => {
+  it("drops a view answer for a ticket no longer asked for", async () => {
+    tickets.handleOob("ticket_role", [], { staff: true, account: 7 });
+    let first: (v: any) => void = () => {};
+    answer = (_ns, action, data) =>
+      action === "ticket_get" && data.id === "x"
+        ? new Promise((resolve) => (first = resolve))
+        : action === "ticket_get"
+          ? { id: data.id, messages: [] }
+          : {};
+    const slow = tickets.openStaff("x");
+    await tickets.openStaff("y");
+    first({ id: "x", messages: [] });
+    await slow;
+    expect(tickets.ticket?.id).toBe("y");
+  });
+
+  it("drops a staff answer that lands after the role is gone", async () => {
+    tickets.handleOob("ticket_role", [], { staff: true, account: 7 });
+    let finish: (v: any) => void = () => {};
+    answer = (_ns, action) => (action === "ticket_get" ? new Promise((resolve) => (finish = resolve)) : {});
+    const pending = tickets.openStaff("x");
+    tickets.handleOob("ticket_role", [], { staff: false, account: 7 });
+    finish({ id: "x", messages: [] });
+    await pending;
+    expect(tickets.ticket).toBeNull();
+  });
+
+  it("drops a staff answer that lands after Back", async () => {
+    tickets.handleOob("ticket_role", [], { staff: true, account: 7 });
+    let finish: (v: any) => void = () => {};
+    answer = (_ns, action) => (action === "ticket_get" ? new Promise((resolve) => (finish = resolve)) : {});
+    const pending = tickets.openStaff("x");
+    tickets.closeStaff();
+    finish({ id: "x", messages: [] });
+    await pending;
+    expect(tickets.ticket).toBeNull();
+  });
+
+  it("stops showing a ticket the action left unreadable", async () => {
+    tickets.handleOob("ticket_role", [], { staff: true, account: 7 });
+    tickets.ticket = { id: "x", view: "staff", messages: [] };
+    answer = () => ({ message: "Approved.", ticket: null });
+    const result = await tickets.approve("x");
+    expect(result).toEqual({ ok: true, message: "Approved.", puppet: null });
+    expect(tickets.ticket).toBeNull();
+  });
+
+  it("shows a staff member's own request on the My requests tab", async () => {
+    tickets.handleOob("ticket_role", [], { staff: true, account: 7 });
+    tickets.assistTab = "queue";
+    answer = (_ns, action) => (action === "my_ticket" ? { id: "m", view: "owner", messages: [] } : {});
+    await tickets.openMine("m");
+    expect(tickets.assistTab).toBe("mine");
+  });
+});
+
+describe("opening the Assist panel from a toast", () => {
+  it("brings the panel forward on the tab the news is for", () => {
+    const opened: string[] = [];
+    tickets.setPanelOpener((view) => opened.push(view));
+    tickets.handleOob("ticket_role", [], { staff: true, account: 7 });
+    tickets.handleOob("ticket_unread", [], { mine: 1, unanswered: 2, unclaimed: 1 });
+    expect(pushed).toHaveLength(2);
+    pushed[0].open?.();
+    expect(tickets.assistTab).toBe("mine");
+    pushed[1].open?.();
+    expect(tickets.assistTab).toBe("queue");
+    expect(opened).toEqual(["assist", "assist"]);
+  });
+
+  it("never shows a player the queue tab", () => {
+    tickets.handleOob("ticket_role", [], { staff: false, account: 7 });
+    tickets.showTab("queue");
+    expect(tickets.assistTab).toBe("mine");
   });
 });

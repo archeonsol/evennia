@@ -2,7 +2,6 @@
   import { connection } from "../lib/evennia.svelte";
   import { scene } from "../lib/scene.svelte";
   import { dock, VIEWS } from "../lib/dock.svelte";
-  import { chat } from "../lib/chat.svelte";
   import { media } from "../lib/media.svelte";
   import { settings } from "../lib/settings.svelte";
   import { focusRegion, type Region } from "../lib/regions";
@@ -20,10 +19,8 @@
 
   let viewsOpen = $state(false);
   let volOpen = $state(false);
-  // Panels the player can reopen (Tickets only for staff).
-  const viewIds = $derived(
-    Object.keys(VIEWS).filter((id) => (id !== "tickets" || chat.staff) && (id !== "activity" || activity.allowed)),
-  );
+  // Panels the player can reopen.
+  const viewIds = $derived(Object.keys(VIEWS).filter((id) => id !== "activity" || activity.allowed));
   // Where focus goes after a pick: the view's own region when it has one,
   // else the tab of the new view in the screen-reader layout, else back to
   // the Views button. Closing the list must not leave focus on the body.
