@@ -16,6 +16,12 @@ const API = "/api/console/";
 const HEADER = "X-Evennia-Console";
 const RECONNECT_MS = 1000;
 
+/** The longest pause between attempts after repeated failures. */
+const MAX_RECONNECT_MS = 30_000;
+
+/** Said when the server refused the feed and gave no sentence of its own. */
+const REFUSED = "The server refused the live feed.";
+
 /** How many log lines are kept. Past this, the oldest are dropped. */
 export const LIVE_LOG_LIMIT = 300;
 
@@ -63,8 +69,20 @@ export interface WatchEntry {
   newline?: boolean;
 }
 
+/** Why the server will not serve the feed. Retrying cannot change it. */
+export interface Refusal {
+  detail: string;
+  /** Whether the operator has to sign in again, as opposed to being refused. */
+  reauthenticate: boolean;
+}
+
 export const live = $state({
   connected: false,
+  /* Set when the server refused or closed the feed on purpose, for example
+   * because the console session sat idle. While it is set the feed is not
+   * retried: asking again every second repeats the refusal, and the answer
+   * only changes when the operator signs in. */
+  refusal: null as Refusal | null,
   health: null as Health | null,
   metrics: null as Metrics | null,
   log: [] as LogEntry[],
@@ -99,11 +117,38 @@ export function openFeed(onDegraded?: (degraded: boolean) => void): void {
   void runFeed(controller, onDegraded);
 }
 
-/** Keep one authenticated stream open, reconnecting after a bounded pause. */
+/** Read the sentence a refused feed request carries, whatever shape it is in. */
+async function readRefusal(response: Response): Promise<Refusal> {
+  let text = "";
+  try {
+    text = await response.text();
+  } catch {
+    return { detail: REFUSED, reauthenticate: false };
+  }
+  try {
+    const body = JSON.parse(text) as { detail?: unknown; reauthenticate?: unknown };
+    return {
+      detail: typeof body.detail === "string" && body.detail ? body.detail : REFUSED,
+      reauthenticate: body.reauthenticate === true,
+    };
+  } catch {
+    return { detail: text.trim().slice(0, 200) || REFUSED, reauthenticate: false };
+  }
+}
+
+/**
+ * Keep one authenticated stream open, reconnecting after a bounded pause.
+ *
+ * A refusal (401 or 403) ends the loop: it is the server's answer, not a fault,
+ * and it does not clear by waiting. Any other failure is retried with a pause
+ * that doubles up to MAX_RECONNECT_MS, so an outage is not met with a request
+ * every second for as long as it lasts.
+ */
 async function runFeed(
   run: AbortController,
   onDegraded?: (degraded: boolean) => void,
 ): Promise<void> {
+  let pauseMs = RECONNECT_MS;
   while (controller === run && !run.signal.aborted) {
     try {
       const suffix = lastSequence ? `?since=${lastSequence}` : "";
@@ -112,10 +157,18 @@ async function runFeed(
         headers: { [HEADER]: "1", Accept: "text/event-stream" },
         signal: run.signal,
       });
+      if (response.status === 401 || response.status === 403) {
+        live.refusal = await readRefusal(response);
+        live.connected = false;
+        if (controller === run) controller = null;
+        return;
+      }
       if (!response.ok || !response.body) {
         throw new Error(`console feed returned ${response.status}`);
       }
       live.connected = true;
+      live.refusal = null;
+      pauseMs = RECONNECT_MS;
       const reconnect = await consume(response.body, run.signal, onDegraded);
       if (!reconnect) {
         if (controller === run) controller = null;
@@ -126,7 +179,8 @@ async function runFeed(
       if (run.signal.aborted || controller !== run) return;
     }
     live.connected = false;
-    await pause(RECONNECT_MS, run.signal);
+    await pause(pauseMs, run.signal);
+    pauseMs = Math.min(pauseMs * 2, MAX_RECONNECT_MS);
   }
 }
 
@@ -153,7 +207,13 @@ async function consume(
     }
     const sequence = Number(eventId || payload.s || 0);
     if (Number.isFinite(sequence)) lastSequence = Math.max(lastSequence, sequence);
-    if (topic === "closed") return false;
+    if (topic === "closed") {
+      live.refusal = {
+        detail: typeof payload.reason === "string" && payload.reason ? payload.reason : REFUSED,
+        reauthenticate: payload.reauthenticate === true,
+      };
+      return false;
+    }
     deliver(topic, payload, onDegraded);
     return true;
   };
@@ -246,4 +306,5 @@ export function closeFeed(): void {
   controller = null;
   lastSequence = 0;
   live.connected = false;
+  live.refusal = null;
 }
