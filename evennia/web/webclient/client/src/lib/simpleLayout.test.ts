@@ -3,9 +3,9 @@ import { describe, expect, it } from "vitest";
 import { simple } from "./simpleLayout.svelte";
 
 describe("simple layout", () => {
-  it("starts on the terminal with the three base views", () => {
+  it("starts on the terminal with the base views", () => {
     expect(simple.active).toBe("log");
-    expect(simple.views.map((v) => v.id)).toEqual(["log", "scene", "chat"]);
+    expect(simple.views.map((v) => v.id)).toEqual(["log", "scene", "chat", "assist"]);
   });
 
   it("opens a new view once, shows it, and closes back to the terminal", () => {

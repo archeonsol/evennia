@@ -38,6 +38,10 @@ BrowserSessionStore = importlib.import_module(settings.SESSION_ENGINE).SessionSt
 _GA = object.__getattribute__
 _SA = object.__setattr__
 
+# The shell build the server expects, sent as ``caps.shell``. Raise it with the
+# client's when a release breaks tabs still running the bundle before it.
+SHELL_GENERATION = 1
+
 
 def _idle_commands():
     """Tuple of strings that count as the idle command.
@@ -859,6 +863,10 @@ def azaban_hello(session, *args, **kwargs):
     if flags is None:
         return False
     session.update_flags(**flags)
+    # A deploy reconnects open tabs without reloading them. An old bundle
+    # cannot be made to reload, so the player is asked to.
+    if not isinstance(flags["AZABAN_CAPS"].get("shell"), int) or flags["AZABAN_CAPS"]["shell"] < SHELL_GENERATION:
+        session.msg(text="This page runs an older web client. Reload the page to update it.")
     return True
 
 

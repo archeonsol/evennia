@@ -1,11 +1,12 @@
 <script lang="ts">
-  // The staff Ticket Queue: find a ticket, read it, act on it.
+  // The Queue tab of the Assist panel: find a ticket, read it, act on it.
   //
   // Actions go through the ticket_act RPC (chat.ticketAct), so each button's
   // answer shows here, not as "Posted." or "Ticket #... closed." in the
   // terminal beside the panel.
   import { chat, type TicketResult } from "../lib/chat.svelte";
   import { renderBody, renderSender } from "../lib/markup";
+  import { TICKET_SORTS, loadTicketSort, saveTicketSort, sortTickets, type TicketSort } from "../lib/ticketSort";
 
   type Show = "all" | "pending" | "waiting" | "unclaimed";
 
@@ -14,6 +15,7 @@
   let history = $state(false);
   let kindFilter = $state("all");
   let show = $state<Show>("all");
+  let sort = $state<TicketSort>(loadTicketSort());
   let search = $state("");
   let reason = $state("");
   let deciding = $state<"approve" | "deny" | null>(null);
@@ -27,6 +29,9 @@
     "all",
     ...Array.from(new Set(source.map((t: any) => t.kind))),
   ]);
+  // A kind filter whose last ticket closed would hide every row, and the
+  // filter bar that could clear it is gone below two kinds.
+  const kind = $derived(kinds.includes(kindFilter) ? kindFilter : "all");
   const q = $derived(search.trim().toLowerCase());
   // The open queue is small and already here, so it narrows as you type, on
   // the fields the server's search reads. The history is searched on the
@@ -36,20 +41,21 @@
     return [t.short_id, t.subject, t.requester_name, t.account_name, t.preview, t.label, t.assignee]
       .some((v) => String(v ?? "").toLowerCase().includes(q));
   }
-  // Filter by kind and state, then highest priority first, then newest first.
-  // Oldest-first buried fresh tickets behind stale ones nobody could action
-  // (blocked, or deliberately parked at low priority).
-  const rows = $derived(
-    [...source]
-      .filter((t: any) => kindFilter === "all" || t.kind === kindFilter)
+  // The history keeps the server's order: latest decision first.
+  const filtered = $derived(
+    source
+      .filter((t: any) => kind === "all" || t.kind === kind)
       .filter((t: any) =>
         history || show === "all" ? true : show === "unclaimed" ? !t.assignee : t.status === show,
       )
-      .filter((t: any) => history || matches(t))
-      .sort(
-        (a, b) => (b.priority ?? 0) - (a.priority ?? 0) || (b.created ?? 0) - (a.created ?? 0),
-      ),
+      .filter((t: any) => history || matches(t)),
   );
+  const rows = $derived(history ? filtered : sortTickets(filtered, sort));
+  const ageTitle = $derived(sort === "activity" || history ? "since last activity" : "since filed");
+  function setSort(next: TicketSort) {
+    sort = next;
+    saveTicketSort(next);
+  }
   const counts = $derived({
     pending: chat.tickets.filter((t: any) => t.status === "pending").length,
     waiting: chat.tickets.filter((t: any) => t.status === "waiting").length,
@@ -72,13 +78,17 @@
     };
   });
 
-  function open(t: any) {
+  async function open(t: any) {
     feedback = null;
     deciding = null;
-    chat.openTicket(t.id);
+    const result = await chat.openTicket(t.id);
+    if (!result.ok) feedback = result;
   }
   async function loadBug() {
-    if (ticket) bugDetail = await chat.loadBugDetail(ticket.id);
+    if (!ticket) return;
+    const id = ticket.id;
+    const detail = await chat.loadBugDetail(id);
+    if (chat.ticket?.id === id) bugDetail = detail;
   }
   // Reset the loaded bug detail whenever the open ticket changes.
   $effect(() => {
@@ -134,6 +144,7 @@
     return `${d.getMonth() + 1}/${d.getDate()} ${p(d.getHours())}:${p(d.getMinutes())}`;
   }
   const isOpen = $derived(!!ticket && (ticket.status === "pending" || ticket.status === "waiting"));
+  const recipient = $derived(ticket ? ticket.requester_name || ticket.account_name || "player" : "");
   // The deep report fields ride in the payload too. The bug block renders them
   // from ticket_bug_detail with its own bounds; dumped inline they are an 8KB
   // traceback with collapsed newlines, one wall of text that buries the thread.
@@ -152,13 +163,13 @@
 
 <div class="tickets">
   <div class="hd">
-    <span class="title glow-text">Ticket queue</span>
     {#if ticket}
       <button class="sh-cmd back" onclick={back}>Back</button>
     {:else}
       <button class="sh-toggle" aria-pressed={!history} onclick={() => (history = false)}>Open</button>
       <button class="sh-toggle" aria-pressed={history} onclick={() => (history = true)}>History</button>
-      <span class="count">{rows.length}</span>
+      <span class="count" title={rows.length < source.length ? "shown of loaded" : undefined}
+        >{rows.length < source.length ? `${rows.length} / ${source.length}` : rows.length}</span>
     {/if}
   </div>
 
@@ -177,11 +188,16 @@
           <button class="sh-toggle" role="radio" aria-checked={show === "waiting"} onclick={() => (show = "waiting")}>On player<span class="sh-count">{counts.waiting}</span></button>
           <button class="sh-toggle" role="radio" aria-checked={show === "unclaimed"} onclick={() => (show = "unclaimed")}>Unclaimed<span class="sh-count">{counts.unclaimed}</span></button>
         </div>
+        <div class="fl" role="radiogroup" aria-label="Sort">
+          {#each TICKET_SORTS as o (o.key)}
+            <button class="sh-toggle" role="radio" aria-checked={sort === o.key} onclick={() => setSort(o.key)}>{o.label}</button>
+          {/each}
+        </div>
       {/if}
       {#if kinds.length > 2}
         <div class="fl">
           {#each kinds as k}
-            <button class="sh-toggle" aria-pressed={kindFilter === k} onclick={() => (kindFilter = k)}>
+            <button class="sh-toggle" aria-pressed={kind === k} onclick={() => (kindFilter = k)}>
               {kindLabel(k)}
             </button>
           {/each}
@@ -198,7 +214,7 @@
                 {#if t.priority > 0}<span class="pri" title="priority">▲{t.priority}</span>{/if}
                 {#if t.assignee}<span class="asg" title="claimed by {t.assignee}">◆ {t.assignee}</span>{/if}
                 <span class="sh-plate {PLATE[t.status] ?? ''}">{t.status}</span>
-                <span class="age">{ageOf(t.updated)}</span>
+                <span class="age" title={ageTitle}>{ageOf(sort === "activity" || history ? t.updated : t.created)}</span>
               </span>
             </span>
             <span
@@ -212,7 +228,7 @@
       {:else}
         <p class="empty">
           {#if q}No match.
-          {:else}No {kindFilter === "all" ? "" : kindLabel(kindFilter).toLowerCase() + " "}tickets{history ? " in history" : ""}.{/if}
+          {:else}No {kind === "all" ? "" : kindLabel(kind).toLowerCase() + " "}tickets{history ? " in history" : ""}.{/if}
         </p>
       {/if}
     </div>
@@ -305,19 +321,26 @@
         </div>
       </div>
 
-      <div class="reply">
-        <label class="int"><input type="checkbox" bind:checked={internal} /> note</label>
-        <textarea
-          bind:value={reply}
-          onkeydown={onKey}
-          rows="2"
-          class="sh-placeholder"
-          placeholder={internal ? "Staff note" : "Reply to player"}
-          aria-label="ticket reply"
-          aria-describedby="queue-reply-keys"
-        ></textarea>
-        <span id="queue-reply-keys" class="sr-only">Enter sends. Shift+Enter starts a new line.</span>
-      </div>
+      {#if isOpen}
+        <div class="reply">
+          <div class="to" class:note={internal}>
+            {#if internal}Note to staff only{:else}To <b>{recipient}</b>{/if} · #{ticket.short_id}
+            <label class="int"><input type="checkbox" bind:checked={internal} /> note</label>
+          </div>
+          <textarea
+            bind:value={reply}
+            onkeydown={onKey}
+            rows="2"
+            class="sh-placeholder"
+            placeholder={internal ? "Staff note" : `Reply to ${recipient}`}
+            aria-label={internal ? "Staff note" : `Reply to ${recipient}`}
+            aria-describedby="queue-reply-keys"
+          ></textarea>
+          <span id="queue-reply-keys" class="sr-only">Enter sends. Shift+Enter starts a new line.</span>
+        </div>
+      {:else}
+        <div class="closed-note">{ticket.approvable ? "Decided." : "Reopen to reply."}</div>
+      {/if}
     </div>
   {/if}
 </div>
@@ -381,10 +404,14 @@
   .m.note .s::after { content: " (note)"; content: " (note)" / ""; color: var(--alert); font-size: 0.7em; letter-spacing: 0.1em; text-transform: uppercase; }
   .m .sh-plate { margin-right: 0.6ch; }
   .reply {
-    display: flex; align-items: center; gap: 0.8rem; padding: 7px 10px;
+    display: flex; flex-direction: column; gap: 4px; padding: 7px 10px;
     border-top: 1px solid var(--accent); flex: 0 0 auto;
   }
-  .int { color: var(--fg-dim); font-size: 0.6rem; letter-spacing: 0.14em; text-transform: uppercase; display: flex; align-items: center; gap: 4px; }
+  .to { display: flex; align-items: center; gap: 0.8ch; color: var(--fg-dim); font-size: 0.66rem; letter-spacing: 0.06em; }
+  .to b { color: var(--gold); font-weight: normal; }
+  .to.note { color: var(--alert); }
+  .int { margin-left: auto; color: var(--fg-dim); font-size: 0.6rem; letter-spacing: 0.14em; text-transform: uppercase; display: flex; align-items: center; gap: 4px; }
+  .closed-note { padding: 7px 10px; border-top: 1px solid var(--border); color: var(--fg-faint); font-size: 0.64rem; letter-spacing: 0.14em; text-transform: uppercase; }
   .reply textarea {
     flex: 1; background: transparent; border: none; outline: none; resize: vertical;
     color: var(--fg); font-family: inherit; font-size: 0.85rem; caret-color: var(--accent-bright);

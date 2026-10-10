@@ -1,10 +1,16 @@
 // Shared command dispatch + history. The input bar, command palette and macros
-// all run commands through here so recents stay consistent. Recents persist.
+// all run commands through here so recents stay consistent. Recents persist,
+// per account, so the next person at the browser cannot page back through
+// them.
 
 import { connection } from "./evennia.svelte";
+import { session } from "./session.svelte";
+import { settings } from "./settings.svelte";
 import { triggers } from "./triggers.svelte";
 
-const KEY = "underspire.history.v1";
+export const HISTORY_KEY = "underspire.history.v2";
+/** History from before it was kept per account: every login's commands, `connect` passwords included. */
+const LEGACY_KEY = "underspire.history.v1";
 const MAX = 120;
 
 export interface CmdItem {
@@ -32,10 +38,25 @@ export const CURATED: CmdItem[] = [
 
 class Commands {
   recent = $state<string[]>([]);
+  /** The signed-in account. Nothing is recorded without one, so a `connect` line is never kept. */
+  private account: number | null = null;
 
   init(): void {
     try {
-      const raw = localStorage.getItem(KEY);
+      localStorage.removeItem(LEGACY_KEY);
+    } catch {
+      /* ignore */
+    }
+  }
+
+  /** Show the history of the account the shell is signed in as; null shows none. */
+  useAccount(account: number | null): void {
+    if (account === this.account) return;
+    this.account = account;
+    this.recent = [];
+    if (account == null) return;
+    try {
+      const raw = localStorage.getItem(`${HISTORY_KEY}:${account}`);
       if (raw) this.recent = JSON.parse(raw);
     } catch {
       /* ignore */
@@ -44,18 +65,26 @@ class Commands {
 
   private runListeners: ((line: string) => void)[] = [];
 
-  /** Hear each command the player sends (the local echo uses this). */
+  /** Hear each command the player sends. */
   onRun(fn: (line: string) => void): void {
     this.runListeners.push(fn);
   }
 
+  /**
+   * Send a line. Only a signed-in account's lines are echoed and kept: a line
+   * typed before login can be `connect name password`.
+   */
   run(line: string): void {
     // Client aliases expand the first word before it hits the server.
     const expanded = triggers.expand(line);
     for (const fn of this.runListeners) fn(line);
-    connection.sendCommand(expanded);
     const t = line.trim();
-    if (t) {
+    if (t && this.account != null && settings.echoCommands) {
+      const safe = t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+      session.append(`<span class="cmd-echo">&gt; ${safe}</span>`, "echo");
+    }
+    connection.sendCommand(expanded);
+    if (t && this.account != null) {
       this.recent = [t, ...this.recent.filter((x) => x !== t)].slice(0, MAX);
       this.save();
     }
@@ -63,7 +92,7 @@ class Commands {
 
   private save(): void {
     try {
-      localStorage.setItem(KEY, JSON.stringify(this.recent));
+      localStorage.setItem(`${HISTORY_KEY}:${this.account}`, JSON.stringify(this.recent));
     } catch {
       /* ignore */
     }

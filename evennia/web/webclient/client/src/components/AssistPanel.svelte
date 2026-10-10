@@ -1,151 +1,47 @@
 <script lang="ts">
-  import { chat } from "../lib/chat.svelte";
-  import { renderBody, renderSender } from "../lib/markup";
+  // The Assist panel: the caller's own tickets (Mine), and for staff the
+  // ticket queue (Queue). Both tabs stay mounted so a draft or a filter
+  // survives a switch; both are rebuilt for a new account, so one person's
+  // drafts and searches never reach the next.
+  import { untrack } from "svelte";
+  import { chat, type AssistTab } from "../lib/chat.svelte";
+  import AssistMine from "./AssistMine.svelte";
+  import AssistQueue from "./AssistQueue.svelte";
 
-  let reply = $state("");
-  const thread = $derived(chat.assistThread);
-  // Oldest ticket first - triage the longest-waiting.
-  const tickets = $derived(
-    [...chat.assistThreads].sort((a, b) => (a.created ?? a.ts ?? 0) - (b.created ?? b.ts ?? 0)),
-  );
-  const STATUSES = ["open", "pending", "closed"];
+  const tab = $derived<AssistTab>(chat.staff ? chat.assistTab : "mine");
 
-  function open(t: any) {
-    chat.openAssistThread(t.account_id);
-  }
-  function ageOf(created: number) {
-    if (!created) return "";
-    const mins = Math.floor((Date.now() / 1000 - created) / 60);
-    if (mins < 1) return "now";
-    if (mins < 60) return `${mins}m`;
-    const h = Math.floor(mins / 60);
-    return h < 24 ? `${h}h` : `${Math.floor(h / 24)}d`;
-  }
-  function back() {
-    chat.assistThread = null;
-  }
-  function send() {
-    if (reply.trim() && thread) {
-      chat.assistReply(thread.accountKey || thread.accountId, reply);
-      reply = "";
-    }
-  }
-  function onKey(e: KeyboardEvent) {
-    if (e.key === "Enter") {
-      e.preventDefault();
-      send();
-    }
-  }
-  function fmt(ts: number) {
-    if (!ts) return "";
-    const d = new Date(ts * 1000);
-    const p = (n: number) => String(n).padStart(2, "0");
-    return `${p(d.getHours())}:${p(d.getMinutes())}`;
-  }
+  // News in the queue counts as seen while the queue is on screen.
+  $effect(() => {
+    if (chat.queueActive) untrack(() => chat.markQueueSeen());
+  });
 </script>
 
 <div class="assist">
-  <div class="hd">
-    <span class="tag glow-text">Assist</span>
-    <span class="sub">help desk</span>
-    {#if thread}
-      <button class="sh-cmd back" onclick={back}>Inbox</button>
-    {:else}
-      <span class="count">{chat.assistThreads.length} open</span>
-    {/if}
-  </div>
-
-  {#if !thread}
-    <div class="list">
-      {#if tickets.length}
-        {#each tickets as t (t.account_id)}
-          <button class="sh-row" onclick={() => open(t)}>
-            <span class="row1">
-              <span class="who">{t.account_key || `#${t.account_id}`}</span>
-              <span class="meta">
-                {#if t.assignee}<span class="asg">◆ {t.assignee}</span>{/if}
-                <span class="sh-plate {(t.status || 'open') === 'open' ? 'hot' : t.status === 'pending' ? 'gold' : ''}">{t.status || "open"}</span>
-                {#if t.created}<span class="age">{ageOf(t.created)}</span>{/if}
-              </span>
-            </span>
-            {#if t.preview}<span class="prev">{t.preview}</span>{/if}
-          </button>
-        {/each}
-      {:else}
-        <p class="empty">No open tickets.</p>
-      {/if}
-    </div>
-  {:else}
-    <div class="convo">
-      <div class="who-head">
-        <span class="petitioner">{thread.accountKey || `#${thread.accountId}`}</span>
-        <span class="actions">
-          <button class="sh-cmd" onclick={() => chat.assistClaim(thread.accountId)}>Claim</button>
-          {#each STATUSES as st}
-            <button class="sh-cmd" onclick={() => chat.assistStatus(thread.accountId, st)}>{st}</button>
-          {/each}
-        </span>
-      </div>
-      <div class="msgs">
-        {#each thread.messages as m, i (i)}
-          <div class="am">
-            <span class="s">{@html renderSender(m.sender_html ?? m.senderHtml, m.sender)}</span>
-            <span class="t">{@html renderBody(m.html, m.text)}</span>
-          </div>
-        {/each}
-        {#if !thread.messages.length}<p class="empty">No messages in this thread.</p>{/if}
-      </div>
-      <div class="reply">
-        <span class="chev glow-text" aria-hidden="true">&gt;</span>
-        <input
-          class="sh-placeholder"
-          bind:value={reply}
-          onkeydown={onKey}
-          placeholder="Reply to {thread.accountKey || 'petitioner'}"
-          aria-label="assist reply"
-        />
-      </div>
+  {#if chat.staff}
+    <div class="tabs" role="tablist" aria-label="Assist">
+      <button class="sh-toggle" class:off={tab !== "mine"} role="tab" aria-selected={tab === "mine"} aria-controls="assist-mine"
+        onclick={() => (chat.assistTab = "mine")}
+        >Mine{#if chat.mineUnseen}<span class="sh-count">{chat.mineUnseen}</span>{/if}</button>
+      <button class="sh-toggle" class:off={tab !== "queue"} role="tab" aria-selected={tab === "queue"} aria-controls="assist-queue"
+        onclick={() => (chat.assistTab = "queue")}
+        >Queue{#if chat.queueUnseen}<span class="sh-count">{chat.queueUnseen}</span>{/if}</button>
     </div>
   {/if}
+  {#key chat.account}
+    <div class="pane" id="assist-mine" role={chat.staff ? "tabpanel" : undefined} hidden={tab !== "mine"}>
+      <AssistMine />
+    </div>
+    {#if chat.staff}
+      <div class="pane" id="assist-queue" role="tabpanel" hidden={tab !== "queue"}>
+        <AssistQueue />
+      </div>
+    {/if}
+  {/key}
 </div>
 
 <style>
   .assist { display: flex; flex-direction: column; height: 100%; background: var(--bg-elev); }
-  .hd {
-    display: flex; align-items: baseline; gap: 1ch; padding: 6px 10px;
-    border-bottom: 1px solid var(--accent); flex: 0 0 auto;
-  }
-  .tag { color: var(--accent-bright); text-transform: uppercase; letter-spacing: 0.22em; font-size: 0.8rem; }
-  .sub { color: var(--fg-dim); text-transform: uppercase; letter-spacing: 0.18em; font-size: 0.62rem; }
-  .count { margin-left: auto; color: var(--gold); font-size: 0.68rem; letter-spacing: 0.1em; }
-  .back { margin-left: auto; }
-  .list { overflow-y: auto; }
-  .row1 { display: flex; justify-content: space-between; align-items: baseline; gap: 1ch; }
-  .who { color: var(--gold); text-transform: uppercase; letter-spacing: 0.08em; font-size: 0.78rem; }
-  .meta { display: flex; align-items: baseline; gap: 0.7ch; flex: 0 0 auto; }
-  .asg { color: var(--accent-bright); font-size: 0.62rem; text-transform: uppercase; letter-spacing: 0.06em; }
-  .age { color: var(--fg-faint); font-size: 0.68rem; }
-  .prev { color: var(--fg-dim); font-size: 0.76rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .empty { color: var(--fg-faint); padding: 12px 10px; margin: 0; font-size: 0.66rem; letter-spacing: 0.14em; text-transform: uppercase; }
-
-  .convo { display: flex; flex-direction: column; min-height: 0; flex: 1; }
-  .who-head {
-    display: flex; align-items: center; gap: 1ch; padding: 5px 10px;
-    border-bottom: 1px solid var(--border);
-  }
-  .petitioner { color: var(--gold); text-transform: uppercase; letter-spacing: 0.1em; font-size: 0.78rem; }
-  .actions { display: flex; flex-wrap: wrap; gap: 2px; margin-left: auto; }
-  .msgs { flex: 1; overflow-y: auto; padding: 6px 10px; line-height: 1.5; }
-  .am { padding: 2px 0; font-size: 0.85rem; }
-  .am .s { color: var(--accent-bright); margin-right: 0.6ch; }
-  .am .t { color: var(--fg); white-space: pre-wrap; }
-  .reply {
-    display: flex; align-items: center; gap: 0.6rem; padding: 6px 10px;
-    border-top: 1px solid var(--accent); flex: 0 0 auto;
-  }
-  .chev { color: var(--accent-bright); }
-  .reply input {
-    flex: 1; background: transparent; border: none; outline: none;
-    color: var(--fg); font-family: inherit; font-size: 0.85rem; caret-color: var(--accent-bright);
-  }
+  .tabs { display: flex; gap: 6px; padding: 5px 10px; border-bottom: 1px solid var(--border); flex: 0 0 auto; }
+  .pane { flex: 1; min-height: 0; }
+  .pane[hidden] { display: none; }
 </style>

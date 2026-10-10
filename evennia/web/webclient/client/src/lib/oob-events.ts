@@ -29,16 +29,6 @@ export interface ActivityRolePayload {
   can_puppet: boolean;
 }
 
-export interface AssistInboxPayload {
-  threads: any[];
-}
-
-export interface AssistThreadPayload {
-  account_id: any;
-  account_key: string;
-  messages: any[];
-}
-
 /** args[0] = audio URL. */
 export type AudioPayload = string;
 
@@ -54,6 +44,7 @@ export interface ChannelMsgPayload {
   platform?: string;
   ts: number;
   msg_id: string;
+  own?: boolean;
 }
 
 export interface ChannelMsgDeletePayload {
@@ -194,7 +185,12 @@ export interface TicketInboxPayload {
 
 export interface TicketMsgPayload {
   id: string;
+  short_id: string;
   kind: string;
+  label: string;
+  origin: string;
+  audience: string;
+  subject: string;
   text: string;
   html?: string;
   sender: string;
@@ -205,9 +201,10 @@ export interface TicketMsgPayload {
   status?: string;
 }
 
-/** Whether this session works the staff ticket queue. Sent at login and on @sync_channels. */
+/** Whether this session works the staff ticket queue, and its account id. Sent at login, on @sync_channels, and on @quell / @unquell. */
 export interface TicketRolePayload {
   staff: boolean;
+  account: number;
 }
 
 /** A full ticket dict (see tickets.core.to_dict). */
@@ -238,8 +235,6 @@ export type OobEvent =
   | "STOP_AUDIO"
   | "activity_batch"
   | "activity_role"
-  | "assist_inbox"
-  | "assist_thread"
   | "audio"
   | "channel_history"
   | "channel_msg"
@@ -287,8 +282,6 @@ export interface OobEventMap {
   "STOP_AUDIO": StopAudioPayload;
   "activity_batch": ActivityBatchPayload;
   "activity_role": ActivityRolePayload;
-  "assist_inbox": AssistInboxPayload;
-  "assist_thread": AssistThreadPayload;
   "audio": AudioPayload;
   "channel_history": ChannelHistoryPayload;
   "channel_msg": ChannelMsgPayload;

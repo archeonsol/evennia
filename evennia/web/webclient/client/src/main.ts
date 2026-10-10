@@ -34,6 +34,7 @@ import { screenSize } from "./lib/screensize";
 import { help } from "./lib/help.svelte";
 import { lore } from "./lib/lore.svelte";
 import { activity } from "./lib/activity.svelte";
+import { handshake, loggedIn, loggedOut, roleArrived } from "./lib/accountSession";
 
 const OOB_TRACE_KEY = "underspire.trace.oob";
 
@@ -85,14 +86,6 @@ compose.setPreviewSender((line) => connection.sendCommand(line));
 chat.setPanelOpener((view) => dock.openView(view));
 activity.connect((ns, action, data) => connection.request(ns, action, data), (entries) => puppets.setManifest(entries));
 
-// Local echo: the command as typed, in the terminal before the game's answer.
-commands.onRun((line) => {
-  const t = line.trim();
-  if (!settings.echoCommands || !t) return;
-  const safe = t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-  session.append(`<span class="cmd-echo">&gt; ${safe}</span>`, "echo");
-});
-
 // Speak new output. A category the player filtered out of the log is muted
 // here too, so the log's filter chips double as speech filters. The echo of
 // the player's own command is not read back to them.
@@ -106,10 +99,12 @@ session.onLine((line) => {
 
 // Channel echo: telnet shows channel traffic in the one stream, and the shell
 // used to keep it in the Channels panel only, where a screen reader never
-// heard it. Muted channels stay quiet here as they do there.
+// heard it. Muted channels stay quiet here as they do there. With echo off, a
+// speak line typed in the terminal still shows its own channel line there.
 function echoChannel(kw: Record<string, any>): void {
   const key = String(kw.channel ?? "");
-  if (!settings.channelEcho || !key || chat.muted[key]) return;
+  if (!key || chat.muted[key]) return;
+  if (!chat.takeEcho(key, !!kw.own) && !settings.channelEcho) return;
   const name = chat.channels.find((c) => c.key === key)?.name ?? key;
   const sender = renderSender(kw.sender_html, kw.sender);
   const body = renderBody(kw.html, kw.text);
@@ -182,6 +177,7 @@ screenSize.connect((grid) =>
 // window had already moved past some of it, say so rather than leave a silent
 // hole in the log.
 connection.on("hello", (env) => {
+  handshake(env.resumed === true);
   if (env.gap === true) {
     session.append(
       `<span class="conn-note">Some output was lost while you were disconnected.</span>`,
@@ -226,23 +222,18 @@ connection.on("oob", (env) => {
     activity.batch(env.kwargs as any);
     return;
   }
-  if (is(event, "logged_in")) activity.clear();
-  if (
-    event.startsWith("channel_") ||
-    is(event, "channels_list") ||
-    is(event, "assist_inbox") ||
-    is(event, "assist_thread") ||
-    event.startsWith("ticket_")
-  ) {
+  if (is(event, "logged_in")) loggedIn();
+  if (event.startsWith("channel_") || is(event, "channels_list") || event.startsWith("ticket_")) {
     chat.handleOob(event, env.args ?? [], env.kwargs ?? {});
+    if (is(event, "ticket_role")) roleArrived();
     if (is(event, "channel_msg")) {
       echoChannel(env.kwargs ?? {});
       const key = String(env.kwargs?.channel ?? "");
       if (key && !chat.muted[key]) notify.activity();
     }
     // A thread only arrives because the player asked for one (@ticket, or a
-    // click in a ticket list): bring its panel forward.
-    if (is(event, "ticket_thread")) dock.openView(chat.staff ? "tickets" : "mytickets");
+    // click in a ticket list): bring the Assist panel forward.
+    if (is(event, "ticket_thread")) dock.openView("assist");
   } else if (is(event, "ui_component")) {
     const comp = Array.isArray(env.args) ? env.args[0] : env.args;
     if (comp) ui.set(comp);
@@ -259,10 +250,9 @@ connection.on("oob", (env) => {
       dock.openWebPage(id, String(spec.title ?? "Web"), url, pageSize(spec.size));
     }
   } else if (is(event, "logout")) {
-    activity.logout();
     // Server-side @quit: raise the quit menu instead of silently reconnecting.
     const reason = Array.isArray(env.args) ? env.args[0] : env.args;
-    connection.markLoggedOut(String(reason ?? "quit"));
+    loggedOut(String(reason ?? "quit"));
   } else if (is(event, "screenreader_mode")) {
     // The server's flag was set on (a saved @option restored at login, or
     // @option now). Follow it. Only "on" is followed: turning the client's

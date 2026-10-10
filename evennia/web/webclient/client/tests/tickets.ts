@@ -1,4 +1,4 @@
-// Browser checks for the ticket panels. Run with `npm run test:browser`.
+// Browser checks for the Assist panel's two tabs. Run with `npm run test:browser`.
 //
 // The real panels and store run against a stubbed connection: every RPC the
 // panels make is recorded and answered from fixtures, and any command they
@@ -7,8 +7,8 @@
 
 import { mount, tick } from "svelte";
 
-import MyTicketsPanel from "../src/components/MyTicketsPanel.svelte";
-import TicketsPanel from "../src/components/TicketsPanel.svelte";
+import AssistMine from "../src/components/AssistMine.svelte";
+import AssistQueue from "../src/components/AssistQueue.svelte";
 import Toasts from "../src/components/Toasts.svelte";
 import { chat } from "../src/lib/chat.svelte";
 import { connection } from "../src/lib/evennia.svelte";
@@ -49,6 +49,7 @@ const mineRows = [
 ];
 const doorThread = {
   ...mineRows[0],
+  view: "owner",
   messages: [
     { origin: "player", sender: "Vesna", text: "The door will not open.", ts: now - 600 },
     { origin: "system", sender: "System", text: "Mira is handling this.", ts: now - 300 },
@@ -71,24 +72,24 @@ const commands: string[] = [];
     return { message: "Withdrawn.", ticket: { ...doorThread, status: "withdrawn" } };
   }
   if (action === "ticket_act") {
-    return { message: data.action === "close" ? "Closed. The player was told." : "Done.", ticket: { ...doorThread, status: data.action === "close" ? "closed" : "pending", assignee: "Mira" } };
+    if (data.action === "view") return { message: "", ticket: { ...doorThread, view: "staff", requester_name: "Vesna" } };
+    return { message: data.action === "close" ? "Closed. The player was told." : "Done.", ticket: { ...doorThread, view: "staff", requester_name: "Vesna", status: data.action === "close" ? "closed" : "pending", assignee: "Mira" } };
   }
   if (action === "ticket_list") return { tickets: [] };
   throw new Error(`unexpected ${action}`);
 };
 connection.sendCommand = (line: string) => {
   commands.push(line);
-  if (line.startsWith("@ticket ")) chat.handleOob("ticket_thread", [], { ...doorThread });
 };
 (connection as any).state = "open";
 
 async function run(): Promise<void> {
   mount(Toasts, { target: document.getElementById("toasts")! });
 
-  // ---- player: My Tickets -------------------------------------------------
+  // ---- Mine ---------------------------------------------------------------
   chat.staff = false;
   const mine = document.getElementById("mine")!;
-  mount(MyTicketsPanel, { target: mine });
+  mount(AssistMine, { target: mine });
   await settle();
   await wait(50);
   await settle();
@@ -119,6 +120,7 @@ async function run(): Promise<void> {
   await settle();
   check("opening a ticket shows the system notice as a notice", !!mine.querySelector(".sys") && mine.querySelector(".sys")!.textContent!.includes("handling"));
   check("staff lines are marked staff", mine.querySelector(".m.staffmsg .sh-plate")?.textContent?.trim() === "Staff");
+  check("the reply box says it goes to staff", mine.querySelector(".reply .to")?.textContent?.replace(/\s+/g, " ").trim() === "To staff · #aaaa1111", mine.querySelector(".reply .to")?.textContent ?? "none");
 
   const box = mine.querySelector<HTMLTextAreaElement>(".reply textarea")!;
   box.value = "Still stuck.";
@@ -149,20 +151,39 @@ async function run(): Promise<void> {
   check("the toast opens that ticket", !!chat.myTicket, JSON.stringify(chat.myTicket?.id ?? null));
   toasts.list.forEach((t) => toasts.dismiss(t.id));
 
-  // ---- staff: Ticket Queue -------------------------------------------------
-  chat.staff = true;
+  // ---- Queue --------------------------------------------------------------
+  chat.handleOob("ticket_role", [], { staff: true });
   chat.handleOob("ticket_inbox", [], { tickets: mineRows });
   toasts.list.forEach((t) => toasts.dismiss(t.id));
   const queue = document.getElementById("queue")!;
-  mount(TicketsPanel, { target: queue });
+  mount(AssistQueue, { target: queue });
   await settle();
   const qsearch = queue.querySelector<HTMLInputElement>(".search")!;
   qsearch.value = "door";
   qsearch.dispatchEvent(new Event("input", { bubbles: true }));
   await settle();
   check("the queue narrows as staff type", queue.querySelectorAll(".row").length === 1, `${queue.querySelectorAll(".row").length}`);
+  const typedBefore = commands.length;
   queue.querySelector<HTMLButtonElement>(".row")!.click();
+  await wait(50);
   await settle();
+  const viewed = calls.filter((c) => c.action === "ticket_act").at(-1);
+  check("opening a queue row goes through the RPC", viewed?.data?.action === "view", JSON.stringify(viewed?.data));
+  check("opening a queue row types no command", commands.length === typedBefore, commands.slice(typedBefore).join("|"));
+  const to = () => queue.querySelector(".reply .to")?.textContent?.replace(/\s+/g, " ").trim() ?? "none";
+  check("the reply box names the player it goes to", to().startsWith("To Vesna · #aaaa1111"), to());
+  queue.querySelector<HTMLInputElement>(".reply .int input")!.click();
+  await settle();
+  check("a note says it stays with staff", to().startsWith("Note to staff only · #aaaa1111"), to());
+  const noteBox = queue.querySelector<HTMLTextAreaElement>(".reply textarea")!;
+  noteBox.value = "she has asked before";
+  noteBox.dispatchEvent(new Event("input", { bubbles: true }));
+  await settle();
+  noteBox.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+  await wait(50);
+  await settle();
+  const noted = calls.filter((c) => c.action === "ticket_act").at(-1);
+  check("a ticked note goes to the server as a staff note", noted?.data?.action === "reply" && noted?.data?.internal === true, JSON.stringify(noted?.data));
   const before = commands.length;
   const close = Array.from(queue.querySelectorAll<HTMLButtonElement>(".act")).find((b) => b.textContent === "Close");
   close?.click();
@@ -173,6 +194,7 @@ async function run(): Promise<void> {
   check("Close types no command (nothing lands in the terminal)", commands.length === before, commands.slice(before).join("|"));
   check("the queue says what happened", queue.querySelector(".fb")?.textContent?.includes("Closed") === true, queue.querySelector(".fb")?.textContent ?? "none");
   check("a closed ticket offers Reopen", Array.from(queue.querySelectorAll(".act")).some((b) => b.textContent === "Reopen"));
+  check("a closed ticket has no reply box", !queue.querySelector(".reply textarea") && queue.querySelector(".closed-note")?.textContent === "Reopen to reply.");
 
   check("no page errors", pageErrors.length === 0, pageErrors.join(" | "));
   const pre = document.getElementById("results");

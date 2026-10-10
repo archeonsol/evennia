@@ -267,6 +267,26 @@ def has_capability(principal, capability: str, *, resource=None, session=None) -
     return result
 
 
+def holds_capability(principal, capability: str, *, resource=None) -> bool:
+    """Whether a principal holds a capability, quelled or not.
+
+    Quell is a choice to act without authority, not a loss of it. This answers
+    who someone is, for example whether a ticket's owner is staff who can read
+    the staff side of it elsewhere. It must never gate an action: use
+    :func:`has_capability` for that. Break-glass is not counted.
+    """
+
+    resource = resource or principal
+    context = AuthorizationContext(
+        principal=principal,
+        resource=resource,
+        session=None,
+        suspended=principal_is_suspended(principal),
+    )
+    grants = load_grants(principal, ignore_quell=True)
+    return evaluate(RequiresCapability(capability), grants, load_resource(resource), context).allowed
+
+
 def authorized_affordances(principal, resource, access_types) -> tuple[str, ...]:
     """Return public operations allowed by structured policies.
 

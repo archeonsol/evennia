@@ -314,6 +314,12 @@ export class Routing {
     this.buffers = { ...this.buffers, [label]: [] };
     this.unread = { ...this.unread, [label]: 0 };
   }
+
+  /** Empty every feed. The routes are the player's preferences and stay. */
+  clearBuffers(): void {
+    this.buffers = {};
+    this.unread = {};
+  }
 }
 
 export const routing = new Routing();

@@ -99,6 +99,25 @@ class TestAzabanHelloInputfunc(unittest.TestCase):
         )
         session.sessionhandler.session_portal_sync.assert_called_once_with(session)
 
+    def _hello(self, caps):
+        from evennia.server.serversession import ServerSession
+
+        session = ServerSession.__new__(ServerSession)
+        session.protocol_flags = {}
+        session.sessionhandler = mock.MagicMock()
+        session.msg = mock.Mock()
+        inputfuncs.azaban_hello(session, caps=caps)
+        return session
+
+    def test_an_older_shell_is_asked_to_reload(self):
+        session = self._hello({"rendersNodes": True})
+        session.msg.assert_called_once()
+        self.assertIn("Reload the page", session.msg.call_args.kwargs["text"])
+
+    def test_the_current_shell_is_not(self):
+        session = self._hello({"rendersNodes": True, "shell": inputfuncs.SHELL_GENERATION})
+        session.msg.assert_not_called()
+
 
 class TestWebclientOptionsScreenreader(unittest.TestCase):
     """The webclient's screen reader toggle must reach the session, not just the account."""

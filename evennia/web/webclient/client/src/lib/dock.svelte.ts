@@ -18,17 +18,45 @@ const LKEY = "underspire.layout.v2";
 const PRESET_PREFIX = "underspire.layout.preset.";
 const LOCK_KEY = "underspire.layout.locked";
 
+/** Panel ids that the Assist panel replaced; a saved layout may still hold them. */
+export const LEGACY_ASSIST_IDS = ["tickets", "mytickets"];
+
+/**
+ * Put one Assist panel where a saved layout had the old ticket panels, and
+ * close those. Returns whether the layout changed.
+ */
+export function migrateAssistPanels(api: DockviewApi): boolean {
+  const legacy = LEGACY_ASSIST_IDS.map((id) => api.getPanel(id)).filter((p) => !!p);
+  if (!legacy.length) return false;
+  if (!api.getPanel("assist")) {
+    api.addPanel({
+      id: "assist",
+      component: "assist",
+      title: "Assist",
+      inactive: true,
+      position: { referencePanel: legacy[0]!.id, direction: "within" },
+    });
+  }
+  for (const p of legacy) p!.api.close();
+  return true;
+}
+
+/** Close the web page panels a dockview holds. */
+export function closeWebPanels(api: DockviewApi | null): void {
+  for (const p of [...(api?.panels ?? [])]) {
+    if ((p as any).view?.contentComponent === "iframe") p.api.close();
+  }
+}
+
 // The standard, reopenable panels (so closing one isn't a dead end).
 export const VIEWS: Record<string, { component: string; title: string }> = {
   log: { component: "log", title: "Terminal" },
   scene: { component: "scene", title: "Scene" },
   chat: { component: "chat", title: "Channels" },
-  // Staff-only. Named apart from My Tickets, which every player has.
-  tickets: { component: "tickets", title: "Ticket Queue" },
+  assist: { component: "assist", title: "Assist" },
   activity: { component: "activity", title: "Activity" },
   media: { component: "media", title: "Media" },
   spawns: { component: "spawns", title: "Feeds" },
-  mytickets: { component: "mytickets", title: "My Tickets" },
   help: { component: "help", title: "Help" },
 };
 
@@ -85,7 +113,10 @@ class Dock {
     if (!this.api) return;
     try {
       const raw = localStorage.getItem(PRESET_PREFIX + name);
-      if (raw) this.api.fromJSON(JSON.parse(raw));
+      if (raw) {
+        this.api.fromJSON(JSON.parse(raw));
+        migrateAssistPanels(this.api);
+      }
     } catch {
       /* ignore */
     }
@@ -188,6 +219,12 @@ class Dock {
       renderer: PAGE_RENDERER,
       floating: pageFloat(size, w, h),
     });
+  }
+
+  /** Close every web page panel; a page's address can name the account that opened it. */
+  closeWebPages(): void {
+    for (const v of simple.views) if (v.component === "iframe") simple.close(v.id);
+    closeWebPanels(this.api);
   }
 
   /** Pin a web page panel so the next page for its base opens beside it, or unpin it. */
