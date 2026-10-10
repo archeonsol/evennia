@@ -29,16 +29,6 @@ export interface ActivityRolePayload {
   can_puppet: boolean;
 }
 
-export interface AssistInboxPayload {
-  threads: any[];
-}
-
-export interface AssistThreadPayload {
-  account_id: any;
-  account_key: string;
-  messages: any[];
-}
-
 /** args[0] = audio URL. */
 export type AudioPayload = string;
 
@@ -54,6 +44,7 @@ export interface ChannelMsgPayload {
   platform?: string;
   ts: number;
   msg_id: string;
+  own?: boolean;
 }
 
 export interface ChannelMsgDeletePayload {
@@ -199,7 +190,12 @@ export interface TicketInboxPayload {
 /** One message on a ticket, pushed live. origin is staff, player or system; audience is owner, assignee or staff (who this copy is for); news is false for a claim or an assignment, which a player is not told is unread. */
 export interface TicketMsgPayload {
   id: string;
+  short_id: string;
   kind: string;
+  label: string;
+  origin: string;
+  audience: string;
+  subject: string;
   text: string;
   html?: string;
   sender: string;
@@ -208,14 +204,9 @@ export interface TicketMsgPayload {
   visibility?: string;
   ts: number;
   status?: string;
-  short_id?: string;
   number?: number;
   ref?: string;
-  label?: string;
   title?: string;
-  subject?: string;
-  origin?: string;
-  audience?: string;
   news?: boolean;
 }
 
@@ -233,10 +224,10 @@ export interface TicketRemovePayload {
   id: string;
 }
 
-/** Whether this session works the staff ticket queue, who it is, and whether it is on duty. Sent at login and on @sync_channels. */
+/** Whether this session works the staff ticket queue, its account id, and whether it is on duty. Sent at login, on @sync_channels, and on @quell / @unquell. */
 export interface TicketRolePayload {
   staff: boolean;
-  account?: number;
+  account: number;
   duty?: boolean;
 }
 
@@ -282,8 +273,6 @@ export type OobEvent =
   | "STOP_AUDIO"
   | "activity_batch"
   | "activity_role"
-  | "assist_inbox"
-  | "assist_thread"
   | "audio"
   | "channel_history"
   | "channel_msg"
@@ -335,8 +324,6 @@ export interface OobEventMap {
   "STOP_AUDIO": StopAudioPayload;
   "activity_batch": ActivityBatchPayload;
   "activity_role": ActivityRolePayload;
-  "assist_inbox": AssistInboxPayload;
-  "assist_thread": AssistThreadPayload;
   "audio": AudioPayload;
   "channel_history": ChannelHistoryPayload;
   "channel_msg": ChannelMsgPayload;
