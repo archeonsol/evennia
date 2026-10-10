@@ -25,6 +25,157 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.316: One Assist tab, and forget the account at every session end
+
+### Webclient
+
+- **The staff ticket queue is newest first** ([`AssistQueue.svelte`](evennia/web/webclient/client/src/components/AssistQueue.svelte),
+  [`ticketSort.ts`](evennia/web/webclient/client/src/lib/ticketSort.ts)).
+  The panel re-sorted the server's newest-first `ticket_inbox` by priority,
+  so a new ticket sank below every older prioritized one. The open queue now
+  has a Sort row: Newest (the default), Last activity, Oldest and Priority,
+  remembered per browser in `localStorage`. The age column reads the time the
+  list is sorted by (filed, or last activity). The history keeps the server's
+  order, latest decision first (`678833053`).
+- **A stale kind filter no longer hides the queue.** A kind filter whose last
+  ticket closed hid every row, and the filter bar that could clear it is not
+  drawn below two kinds. A filter for a kind not in the list now reads as All.
+  The header count reads `shown / loaded` while a filter or search hides rows
+  (`678833053`).
+- **One Assist panel replaces Ticket Queue and My Tickets** ([`AssistPanel.svelte`](evennia/web/webclient/client/src/components/AssistPanel.svelte),
+  [`AssistMine.svelte`](evennia/web/webclient/client/src/components/AssistMine.svelte), [`AssistQueue.svelte`](evennia/web/webclient/client/src/components/AssistQueue.svelte)).
+  Every player has Mine, their own tickets. Staff also have Queue, the
+  staff ticket queue, as a second tab. Both tabs stay mounted, so a draft or
+  a filter survives a switch. The legacy `AssistPanel` (the `@assist` help
+  desk) is gone. The tab badge flags news on either tab. Staff are given the
+  panel at every login; a player is given it once per account
+  (`underspire.assist.added:<account>`), so one who closes it keeps it closed
+  and a second player on the same browser still gets it. A saved layout that
+  already holds the panel marks it given. The tabs are rebuilt for each
+  account. The screen-reader layout has Assist as a base view (`85792d7e7`,
+  `d8dcc7394`, `1c78858ed`).
+- **Saved layouts move to the Assist panel** ([`dock.svelte.ts`](evennia/web/webclient/client/src/lib/dock.svelte.ts),
+  [`panelRegistry.ts`](evennia/web/webclient/client/src/lib/panelRegistry.ts)). `migrateAssistPanels` puts
+  one Assist panel where a saved layout or named preset had `tickets` or
+  `mytickets`, and closes those. Both old component names stay registered
+  as Assist, because a restore that names an unknown component fails and
+  resets the whole layout (`85792d7e7`).
+- **A ticket opens in the view the server built** ([`chat.svelte.ts`](evennia/web/webclient/client/src/lib/chat.svelte.ts)).
+  `ticket_thread` routes by the row's `view` field (`staff` or `owner`), not
+  by whether the session is staff, so a staff member's own ticket never
+  opens in the queue, and opening one switches to the Mine tab. A
+  `ticket_msg` is appended only to the open thread of its audience: an owner
+  line to Mine, any other to the queue. Opening a queue row uses the
+  `ticket_act` RPC (action `view`) in place of typing `@ticket`, so its
+  errors show in the panel. A late `view` answer for a ticket that is no
+  longer open is dropped, and so is any staff thread after the staff role is
+  lost. A refreshed action with no ticket closes the open thread. `ticket_msg`
+  handling is typed from the event catalog (`85792d7e7`, `d8dcc7394`,
+  `1c78858ed`).
+- **Ticket state is per account** ([`chat.svelte.ts`](evennia/web/webclient/client/src/lib/chat.svelte.ts), [`main.ts`](evennia/web/webclient/client/src/main.ts)).
+  `ticket_role` now carries the account id. The seen marks for Mine and the
+  queue are stored under that id (`underspire.tickets.seen.v2:<id>`,
+  `underspire.queue.seen.v2:<id>`), so two people who share a browser do not
+  mark each other's tickets read or learn their ids. The old shared `v1` keys
+  are removed at login. Losing the staff role (for example `@quell`) drops
+  the queue already held, and a stray `ticket_inbox` for a non-staff session
+  is ignored (`85792d7e7`, `d8dcc7394`).
+- **The reply box names its recipient** ([`AssistQueue.svelte`](evennia/web/webclient/client/src/components/AssistQueue.svelte),
+  [`AssistMine.svelte`](evennia/web/webclient/client/src/components/AssistMine.svelte)). Staff see
+  "To <player> · #id", or "Note to staff only · #id" with note on; the
+  owner sees "To staff · #id". A closed staff-view ticket shows "Reopen to
+  reply." in place of the reply box (`85792d7e7`).
+- **A speak verb typed in the terminal shows its channel line there**
+  ([`CommandInput.svelte`](evennia/web/webclient/client/src/components/CommandInput.svelte), [`main.ts`](evennia/web/webclient/client/src/main.ts)).
+  With channel echo off, `xooc hi` went only to the Channels panel. The
+  typed line, aliases expanded, now arms an echo: the next line on that
+  channel within 10 seconds that the server marks as the player's own
+  (`channel_msg.own`) is echoed once. Another player's line is never echoed
+  as the player's own, and a line the server refused never arrives, so
+  nothing unsaid is shown as said (`85792d7e7`, `d8dcc7394`, `1c78858ed`).
+- **Every session end forgets the account** ([`accountSession.ts`](evennia/web/webclient/client/src/lib/accountSession.ts)).
+  The shell stays drawn under the quit screen, so the next person at a shared
+  browser could read what the last account left. A `logout` OOB, a `hello`
+  handshake that cannot resume a signed-in page (an idle timeout or a menu
+  sign-out sends no `logout`), and a second login without a logout between
+  all forget it. Forgetting empties the terminal, channels with their mutes
+  and read marks, tickets, threads, drafts, searches, seen maps, pins,
+  command history, the compose draft, routed feeds, puppets, the scene, the
+  help page, notifications and an open lore note, and closes every web page
+  panel. It sends `resume_reset` while the socket is still open, so the
+  portal drops its replay window and a reload cannot bring the scrollback
+  back (`d8dcc7394`, `9facc3288`, `38fc718ed`, `441d0f7a9`).
+- **The quit screen is opaque, and Reconnect reloads the page**
+  ([`QuitOverlay.svelte`](evennia/web/webclient/client/src/components/QuitOverlay.svelte)).
+  Every store starts empty, so no panel the last account had open survives
+  into the next login. A page refresh closes web page panels a saved layout
+  would reopen. `connection.reconnect()` is removed; nothing calls it
+  (`9facc3288`, `38fc718ed`).
+- **Command history and the compose draft are per account**
+  ([`commands.svelte.ts`](evennia/web/webclient/client/src/lib/commands.svelte.ts),
+  [`compose.svelte.ts`](evennia/web/webclient/client/src/lib/compose.svelte.ts)).
+  They are stored as `underspire.history.v2:<account>` and
+  `underspire.compose.draft.v2:<account>`, keyed by the account
+  `ticket_role` names. Nothing is recorded before login, so a typed
+  `connect <name> <password>` is never kept, and a line typed before login
+  is not echoed. The shared `v1` keys are removed at startup (`9facc3288`,
+  `38fc718ed`).
+- **A config export and import skip account records** ([`backup.ts`](evennia/web/webclient/client/src/lib/backup.ts)).
+  History, drafts, ticket seen maps (per account and the old shared ones)
+  and the per-account Assist mark are left out (`9facc3288`, `1c78858ed`).
+
+### Protocol
+
+- **A tab on an older shell is told to reload** ([`inputfuncs.py`](evennia/server/inputfuncs.py),
+  [`evennia.svelte.ts`](evennia/web/webclient/client/src/lib/evennia.svelte.ts)).
+  A deploy reconnects open tabs without reloading them, so they keep the old
+  bundle. The shell now sends `shell` (its generation) in `hello`
+  capabilities, and a session whose generation is missing or below
+  `SHELL_GENERATION` is asked to reload. Every tab open before this release
+  sees the message once (`05027062b`).
+
+### Authorization
+
+- **`holds_capability(principal, capability, *, resource=None)`**
+  ([`service.py`](evennia/authorization/service.py), [`storage.py`](evennia/authorization/storage.py))
+  answers with quell set aside, for decisions about who someone is (a quelled
+  staff member's own ticket is still a staff member's). It reads an uncached
+  snapshot, so ordinary checks still see quell, and break-glass does not
+  count. `load_grants` takes `ignore_quell` (`7dd96e161`).
+
+### Migration
+
+- The game must send `ticket_role` with `account`, a `view` field on every
+  ticket row, and `own` on `channel_msg`, and must stop sending
+  `assist_inbox` / `assist_thread` (the client no longer handles them).
+  Regenerate `oob-events.ts` from the game's catalog.
+
+### Tests
+
+- [`ticketSort.test.ts`](evennia/web/webclient/client/src/lib/ticketSort.test.ts):
+  a new low-priority ticket leads a parked high-priority one under Newest, and
+  each order ranks a fixed set.
+- [`chat.test.ts`](evennia/web/webclient/client/src/lib/chat.test.ts): view routing, audience-checked
+  appends, role loss, login reset, per-account seen marks, terminal echo,
+  late view answers, and layout migration.
+- [`accountSession.test.ts`](evennia/web/webclient/client/src/lib/accountSession.test.ts):
+  every way a session ends leaves no store holding the last account's data;
+  a resumed reconnect keeps the scrollback.
+- [`account-records.test.ts`](evennia/web/webclient/client/src/lib/account-records.test.ts):
+  per-account history and drafts, and an export that leaves them out.
+- [`tests/workspace.ts`](evennia/web/webclient/client/tests/workspace.ts),
+  [`tests/tickets.ts`](evennia/web/webclient/client/tests/tickets.ts) and
+  [`tests/notify.ts`](evennia/web/webclient/client/tests/notify.ts):
+  the Assist panel and its tabs in a live dockview, an old layout's
+  migration, the recipient line, queue rows opened through the RPC, and
+  notifications closed at session end.
+- [`test_inputfuncs.py`](evennia/server/tests/test_inputfuncs.py): the reload
+  message for an older shell, and none for the current one.
+- [`test_storage.py`](evennia/authorization/tests/test_storage.py): grants read
+  with quell set aside.
+
+---
+
 ## 6.0.0+underspire.312: Reactor stalls: the frozen-object gauge, the thaw clock and the stall watchdog
 
 Production on underspire.310 with `ENGINE_GC_REFREEZE` on logged 885 reactor stalls an
