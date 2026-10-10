@@ -7,6 +7,7 @@
   import { VIEWS } from "../lib/dock.svelte";
   import { PANELS } from "../lib/panelRegistry";
   import { chat } from "../lib/chat.svelte";
+  import { tickets } from "../lib/tickets.svelte";
   import { puppets } from "../lib/puppets.svelte";
   import { activity } from "../lib/activity.svelte";
 
@@ -46,8 +47,8 @@
   // page body with it hidden. Put it on the new view's tab instead.
   $effect(() => {
     const id = simple.active;
-    chat.queueActive = id === "tickets";
-    if (chat.queueActive) chat.markQueueSeen();
+    tickets.queueActive = id === "tickets";
+    if (tickets.queueActive) tickets.markQueueSeen();
     tick().then(() => {
       const a = document.activeElement;
       if (!a || a === document.body || a.closest("[role=tabpanel][hidden]")) tabEls[id]?.focus();
@@ -60,7 +61,7 @@
       return n ? `${title} (${n} unread)` : title;
     }
     if (id === "puppets" && puppets.totalUnread) return `${title} (${puppets.totalUnread})`;
-    if (id === "tickets" && chat.queueUnseen) return `${title} (new)`;
+    if (id === "tickets" && tickets.queueUnseen) return `${title} (new)`;
     return title;
   }
 

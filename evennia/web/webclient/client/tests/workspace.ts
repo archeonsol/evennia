@@ -11,7 +11,7 @@ import SimpleWorkspace from "../src/components/SimpleWorkspace.svelte";
 import { activity } from "../src/lib/activity.svelte";
 import { simple } from "../src/lib/simpleLayout.svelte";
 import { puppets } from "../src/lib/puppets.svelte";
-import { chat } from "../src/lib/chat.svelte";
+import { tickets } from "../src/lib/tickets.svelte";
 import { dock } from "../src/lib/dock.svelte";
 
 declare global {
@@ -46,24 +46,24 @@ async function run(): Promise<void> {
   // A staff session: the queue panel appears and is saved into the layout.
   let app = mount(Workspace, { target: host });
   await settle();
-  chat.handleOob("ticket_role", [], { staff: true });
+  tickets.handleOob("ticket_role", [], { staff: true });
   await settle();
   check("staff get the ticket queue", has("tickets"));
-  check("the staff panel is named apart from My Tickets", title("tickets") === "Ticket Queue", title("tickets"));
+  check("the staff panel is named apart from My requests", title("tickets") === "Tickets", title("tickets"));
   dock.api?.getPanel("log")?.api.setActive(); // any layout change saves it
   await settle();
   check("the layout was saved with the queue in it", (localStorage.getItem("underspire.layout.v2") ?? "").includes('"tickets"'));
   unmount(app);
 
   // A player on the same browser: the saved layout brings the panel back ...
-  chat.staff = false;
-  chat.staffKnown = false;
+  tickets.staff = false;
+  tickets.staffKnown = false;
   app = mount(Workspace, { target: host });
   await settle();
   check("a restored layout keeps the queue until the role is known", has("tickets"));
 
   // ... until the server says this session is not staff.
-  chat.handleOob("ticket_role", [], { staff: false });
+  tickets.handleOob("ticket_role", [], { staff: false });
   await settle();
   check("a player loses a queue panel restored from a staff layout", !has("tickets"));
   unmount(app);

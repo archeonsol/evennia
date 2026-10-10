@@ -16,6 +16,7 @@ import { keybinds } from "./lib/keybinds.svelte";
 import { panelPrefs } from "./lib/panelPrefs.svelte";
 import { routing } from "./lib/routing.svelte";
 import { chat } from "./lib/chat.svelte";
+import { tickets } from "./lib/tickets.svelte";
 import { toasts } from "./lib/toasts.svelte";
 import { notify } from "./lib/notify.svelte";
 import { renderNodeHtml } from "./lib/render";
@@ -81,7 +82,8 @@ compose.init();
 // rather than as an RPC - `@preview_rp` answers with a `compose_preview` OOB.
 compose.setPreviewSender((line) => connection.sendCommand(line));
 // A ticket toast opens its panel; the dock imports the chat store, so the
-// store is handed the opener rather than importing the dock.
+// store is handed the opener rather than importing the dock. The chat store
+// passes it on to the tickets store.
 chat.setPanelOpener((view) => dock.openView(view));
 activity.connect((ns, action, data) => connection.request(ns, action, data), (entries) => puppets.setManifest(entries));
 
@@ -193,6 +195,8 @@ connection.on("hello", (env) => {
 connection.on("connection_open", () => {
   void activity.ensureSubscribed();
   refreshPuppetManifest();
+  // The lean ticket protocol is a session flag, so every connection asks again.
+  void tickets.hello();
   // Screen size is a session flag, so a new connection starts without one.
   screenSize.resend();
   // The session flag starts off on every connection, and the settings store's
@@ -231,8 +235,7 @@ connection.on("oob", (env) => {
     event.startsWith("channel_") ||
     is(event, "channels_list") ||
     is(event, "assist_inbox") ||
-    is(event, "assist_thread") ||
-    event.startsWith("ticket_")
+    is(event, "assist_thread")
   ) {
     chat.handleOob(event, env.args ?? [], env.kwargs ?? {});
     if (is(event, "channel_msg")) {
@@ -240,9 +243,11 @@ connection.on("oob", (env) => {
       const key = String(env.kwargs?.channel ?? "");
       if (key && !chat.muted[key]) notify.activity();
     }
+  } else if (event.startsWith("ticket_")) {
+    tickets.handleOob(event, env.args ?? [], env.kwargs ?? {});
     // A thread only arrives because the player asked for one (@ticket, or a
     // click in a ticket list): bring its panel forward.
-    if (is(event, "ticket_thread")) dock.openView(chat.staff ? "tickets" : "mytickets");
+    if (is(event, "ticket_thread")) dock.openView(tickets.staff ? "tickets" : "mytickets");
   } else if (is(event, "ui_component")) {
     const comp = Array.isArray(env.args) ? env.args[0] : env.args;
     if (comp) ui.set(comp);

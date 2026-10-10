@@ -1,329 +1,368 @@
 <script lang="ts">
-  // A player's own tickets: find one, read it, answer it, file a new one.
+  // A player's own requests: find one, read it, answer it, send a new one.
   //
-  // Driven by the my_tickets / my_ticket / my_ticket_act / my_ticket_open
-  // RPCs, so nothing a player does here prints into their terminal. Live staff
-  // replies and status changes arrive via ticket_msg; with the panel closed
-  // the store raises a toast instead (chat.announceTicket).
-  import { chat } from "../lib/chat.svelte";
-  import { renderBody, renderSender } from "../lib/markup";
+  // Every action is a request to the game that answers inside the panel, so
+  // nothing a player does here prints into their terminal. Whether a reply is
+  // unread is kept by the server, so another device and the login line agree
+  // with this one. Live staff replies arrive as `ticket_msg`; with the panel
+  // closed the tickets store raises a toast instead.
+  import "../styles/tickets.css";
+  import { onMount } from "svelte";
   import { connection } from "../lib/evennia.svelte";
   import { focusOnMount } from "../lib/focus";
+  import { renderBody, renderSender } from "../lib/markup";
+  import { tickets, type NewRequest, type TicketResult } from "../lib/tickets.svelte";
+  import { ageSince, inMineView, isOpen, mineCounts, playerState, type MineView } from "../lib/ticketModel";
 
-  type View = "open" | "waiting" | "all";
-  type Sort = "recent" | "oldest";
+  type Kind = NewRequest["kind"];
 
-  let view = $state<View>("open");
-  let sort = $state<Sort>("recent");
-  let search = $state("");
+  // The words of the form are the game's, asked for once (see lib/ticketForm.ts).
+  const f = $derived(tickets.form);
+
+  let view = $state<MineView>("open");
+  let query = $state("");
   let reply = $state("");
-  let composing = $state(false);
-  let subject = $state("");
-  let details = $state("");
-  let feedback = $state<{ ok: boolean; message: string } | null>(null);
+  let picking = $state(false);
+  let kind = $state<Kind | null>(null);
+  const BLANK = { subject: "", title: "", text: "", category: "Other", severity: "Minor", npc: "", said: "", goal: "", contact: "" };
+  let fields = $state({ ...BLANK });
+  let tips = $state<{ key: string; summary: string }[]>([]);
+  let feedback = $state<TicketResult | null>(null);
   let busy = $state(false);
   let confirmWithdraw = $state(false);
-  const ticket = $derived(chat.myTicket);
+  let now = $state(Math.floor(Date.now() / 1000));
 
-  const STATUS: Record<string, string> = {
-    pending: "with staff",
-    waiting: "waiting on you",
-    approved: "approved",
-    denied: "denied",
-    closed: "closed",
-    resolved: "closed",
-    withdrawn: "withdrawn",
-  };
-  // The colour of a status plate: your move stands out, staff's move is hot,
-  // finished tickets fade.
-  const PLATE: Record<string, string> = {
-    pending: "hot",
-    waiting: "gold",
-    approved: "ok",
-  };
-  const OPEN = new Set(["pending", "waiting"]);
+  const ticket = $derived(tickets.myTicket);
+  const counts = $derived(mineCounts(tickets.myRows));
+  const rows = $derived(query.trim() ? tickets.myRows : tickets.myRows.filter((r) => inMineView(r, view)));
+  const canReply = $derived(!!ticket && (isOpen(ticket.status) || !ticket.approvable));
+  const canWithdraw = $derived(!!ticket && isOpen(ticket.status) && !ticket.approvable);
+  const composing = $derived(picking || kind !== null);
 
   // Load when the socket is open (a layout restored at page load mounts this
-  // panel before it is), whenever the filter or search changes, and when a
-  // ticket of ours changes. The search is debounced; a status filter is not.
+  // panel before it is), whenever the view or the search changes, and when one of
+  // the requests changes. The search is debounced; a view change is not.
   let searchTimer: ReturnType<typeof setTimeout> | null = null;
   $effect(() => {
-    const q = search.trim();
+    const q = query.trim();
     const includeClosed = view === "all" || !!q;
-    void chat.myTicketsRev;
+    void tickets.myRev;
     if (connection.state !== "open") return;
     if (searchTimer) clearTimeout(searchTimer);
     searchTimer = setTimeout(() => {
-      chat.myTicketsSearch = q;
-      void chat.loadMyTickets(includeClosed, q);
+      tickets.mySearch = q;
+      void tickets.loadMine(includeClosed, q);
     }, q ? 250 : 0);
     return () => {
       if (searchTimer) clearTimeout(searchTimer);
     };
   });
 
-  const rows = $derived.by(() => {
-    let list = [...chat.myTickets];
-    if (!search.trim()) {
-      if (view === "open") list = list.filter((t) => OPEN.has(t.status));
-      else if (view === "waiting") list = list.filter((t) => t.status === "waiting");
+  // Help pages that may answer the question before it goes to staff.
+  let tipTimer: ReturnType<typeof setTimeout> | null = null;
+  $effect(() => {
+    const words = `${fields.subject} ${fields.text}`.trim();
+    if (kind !== "request") {
+      tips = [];
+      return;
     }
-    list.sort((a, b) => (sort === "recent" ? (b.updated ?? 0) - (a.updated ?? 0) : (a.updated ?? 0) - (b.updated ?? 0)));
-    return list;
+    if (tipTimer) clearTimeout(tipTimer);
+    tipTimer = setTimeout(async () => {
+      tips = await tickets.suggest(words);
+    }, 500);
+    return () => {
+      if (tipTimer) clearTimeout(tipTimer);
+    };
   });
-  const waitingCount = $derived(chat.myTickets.filter((t) => t.status === "waiting").length);
 
-  function say(result: { ok: boolean; message: string }) {
-    feedback = result;
-  }
-  function open(t: any) {
-    feedback = null;
-    confirmWithdraw = false;
-    reply = "";
-    void chat.openMyTicket(t.id);
-  }
-  function back() {
-    chat.myTicket = null;
-    feedback = null;
-    confirmWithdraw = false;
-    chat.myTicketsRev += 1;
-  }
-  async function send() {
-    const text = reply.trim();
-    if (!text || !ticket || busy) return;
-    busy = true;
-    const result = await chat.replyMyTicket(ticket.id, text);
-    busy = false;
-    if (result.ok) reply = "";
-    say(result);
-  }
-  async function withdraw() {
-    if (!ticket || busy) return;
-    if (!confirmWithdraw) {
-      confirmWithdraw = true;
-      return;
-    }
-    busy = true;
-    say(await chat.myTicketAct(ticket.id, "withdraw"));
-    busy = false;
-    confirmWithdraw = false;
-  }
-  async function file() {
-    if (busy) return;
-    if (!details.trim()) {
-      say({ ok: false, message: "Say what you need help with." });
-      return;
-    }
-    busy = true;
-    const result = await chat.openRequest(subject.trim(), details.trim());
-    busy = false;
-    say(result);
-    if (result.ok) {
-      composing = false;
-      subject = "";
-      details = "";
-    }
-  }
-  // Enter sends; Shift+Enter is a new line, for the multi-line answer a
-  // support conversation often needs.
-  function onReplyKey(e: KeyboardEvent) {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      void send();
-    }
-  }
-  function ageOf(ts: number) {
-    if (!ts) return "";
-    const m = Math.floor((Date.now() / 1000 - ts) / 60);
-    if (m < 1) return "now";
-    if (m < 60) return `${m}m`;
-    const h = Math.floor(m / 60);
-    return h < 24 ? `${h}h` : `${Math.floor(h / 24)}d`;
-  }
-  function stamp(ts: number) {
+  onMount(() => {
+    const timer = setInterval(() => (now = Math.floor(Date.now() / 1000)), 30000);
+    return () => clearInterval(timer);
+  });
+
+  function stamp(ts: number): string {
     if (!ts) return "";
     const d = new Date(ts * 1000);
     const p = (n: number) => String(n).padStart(2, "0");
     const today = new Date().toDateString() === d.toDateString();
     return today ? `${p(d.getHours())}:${p(d.getMinutes())}` : `${d.getMonth() + 1}/${d.getDate()} ${p(d.getHours())}:${p(d.getMinutes())}`;
   }
-  const canReply = $derived(!!ticket && (OPEN.has(ticket.status) || !ticket.approvable));
-  const canWithdraw = $derived(!!ticket && OPEN.has(ticket.status) && !ticket.approvable);
+
+  function emptyLine(): string {
+    if (query.trim()) return "Nothing of yours matches.";
+    if (view === "answered") return "No request is waiting for your reply.";
+    if (view === "open") return "You have no open requests.";
+    return "You have not sent any requests.";
+  }
+
+  function open(row: { id: string }): void {
+    feedback = null;
+    confirmWithdraw = false;
+    reply = "";
+    void tickets.openMine(row.id);
+  }
+
+  function back(): void {
+    feedback = null;
+    confirmWithdraw = false;
+    tickets.closeMine();
+  }
+
+  function startNew(): void {
+    feedback = null;
+    picking = true;
+    kind = null;
+    void tickets.loadForm();
+  }
+
+  function cancelNew(): void {
+    picking = false;
+    kind = null;
+    feedback = null;
+  }
+
+  async function send(): Promise<void> {
+    const text = reply.trim();
+    if (!text || !ticket || busy) return;
+    busy = true;
+    const result = await tickets.mineAct(ticket.id, "reply", text);
+    busy = false;
+    feedback = result;
+    if (result.ok) reply = "";
+  }
+
+  async function withdraw(): Promise<void> {
+    if (!ticket || busy) return;
+    if (!confirmWithdraw) {
+      confirmWithdraw = true;
+      return;
+    }
+    busy = true;
+    feedback = await tickets.mineAct(ticket.id, "withdraw");
+    busy = false;
+    confirmWithdraw = false;
+  }
+
+  async function file(): Promise<void> {
+    if (busy || !kind) return;
+    const text = fields.text.trim();
+    const body: NewRequest =
+      kind === "bug"
+        ? { kind, title: fields.title.trim(), text, category: fields.category, severity: fields.severity }
+        : kind === "puppet"
+          ? { kind, npc: fields.npc.trim(), said: fields.said.trim(), goal: fields.goal.trim(), contact: fields.contact.trim() }
+          : { kind, subject: fields.subject.trim(), text };
+    busy = true;
+    const result = await tickets.file(body);
+    busy = false;
+    feedback = result;
+    if (result.ok) {
+      picking = false;
+      kind = null;
+      fields = { ...BLANK };
+    }
+  }
+
+  // Enter sends; Shift+Enter is a new line, for the multi-line answer a support
+  // conversation often needs.
+  function onReplyKey(e: KeyboardEvent): void {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      void send();
+    }
+  }
 </script>
 
-<div class="mine">
-  <div class="hd">
-    <span class="title glow-text">My tickets</span>
+<div class="tk" role="region" aria-label="My requests">
+  <div class="tk-hd">
+    <span class="tk-title">My requests</span>
     {#if ticket}
-      <button class="sh-cmd back" onclick={back}>Back</button>
+      <button class="tk-btn quiet" style="margin-left:auto" onclick={back}>Back to the list</button>
     {:else if composing}
-      <button class="sh-cmd" onclick={() => { composing = false; feedback = null; }}>Cancel</button>
+      <button class="tk-btn quiet" style="margin-left:auto" onclick={cancelNew}>Cancel</button>
     {:else}
-      <button class="sh-cmd primary" onclick={() => { composing = true; feedback = null; }}>Request</button>
+      <button class="tk-btn primary" style="margin-left:auto" onclick={startNew}>New request</button>
     {/if}
   </div>
 
   {#if feedback}
-    <p class="fb" class:err={!feedback.ok} role="status">{feedback.message}</p>
+    <p class="tk-fb" class:err={!feedback.ok} role="status">{feedback.message}</p>
   {/if}
 
-  {#if composing}
-    <form class="compose" onsubmit={(e) => { e.preventDefault(); void file(); }}>
-      <label>
-        <span class="sh-label">Subject</span>
-        <input class="sh-field" bind:value={subject} maxlength="120" use:focusOnMount />
-      </label>
-      <label>
-        <span class="sh-label">Details</span>
-        <textarea class="sh-field" bind:value={details} rows="5"></textarea>
-      </label>
-      <div class="formkeys">
-        <span class="hint">Bugs: <b>@bug</b>. Harassment: <b>@report</b>.</span>
-        <button class="sh-cmd primary" type="submit" disabled={busy}>Send</button>
+  {#if picking && !kind}
+    <div class="tk-pick">
+      <p class="tk-note">{f.pick}</p>
+      {#each f.kinds as k (k.kind)}
+        <button onclick={() => (kind = k.kind)}>
+          <span>{k.name}</span>
+          <small>{k.hint}</small>
+        </button>
+      {/each}
+    </div>
+  {:else if kind}
+    <form class="tk-form" onsubmit={(e) => { e.preventDefault(); void file(); }}>
+      {#if kind === "request" || kind === "report"}
+        <label>
+          <span>{f.summary}</span>
+          <input
+            bind:value={fields.subject}
+            maxlength="120"
+            placeholder={f.placeholders[`${kind}_summary`] ?? ""}
+            use:focusOnMount
+          />
+        </label>
+        <label>
+          <span>{f.details}</span>
+          <textarea bind:value={fields.text} rows="6" placeholder={f.placeholders[`${kind}_details`] ?? ""}></textarea>
+        </label>
+        {#if kind === "request" && tips.length}
+          <div class="tk-tips">
+            These help pages may answer it:
+            {#each tips as tip (tip.key)}
+              <button type="button" onclick={() => connection.sendCommand(`help ${tip.key}`)}>help {tip.key}: {tip.summary}</button>
+            {/each}
+          </div>
+        {/if}
+        {#if f.notes[kind]}<p class="tk-note">{f.notes[kind]}</p>{/if}
+      {:else if kind === "bug"}
+        <label>
+          <span>{f.summary}</span>
+          <input bind:value={fields.title} maxlength="120" placeholder={f.placeholders.bug_summary ?? ""} use:focusOnMount />
+        </label>
+        <label>
+          <span>{f.category}</span>
+          <select bind:value={fields.category}>
+            {#each f.categories as c (c)}<option value={c}>{c}</option>{/each}
+          </select>
+        </label>
+        <label>
+          <span>{f.severity}</span>
+          <select bind:value={fields.severity} aria-describedby="tk-severity-advice">
+            {#each f.severities as s (s.key)}<option value={s.key}>{s.text}</option>{/each}
+          </select>
+          <span id="tk-severity-advice" class="tk-note">{f.severity_advice}</span>
+        </label>
+        <label>
+          <span>{f.details}</span>
+          <textarea bind:value={fields.text} rows="6" placeholder={f.placeholders.bug_details ?? ""}></textarea>
+        </label>
+      {:else}
+        <label>
+          <span>{f.npc}</span>
+          <input bind:value={fields.npc} maxlength="120" placeholder={f.placeholders.npc ?? ""} use:focusOnMount />
+        </label>
+        <label>
+          <span>{f.said}</span>
+          <textarea bind:value={fields.said} rows="3"></textarea>
+        </label>
+        <label>
+          <span>{f.goal}</span>
+          <textarea bind:value={fields.goal} rows="3"></textarea>
+        </label>
+        <label>
+          <span>{f.contact}</span>
+          <input bind:value={fields.contact} maxlength="240" placeholder={f.placeholders.contact ?? ""} />
+        </label>
+        {#if f.notes.puppet}<p class="tk-note">{f.notes.puppet}</p>{/if}
+      {/if}
+      <div class="tk-btns">
+        <button class="tk-btn primary" type="submit" disabled={busy}>Send</button>
+        <button class="tk-btn quiet" type="button" onclick={() => (kind = null)}>Choose another kind</button>
       </div>
     </form>
   {:else if !ticket}
-    <div class="tools">
-      <input class="sh-field search" bind:value={search} placeholder="Search" aria-label="Search your tickets" />
-      <div class="chips" role="radiogroup" aria-label="Show">
-        <button class="sh-toggle" role="radio" aria-checked={view === "open"} onclick={() => (view = "open")}>Open</button>
-        <button class="sh-toggle" role="radio" aria-checked={view === "waiting"} onclick={() => (view = "waiting")}>
-          Waiting{#if waitingCount}<span class="sh-count">{waitingCount}</span>{/if}
-        </button>
-        <button class="sh-toggle" role="radio" aria-checked={view === "all"} onclick={() => (view = "all")}>All</button>
-        <button class="sh-cmd sort" onclick={() => (sort = sort === "recent" ? "oldest" : "recent")}
-          aria-label="Sort: {sort === 'recent' ? 'newest first' : 'oldest first'}">{sort === "recent" ? "Newest" : "Oldest"}</button>
+    <div class="tk-tools">
+      <input class="tk-search" bind:value={query} placeholder="Search by number, subject or text" aria-label="Search your requests" />
+      <div class="tk-views">
+        <div class="tk-radios" role="radiogroup" aria-label="Show">
+          <button class="tk-view" role="radio" aria-checked={view === "open"} onclick={() => (view = "open")}>Open<b>{counts.open}</b></button>
+          <button class="tk-view" role="radio" aria-checked={view === "answered"} onclick={() => (view = "answered")}>Answered<b>{counts.answered}</b></button>
+          <button class="tk-view" role="radio" aria-checked={view === "all"} onclick={() => (view = "all")}>All</button>
+        </div>
       </div>
     </div>
-    <div class="list">
-      {#if chat.myTicketsError}
-        <p class="empty err" role="alert">
-          {chat.myTicketsError}
-          <button class="sh-cmd" onclick={() => chat.myTicketsRev++}>Retry</button>
+    <div class="tk-list" role="list" aria-label="Your requests">
+      {#if tickets.myError}
+        <p class="tk-empty err" role="alert">
+          {tickets.myError}
+          <button class="tk-btn" onclick={() => (tickets.myRev += 1)}>Try again</button>
         </p>
       {/if}
-      {#each rows as t (t.id)}
-        <button class="sh-row" class:hot={chat.unseen(t)} onclick={() => open(t)}>
-          <span class="r1">
-            {#if chat.unseen(t)}<span class="sr-only">New. </span>{/if}
-            <span class="kind">{t.label}</span>
-            <span class="id">#{t.short_id}</span>
-            <span class="sh-plate {PLATE[t.status] ?? ''}">{STATUS[t.status] ?? t.status}</span>
-            <span class="age">{ageOf(t.updated)}</span>
-          </span>
-          {#if t.subject}<span class="subject">{t.subject}</span>{/if}
-          {#if t.preview}<span class="prev">{t.preview}</span>{/if}
-        </button>
+      {#each rows as r (r.id)}
+        <div role="listitem">
+          <button class="tk-row plain" class:new={r.unread} onclick={() => open(r)}>
+            <span class="tk-l1">
+              <span class="tk-row-title">{r.title || r.subject || r.label}</span>
+              <span class="tk-clock">{ageSince(r.updated, now)}</span>
+            </span>
+            <span class="tk-l2">
+              <span class="tk-id">{r.ref}</span>
+              <span>{r.label}</span>
+              <span class="tk-state" class:mute={!r.unread && r.status !== "waiting"}>
+                {playerState(r)}{r.unread ? ", new reply" : ""}
+              </span>
+            </span>
+            {#if r.preview}<span class="tk-l3">{r.preview}</span>{/if}
+          </button>
+        </div>
       {:else}
-        {#if !chat.myTicketsError}
-          <p class="empty">
-            {#if search.trim()}No match.
-            {:else if view === "waiting"}Nothing waiting on you.
-            {:else}No {view === "open" ? "open " : ""}tickets.{/if}
-          </p>
-        {/if}
+        {#if !tickets.myError}<p class="tk-empty">{emptyLine()}</p>{/if}
       {/each}
     </div>
   {:else}
-    <div class="convo">
-      <div class="chead">
-        <span class="ctitle">{ticket.subject || ticket.label}</span>
-        <span class="cmeta">
-          <span class="ckind">{ticket.label} #{ticket.short_id}</span>
-          <span class="sh-plate {PLATE[ticket.status] ?? ''}">{STATUS[ticket.status] ?? ticket.status}</span>
-          {#if ticket.assignee}<span class="handler">Handler <b>{ticket.assignee}</b></span>{/if}
-        </span>
+    <div class="tk-detail">
+      <div class="tk-dh">
+        <div class="tk-dt">{ticket.title || ticket.subject || ticket.label}</div>
+        <div class="tk-ds">
+          <span>{ticket.label} {ticket.ref}</span>
+          <span class="tk-state" class:mute={ticket.status !== "waiting"}>{playerState(ticket)}</span>
+          {#if ticket.assignee}<span>{ticket.assignee} is handling it</span>{/if}
+        </div>
       </div>
-      <div class="msgs" role="log" aria-label="Conversation">
-        {#each ticket.messages ?? [] as m, i (i)}
-          {#if m.origin === "system"}
-            <div class="sys"><span class="mts">{stamp(m.ts)}</span> {m.text}</div>
-          {:else}
-            <div class="m" class:me={m.origin === "player"} class:staffmsg={m.origin === "staff"}>
-              <span class="who">
-                <span class="s">{@html renderSender(m.sender_html ?? m.senderHtml, m.sender)}</span>
-                {#if m.origin === "staff"}<span class="sh-plate hot">Staff</span>{:else if m.origin === "player"}<span class="sh-plate dim">You</span>{/if}
-                <span class="mts">{stamp(m.ts)}</span>
-              </span>
-              <span class="t">{@html renderBody(m.html, m.text)}</span>
-            </div>
-          {/if}
-        {/each}
-        {#if !(ticket.messages ?? []).length}<p class="empty">No messages.</p>{/if}
+      <div class="tk-scroll">
+        <div class="tk-msgs" role="log" aria-label="Conversation">
+          {#each ticket.messages ?? [] as m, i (i)}
+            {#if m.origin === "system"}
+              <div class="tk-sys">{stamp(m.ts)} {m.text}</div>
+            {:else}
+              <div class="tk-msg" class:staff={m.origin === "staff"} class:mine={m.origin === "player"}>
+                <span class="tk-who">
+                  <b>{@html renderSender(m.sender_html ?? m.senderHtml, m.sender)}</b>
+                  {m.origin === "staff" ? "Staff" : m.origin === "player" ? "You" : ""}, {stamp(m.ts)}
+                </span>
+                <span class="tk-text">{@html renderBody(m.html, m.text)}</span>
+              </div>
+            {/if}
+          {/each}
+          {#if !(ticket.messages ?? []).length}<p class="tk-empty">No messages yet.</p>{/if}
+        </div>
       </div>
       {#if canReply}
-        <div class="reply">
+        <div class="tk-composer">
           <textarea
-            class="sh-field sh-placeholder"
+            class="tk-box"
             bind:value={reply}
             onkeydown={onReplyKey}
-            rows="2"
-            placeholder={OPEN.has(ticket.status) ? "Reply" : "Reply to reopen"}
+            rows="3"
+            placeholder={isOpen(ticket.status) ? "Write a reply" : "Write a reply to open this again"}
             aria-label="Reply"
             aria-describedby="mine-reply-keys"
           ></textarea>
-          <span id="mine-reply-keys" class="sr-only">Enter sends. Shift+Enter starts a new line.</span>
-          <div class="rkeys">
+          <div class="tk-foot">
+            <span id="mine-reply-keys">Enter sends, Shift+Enter starts a new line.</span>
             {#if canWithdraw}
-              <button class="sh-cmd warn" class:armed={confirmWithdraw} onclick={withdraw} disabled={busy}>
-                {confirmWithdraw ? "Confirm withdraw" : "Withdraw"}
+              <button class="tk-btn warn" onclick={withdraw} disabled={busy}>
+                {confirmWithdraw ? "Yes, withdraw it" : "Withdraw"}
               </button>
             {/if}
-            <button class="sh-cmd primary send" onclick={send} disabled={busy || !reply.trim()}>{OPEN.has(ticket.status) ? "Send" : "Reopen"}</button>
+            <button class="tk-btn primary grow" onclick={send} disabled={busy || !reply.trim()}>
+              {isOpen(ticket.status) ? "Send" : "Send and open again"}
+            </button>
           </div>
         </div>
       {:else}
-        <div class="closed-note">Closed. File a new request if you need more.</div>
+        <p class="tk-empty">This decision is final. Send a new request if you need more.</p>
       {/if}
     </div>
   {/if}
 </div>
-
-<style>
-  .mine { display: flex; flex-direction: column; height: 100%; background: var(--bg-elev); }
-  .hd { display: flex; align-items: center; gap: 1ch; padding: 5px 8px 5px 10px; border-bottom: 1px solid var(--accent); flex: 0 0 auto; }
-  .hd .sh-cmd { margin-left: auto; }
-  .title { color: var(--accent-bright); text-transform: uppercase; letter-spacing: 0.2em; font-size: 0.74rem; }
-  .fb { margin: 0; padding: 4px 10px; font-size: 0.72rem; letter-spacing: 0.04em; color: var(--ok, var(--accent-bright)); border-bottom: 1px solid var(--border); }
-  .fb.err, .err { color: var(--alert); }
-  .tools { display: flex; flex-direction: column; gap: 4px; padding: 6px 10px; border-bottom: 1px solid var(--border); flex: 0 0 auto; }
-  .chips { display: flex; flex-wrap: wrap; gap: 2px 6px; align-items: center; }
-  .sort { margin-left: auto; }
-  .list { overflow-y: auto; flex: 1; min-height: 0; }
-  .r1 { display: flex; align-items: baseline; gap: 1ch; }
-  .kind { color: var(--accent-bright); text-transform: uppercase; letter-spacing: 0.12em; font-size: 0.68rem; }
-  .id { color: var(--fg-faint); font-size: 0.64rem; }
-  .age { margin-left: auto; color: var(--fg-faint); font-size: 0.64rem; }
-  .subject { color: var(--fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .sh-row.hot .subject { color: var(--gold); }
-  .prev { color: var(--fg-dim); font-size: 0.76rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .empty { color: var(--fg-faint); padding: 12px 10px; margin: 0; font-size: 0.68rem; letter-spacing: 0.14em; text-transform: uppercase; }
-  .compose { display: flex; flex-direction: column; gap: 12px; padding: 12px 10px; overflow-y: auto; }
-  .compose label { display: flex; flex-direction: column; gap: 4px; }
-  .formkeys { display: flex; align-items: center; gap: 10px; }
-  .formkeys .sh-cmd { margin-left: auto; }
-  .hint { color: var(--fg-faint); font-size: 0.7rem; }
-  .hint b { color: var(--fg-dim); font-weight: normal; }
-  .convo { display: flex; flex-direction: column; min-height: 0; flex: 1; }
-  .chead { display: flex; flex-direction: column; gap: 4px; padding: 7px 10px; border-bottom: 1px solid var(--border); }
-  .ctitle { color: var(--gold); letter-spacing: 0.04em; font-size: 0.88rem; }
-  .cmeta { display: flex; flex-wrap: wrap; align-items: center; gap: 1ch; }
-  .ckind { color: var(--accent-bright); text-transform: uppercase; letter-spacing: 0.12em; font-size: 0.66rem; }
-  .handler { color: var(--fg-faint); font-size: 0.64rem; letter-spacing: 0.14em; text-transform: uppercase; }
-  .handler b { color: var(--fg-dim); font-weight: normal; letter-spacing: 0.04em; text-transform: none; font-size: 0.72rem; }
-  .msgs { flex: 1; overflow-y: auto; padding: 8px 10px; line-height: 1.5; display: flex; flex-direction: column; gap: 10px; }
-  .m { display: flex; flex-direction: column; gap: 2px; padding-left: 1.5ch; border-left: 1px solid var(--border-bright); font-size: 0.85rem; }
-  .m.staffmsg { border-left-color: var(--accent); }
-  .who { display: flex; align-items: baseline; gap: 0.8ch; }
-  .s { color: var(--accent-bright); }
-  .m.me .s { color: var(--fg-dim); }
-  .mts { color: var(--fg-faint); font-size: 0.64rem; }
-  .t { color: var(--fg); white-space: pre-wrap; }
-  .sys { color: var(--fg-faint); font-size: 0.64rem; letter-spacing: 0.12em; text-transform: uppercase; padding: 2px 0; }
-  .sys::before { content: "-- "; content: "-- " / ""; }
-  .reply { display: flex; flex-direction: column; gap: 4px; padding: 7px 10px; border-top: 1px solid var(--accent); flex: 0 0 auto; }
-  .rkeys { display: flex; gap: 6px; align-items: center; }
-  .rkeys .send { margin-left: auto; }
-  .sh-cmd.armed { background: var(--alert); color: var(--bg-deep); }
-  .closed-note { padding: 7px 10px; border-top: 1px solid var(--border); color: var(--fg-faint); font-size: 0.64rem; letter-spacing: 0.14em; text-transform: uppercase; }
-</style>

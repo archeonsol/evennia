@@ -4,6 +4,7 @@
   import type { DockviewApi } from "dockview-core";
   import { svelteComponents } from "../lib/dockAdapter.svelte";
   import { chat } from "../lib/chat.svelte";
+  import { tickets } from "../lib/tickets.svelte";
   import { dock, VIEWS } from "../lib/dock.svelte";
   import { panelPrefs } from "../lib/panelPrefs.svelte";
   import { PANELS } from "../lib/panelRegistry";
@@ -100,8 +101,8 @@
     // The queue's badge flags what has not been looked at: focusing the panel
     // is looking at it, so its arrivals and updates count as seen from then on.
     const activeSub = dv.onDidActivePanelChange((e: any) => {
-      chat.queueActive = e.panel?.id === "tickets";
-      if (chat.queueActive) chat.markQueueSeen();
+      tickets.queueActive = e.panel?.id === "tickets";
+      if (tickets.queueActive) tickets.markQueueSeen();
     });
 
     return () => {
@@ -153,7 +154,7 @@
     const flagged: Record<string, [string, boolean]> = {
       puppets: ["Puppets", puppets.totalUnread > 0],
       chat: ["Channels", chat.channelsUnseen > 0],
-      tickets: [VIEWS.tickets.title, chat.queueUnseen > 0],
+      tickets: [VIEWS.tickets.title, tickets.queueUnseen > 0],
     };
     for (const [id, [base, hot]] of Object.entries(flagged)) {
       const panel: any = api.getPanel(id);

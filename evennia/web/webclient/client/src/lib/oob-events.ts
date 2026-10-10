@@ -186,12 +186,17 @@ export interface TicketAlertPayload {
   label: string;
   who: string;
   age_mins: number;
+  ref?: string;
+  title?: string;
+  level?: string;
+  held?: boolean;
 }
 
 export interface TicketInboxPayload {
   tickets: any[];
 }
 
+/** One message on a ticket, pushed live. origin is staff, player or system; audience is owner, assignee or staff (who this copy is for); news is false for a claim or an assignment, which a player is not told is unread. */
 export interface TicketMsgPayload {
   id: string;
   kind: string;
@@ -203,15 +208,52 @@ export interface TicketMsgPayload {
   visibility?: string;
   ts: number;
   status?: string;
+  ref?: string;
+  label?: string;
+  title?: string;
+  subject?: string;
+  origin?: string;
+  audience?: string;
+  news?: boolean;
 }
 
-/** Whether this session works the staff ticket queue. Sent at login and on @sync_channels. */
+/** Lean ticket protocol: a puppet requester came, went or moved. sort is the row's new order key. */
+export interface TicketPresencePayload {
+  id: string;
+  presence: string;
+  seen: number;
+  sort: any[];
+  account_online?: boolean;
+}
+
+/** Lean ticket protocol: the ticket left the open queue (closed, withdrawn, decided). */
+export interface TicketRemovePayload {
+  id: string;
+}
+
+/** Whether this session works the staff ticket queue, who it is, and whether it is on duty. Sent at login and on @sync_channels. */
 export interface TicketRolePayload {
   staff: boolean;
+  account_id?: number;
+  duty?: boolean;
 }
 
 /** A full ticket dict (see tickets.core.to_dict). */
 export type TicketThreadPayload = Record<string, any>;
+
+/** Sent at login to a web session: requests with a reply the player has not read, and for staff how many tickets are unanswered and how many of those nobody holds. */
+export interface TicketUnreadPayload {
+  mine?: number;
+  unanswered?: number;
+  unclaimed?: number;
+}
+
+/** Lean ticket protocol (after the ticket_hello request): one open-queue row to add or replace. why is new, reopened or changed; notify is true when this staff member should be told. */
+export interface TicketUpsertPayload {
+  ticket: Record<string, any>;
+  why?: string;
+  notify?: boolean;
+}
 
 /** A UI component spec (see evennia.server.ui). */
 export type UiComponentPayload = Record<string, any>;
@@ -272,8 +314,12 @@ export type OobEvent =
   | "ticket_alert"
   | "ticket_inbox"
   | "ticket_msg"
+  | "ticket_presence"
+  | "ticket_remove"
   | "ticket_role"
   | "ticket_thread"
+  | "ticket_unread"
+  | "ticket_upsert"
   | "ui_component"
   | "ui_remove"
   | "video"
@@ -321,8 +367,12 @@ export interface OobEventMap {
   "ticket_alert": TicketAlertPayload;
   "ticket_inbox": TicketInboxPayload;
   "ticket_msg": TicketMsgPayload;
+  "ticket_presence": TicketPresencePayload;
+  "ticket_remove": TicketRemovePayload;
   "ticket_role": TicketRolePayload;
   "ticket_thread": TicketThreadPayload;
+  "ticket_unread": TicketUnreadPayload;
+  "ticket_upsert": TicketUpsertPayload;
   "ui_component": UiComponentPayload;
   "ui_remove": UiRemovePayload;
   "video": VideoPayload;
