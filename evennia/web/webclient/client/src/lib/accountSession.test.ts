@@ -9,6 +9,7 @@ import { commands } from "./commands.svelte";
 import { compose } from "./compose.svelte";
 import { connection } from "./evennia.svelte";
 import { help } from "./help.svelte";
+import { lore } from "./lore.svelte";
 import { puppets } from "./puppets.svelte";
 import { routing } from "./routing.svelte";
 import { scene } from "./scene.svelte";
@@ -40,6 +41,7 @@ function signInAndFill(): void {
   puppets.setManifest([{ npc_id: 5, slot: 1, name: "Bartender" }]);
   scene.apply("scene", [{ op: "set", path: "/", value: { room: { name: "Staff lounge" } } }]);
   help.show({ kind: "topic", query: "staff ban" });
+  lore.active = { tip: { id: "marrow", title: "Saint Marrow", blurb: "", help: "marrow", terms: ["Marrow"] }, rect: { left: 0, top: 0, right: 1, bottom: 1 }, pinned: true };
   const unfilled = residue().flatMap((v, i) => (JSON.stringify(v) === JSON.stringify(EMPTY[i]) ? [i] : []));
   expect(unfilled).toEqual([]);
 }
@@ -59,10 +61,11 @@ function residue(): unknown[] {
     puppets.list,
     scene.present,
     help.page,
+    lore.active,
   ];
 }
 
-const EMPTY = [[], {}, null, [], false, [], "", [], {}, [], false, null];
+const EMPTY = [[], {}, null, [], false, [], "", [], {}, [], false, null, null];
 
 describe("the end of a signed-in session", () => {
   let sent: string[];

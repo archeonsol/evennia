@@ -9,6 +9,7 @@ import { compose } from "./compose.svelte";
 import { dock } from "./dock.svelte";
 import { connection } from "./evennia.svelte";
 import { help } from "./help.svelte";
+import { lore } from "./lore.svelte";
 import { notify } from "./notify.svelte";
 import { puppets } from "./puppets.svelte";
 import { routing } from "./routing.svelte";
@@ -28,6 +29,7 @@ function forget(): void {
   puppets.clear();
   scene.reset();
   help.clear();
+  lore.hide(true);
   notify.closeAll();
   dock.closeWebPages();
   // Sent while the socket is still open, so the portal drops its replay
