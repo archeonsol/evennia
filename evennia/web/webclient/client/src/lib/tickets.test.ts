@@ -121,6 +121,12 @@ describe("asking for the lean protocol", () => {
     expect(pushed).toEqual([]);
   });
 
+  it("says it can open the New request form when the game asks", async () => {
+    answer = () => ({ v: 2, staff: false, account_id: 9, duty: true, history: false });
+    await tickets.hello();
+    expect(calls[0].data).toEqual({ compose: true });
+  });
+
   it("is told it is not staff, and holds no queue", async () => {
     answer = () => ({ v: 2, staff: false, account_id: 9, duty: true, history: false });
     await tickets.hello();
@@ -811,6 +817,54 @@ describe("late answers", () => {
     answer = (_ns, action) => (action === "my_ticket" ? { id: "m", view: "owner", messages: [] } : {});
     await tickets.openMine("m");
     expect(tickets.assistTab).toBe("mine");
+  });
+});
+
+describe("the game asking for the New request form", () => {
+  it("brings the panel forward on My requests and asks for the form", () => {
+    const opened: string[] = [];
+    tickets.setPanelOpener((view) => opened.push(view));
+    tickets.handleOob("ticket_role", [], { staff: false, account: 7 });
+    tickets.handleOob("ticket_compose", [], {});
+    expect(opened).toEqual(["assist"]);
+    expect(tickets.assistTab).toBe("mine");
+    expect(tickets.wantsNewRequest).toBe(true);
+  });
+
+  it("takes a staff member off the queue tab, to their own requests", () => {
+    tickets.handleOob("ticket_role", [], { staff: true, account: 7 });
+    tickets.showTab("queue");
+    expect(tickets.assistTab).toBe("queue");
+    tickets.handleOob("ticket_compose", [], {});
+    expect(tickets.assistTab).toBe("mine");
+    expect(tickets.wantsNewRequest).toBe(true);
+  });
+
+  it("shows the picker when the game names no form", () => {
+    tickets.handleOob("ticket_compose", [], {});
+    expect(tickets.composeKind).toBe("");
+  });
+
+  it("opens the form of the kind the game names", () => {
+    for (const kind of ["request", "bug", "report", "puppet"]) {
+      tickets.handleOob("ticket_compose", [], { kind });
+      expect(tickets.composeKind).toBe(kind);
+      expect(tickets.wantsNewRequest).toBe(true);
+      expect(tickets.assistTab).toBe("mine");
+    }
+  });
+
+  it("shows the picker for a kind it has no form for", () => {
+    tickets.handleOob("ticket_compose", [], { kind: "wish" });
+    expect(tickets.composeKind).toBe("");
+    expect(tickets.wantsNewRequest).toBe(true);
+  });
+
+  it("is forgotten at a new login", () => {
+    tickets.handleOob("ticket_compose", [], { kind: "bug" });
+    tickets.reset();
+    expect(tickets.wantsNewRequest).toBe(false);
+    expect(tickets.composeKind).toBe("");
   });
 });
 

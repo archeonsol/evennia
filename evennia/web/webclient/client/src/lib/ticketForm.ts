@@ -82,7 +82,7 @@ export const DEFAULT_FORM: TicketForm = {
   ],
   severity_advice: "Pick the lowest one that fits. It helps staff sort bugs and does not bring a reply sooner.",
   notes: {
-    request: "Staff answer as they can. Writing that it is urgent does not move it up.",
+    request: "Staff answer as they can.",
     report: "Senior staff investigate it. The player you name is not told.",
     puppet: "You can leave and wait for a reply. Leave your character's contact information so staff can reach you.",
   },

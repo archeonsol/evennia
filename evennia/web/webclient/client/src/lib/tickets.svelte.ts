@@ -37,6 +37,8 @@ export const ASSIST_ADDED_KEY = "underspire.assist.added";
 export const LEGACY_SEEN_KEYS = ["underspire.tickets.seen.v1", "underspire.queue.seen.v1"];
 const VIEW_KEY = "underspire.tickets.view.v2";
 const VIEWS: ViewKey[] = ["mine", "unanswered", "answered", "online", "all"];
+/** The forms the game may name in `ticket_compose`. */
+const COMPOSE_KINDS: RequestKind[] = ["request", "bug", "report", "puppet"];
 
 /** Which tab of the Assist panel is showing: the caller's own requests, or the staff queue. */
 export type AssistTab = "mine" | "queue";
@@ -162,6 +164,14 @@ class Tickets {
   assistTab = $state<AssistTab>("mine");
   /** The Assist panel is the focused panel (set by the layout). */
   assistFocused = $state(false);
+  /**
+   * The game asked for the New request form (`@request` typed in the terminal).
+   * My requests clears it as soon as it has opened the form, so a panel that is
+   * not on screen yet shows the form when it mounts.
+   */
+  wantsNewRequest = $state(false);
+  /** The form the game named (`@bug`, `@report`, `@puppetrequest`), or none for the picker. */
+  composeKind = $state<RequestKind | "">("");
   /** What the queue badge has been shown, for this account. */
   queueSeen = $state<Record<string, number>>({});
   /** The staff ticket last asked for; an older answer arriving later is dropped. */
@@ -198,6 +208,17 @@ class Tickets {
     this.openPanel?.("assist");
   }
 
+  /**
+   * Open a New request form in My requests, the panel brought forward: the picker, or
+   * the form of one kind when the game names it. A name this client has no form for
+   * shows the picker.
+   */
+  composeRequest(kind?: unknown): void {
+    this.composeKind = COMPOSE_KINDS.includes(kind as RequestKind) ? (kind as RequestKind) : "";
+    this.wantsNewRequest = true;
+    this.showTab("mine");
+  }
+
   /** Forget the last account's tickets, role and badges; a new login starts clean. */
   reset(): void {
     this.epoch += 1;
@@ -225,6 +246,8 @@ class Tickets {
     this.formLoaded = false;
     this.queueSeen = {};
     this.assistTab = "mine";
+    this.wantsNewRequest = false;
+    this.composeKind = "";
     this.viewingId = null;
     for (const key of LEGACY_SEEN_KEYS) {
       try {
@@ -255,7 +278,9 @@ class Tickets {
   async hello(): Promise<void> {
     const epoch = this.epoch;
     try {
-      const r = await connection.request<any>("tickets", "ticket_hello");
+      // `compose` says this client can open the New request form when the game asks
+      // (`ticket_compose`), so `@request` is not sent to a client that would ignore it.
+      const r = await connection.request<any>("tickets", "ticket_hello", { compose: true });
       if (epoch !== this.epoch) return;
       this.useAccount(typeof r?.account_id === "number" ? r.account_id : null);
       this.duty = r?.duty !== false;
@@ -354,6 +379,9 @@ class Tickets {
       case "ticket_thread":
         if (!kwargs || !kwargs.id) break;
         this.showThread(kwargs);
+        break;
+      case "ticket_compose":
+        this.composeRequest(kwargs?.kind);
         break;
       case "ticket_alert":
         this.onAlert(kwargs);

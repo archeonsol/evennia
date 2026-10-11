@@ -25,6 +25,52 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.319: The game can open a request form in the Assist panel
+
+This release is 318 plus one client change. A bare `@request`, `@bug`, `@report` or `@puppetrequest` in the web
+client printed a text menu or a guided flow in the terminal, though the Assist panel has the same choices as forms,
+with help topics that may answer a question first and the game's own words. The game can now ask the client to open
+the form, and the panel opens it.
+
+### Webclient
+
+- **`ticket_compose {kind?}`.** A new event handled by [`tickets.svelte.ts`](evennia/web/webclient/client/src/lib/tickets.svelte.ts).
+  `composeRequest(kind)` brings the Assist panel forward on My requests and sets `wantsNewRequest` and `composeKind`;
+  [`AssistMine.svelte`](evennia/web/webclient/client/src/components/AssistMine.svelte) reacts by leaving any request that
+  is open and showing the form of the kind the game named (`request`, `bug`, `report` or `puppet`), or the picker when
+  none is named or the name is not one it has a form for, then clears the flags. They are kept until the component
+  exists, so an event that arrives before the panel is on screen still shows the form when the panel mounts. A staff
+  member on the Tickets tab is taken to My requests.
+- **`ticket_hello` says so.** The hello request carries `{compose: true}`, so a game sends `ticket_compose` only to a
+  client that acts on it. A game that does not know the field ignores it.
+- **One note is shorter.** The question form's note read "Staff answer as they can. Writing that it is urgent does not
+  move it up." It now reads "Staff answer as they can." The game's own words (the `tickets.form` narratives) change the
+  same way, and [`ticketForm.ts`](evennia/web/webclient/client/src/lib/ticketForm.ts) keeps a copy of them, so the two
+  stay the same.
+- The shell is rebuilt (`shell.js`, `shell.css`).
+
+### Event catalog
+
+[`oob-events.ts`](evennia/web/webclient/client/src/lib/oob-events.ts) is regenerated from the game's registry:
+`ticket_compose` is new, with an optional `kind`.
+
+### Migration notes
+
+Deploy the engine pin and the game together. An older game never sends `ticket_compose`, and an older client never says
+it can show the form, so the side that lacks the feature keeps working: the menu and the guided flows stay in the
+terminal.
+
+### Tests
+
+- [`tickets.test.ts`](evennia/web/webclient/client/src/lib/tickets.test.ts): hello says the client can open the form; the
+  event brings the panel forward on My requests with the picker, or with the form of each kind it names; a name it has no
+  form for shows the picker; a staff member leaves the queue tab; what was asked is forgotten at a new login.
+- [`ticketForm.test.ts`](evennia/web/webclient/client/src/lib/ticketForm.test.ts): the shorter note.
+- The panel was also run in a browser against the real component: with the panel open, and with the event arriving
+  before it mounted, for a player and for a staff member, and for each kind, an unknown kind and none.
+
+---
+
 ## 6.0.0+underspire.318: An idle console tab no longer floods the server with 500s
 
 This release is 317 plus one fix. A console tab left open past `CONSOLE_IDLE_TIMEOUT` made
