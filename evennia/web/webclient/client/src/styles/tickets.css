@@ -206,6 +206,9 @@
 .tk-row {
   position: relative;
   display: grid;
+  /* The one column may be narrower than its widest line, so a long title is cut
+     with an ellipsis and does not make the row wider than the list. */
+  grid-template-columns: minmax(0, 1fr);
   gap: 2px;
   width: 100%;
   padding: 9px 12px 9px 17px;
@@ -714,6 +717,10 @@
   display: flex;
   flex-direction: column;
   min-height: 0;
+  /* A pane may be narrower than its widest line. Without this one long title set
+     the width of the list, the list kept more than its share, and the open ticket
+     was pushed past the edge of the panel. */
+  min-width: 0;
   flex: 1;
 }
 .tk-split.open .tk-pane-list {

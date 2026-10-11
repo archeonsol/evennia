@@ -22,6 +22,7 @@
     isFaint,
     isHot,
     isOpen,
+    ofKind,
     presenceText,
     priorityWord,
     search,
@@ -57,7 +58,10 @@
 
   const t = $derived(tickets.ticket);
   const me = $derived(tickets.accountId);
-  const counts = $derived(viewCounts(tickets.rows, me));
+  // The header counts the whole queue; the views count the kind picked, so a kind's
+  // numbers are the ones its list shows. All kinds counts everything.
+  const totals = $derived(viewCounts(tickets.rows, me));
+  const counts = $derived(viewCounts(ofKind(tickets.rows, kind), me));
   const source = $derived<TicketRow[]>(history ? tickets.history : tickets.rows);
   const kinds = $derived.by(() => {
     const seen = new Map<string, string>();
@@ -70,7 +74,7 @@
     if (kind !== "all" && !kinds.some(([key]) => key === kind)) kind = "all";
   });
   const rows = $derived.by(() => {
-    let out = source.filter((r) => kind === "all" || r.kind === kind);
+    let out = ofKind(source, kind);
     if (history) return out; // the record is searched on the server
     out = out.filter((r) => inView(r, tickets.view, me));
     return sortTickets(search(out, query), order);
@@ -308,7 +312,7 @@
 <div class="tk" class:has-ticket={!!t} bind:this={root} use:keys role="region" aria-label="Tickets">
   <div class="tk-hd">
     {#if t}<button class="tk-btn quiet tk-back" onclick={back}>Back to the list</button>{/if}
-    <span class="tk-sum">{counts.all} open · {counts.unanswered} unanswered</span>
+    <span class="tk-sum">{totals.all} open · {totals.unanswered} unanswered</span>
     <button
       class="tk-btn quiet"
       aria-pressed={tickets.duty}
