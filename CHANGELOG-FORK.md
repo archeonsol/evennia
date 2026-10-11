@@ -25,6 +25,28 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.324: Staff can sort the Assist queue
+
+### Webclient
+
+- **A Sort picker on the staff Assist queue** ([`AssistQueue.svelte`](evennia/web/webclient/client/src/components/AssistQueue.svelte),
+  [`ticketSort.ts`](evennia/web/webclient/client/src/lib/ticketSort.ts)). The rebuild of the ticket
+  panels (`32bcdbfaf`) dropped the Newest / Last activity / Oldest / Priority picker from
+  `678833053`. It is back as a dropdown beside the kind picker, with **Queue order** (the server's
+  order, the one telnet, the board and Discord show) as the default. A picked order reorders only
+  that viewer's open list, after the kind and the search narrow it; j and k follow it, and it is
+  kept in `localStorage` (`underspire.tickets.sort.v1`, so a choice saved before the rebuild still
+  applies). History keeps the server's order. `19e9391a7`.
+- The shell is rebuilt (`shell.js`, `shell.css`).
+
+### Tests
+
+- [`ticketSort.test.ts`](evennia/web/webclient/client/src/lib/ticketSort.test.ts) covers every order;
+  [`tests/tickets.ts`](evennia/web/webclient/client/tests/tickets.ts) checks the default, Oldest, the
+  saved choice and the return to Queue order in the browser.
+
+---
+
 ## 6.0.0+underspire.323: The staff Tickets list keeps its share of the panel, and its counts follow the kind picked
 
 ### Webclient
