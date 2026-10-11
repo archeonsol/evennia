@@ -14,6 +14,7 @@ import {
   isHot,
   matches,
   mineCounts,
+  ofKind,
   playerState,
   presenceText,
   priorityWord,
@@ -136,6 +137,21 @@ describe("the views", () => {
 
   it("counts every view over the whole list", () => {
     expect(viewCounts(rows, 7)).toEqual({ mine: 1, unanswered: 2, answered: 1, online: 2, all: 3 });
+  });
+
+  it("counts the views of one kind, or of every kind", () => {
+    const mixed = [
+      row({ id: "a", kind: "puppet", assignee_id: 7, assignee: "Mira", presence: "offline" }),
+      row({ id: "b", kind: "puppet", status: "pending", presence: "room" }),
+      row({ id: "c", kind: "bug", status: "waiting", state: "answered", presence: "online" }),
+      row({ id: "d", kind: "request", status: "pending", presence: "offline" }),
+    ];
+    expect(ofKind(mixed, "all")).toBe(mixed);
+    expect(ofKind(mixed, "puppet").map((r) => r.id)).toEqual(["a", "b"]);
+    expect(ofKind(mixed, "report")).toEqual([]);
+    expect(viewCounts(ofKind(mixed, "puppet"), 7)).toEqual({ mine: 1, unanswered: 2, answered: 0, online: 1, all: 2 });
+    expect(viewCounts(ofKind(mixed, "bug"), 7)).toEqual({ mine: 0, unanswered: 0, answered: 1, online: 1, all: 1 });
+    expect(viewCounts(ofKind(mixed, "all"), 7)).toEqual({ mine: 1, unanswered: 3, answered: 1, online: 2, all: 4 });
   });
 });
 

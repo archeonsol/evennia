@@ -136,6 +136,11 @@ export function inView(row: TicketRow, view: ViewKey, me: number | null): boolea
   }
 }
 
+/** The rows of one kind of ticket; "all" keeps every row. */
+export function ofKind(rows: TicketRow[], kind: string): TicketRow[] {
+  return kind === "all" ? rows : rows.filter((r) => r.kind === kind);
+}
+
 export function viewCounts(rows: TicketRow[], me: number | null): Record<ViewKey, number> {
   const out: Record<ViewKey, number> = { mine: 0, unanswered: 0, answered: 0, online: 0, all: rows.length };
   for (const row of rows) {

@@ -301,6 +301,29 @@ async function run(): Promise<void> {
   check("opening a ticket asks the server for it by id", calls.filter((c) => c.action === "ticket_get").at(-1)?.data?.id === "dov");
   check("the list stays beside the open ticket on a wide panel", shown(queue.querySelector(".tk-pane-list")) && shown(queue.querySelector(".tk-pane-detail")));
   check("the Back button is not shown when the list is beside it", !shown(queue.querySelector(".tk-back")));
+
+  // One long title must not widen the list: the open ticket stays inside the panel.
+  tickets.handleOob("ticket_upsert", [], {
+    ticket: row({
+      id: "long",
+      number: 1060,
+      ref: "#1060",
+      kind: "bug",
+      label: "Bug Report",
+      title: "When I try to craft a vessel in the foundry the game says I do not have the materials even though I do and they are on the table in front of me",
+      sort: [9, 9, 9, 0, 0],
+    }),
+  });
+  await settle();
+  const panelBox = queue.querySelector<HTMLElement>(".tk")!.getBoundingClientRect();
+  const listBox = queue.querySelector<HTMLElement>(".tk-pane-list")!.getBoundingClientRect();
+  const detailBox = queue.querySelector<HTMLElement>(".tk-pane-detail")!.getBoundingClientRect();
+  const listScroller = queue.querySelector<HTMLElement>(".tk-list")!;
+  check("a very long title leaves the list no more than its share of the panel", listBox.width <= panelBox.width * 0.4 + 1, `${listBox.width} of ${panelBox.width}`);
+  check("and the open ticket stays inside the panel", detailBox.right <= panelBox.right + 1 && detailBox.width > panelBox.width * 0.5, `${detailBox.left}..${detailBox.right} in ${panelBox.left}..${panelBox.right}`);
+  check("and the list does not scroll sideways", listScroller.scrollWidth <= listScroller.clientWidth, `${listScroller.scrollWidth} in ${listScroller.clientWidth}`);
+  tickets.handleOob("ticket_remove", [], { id: "long" });
+  await settle();
   const card = Array.from(queue.querySelectorAll(".tk-card dt")).map((e) => e.textContent);
   check("the facts are labelled in plain words", card.includes("NPC") && card.includes("Wants") && card.includes("Player is in"), card.join("|"));
   check("the header says the player is in the room, and where", queue.querySelector(".tk-ds")!.textContent!.includes("Mira Thane is in the room, Lift Lobby"), queue.querySelector(".tk-ds")?.textContent ?? "");
@@ -394,9 +417,13 @@ async function run(): Promise<void> {
   kindPick.dispatchEvent(new Event("change", { bubbles: true }));
   await settle();
   check("a kind filter shows only that kind", titles().join("|") === "Crash when I look at the market board", titles().join("|"));
+  const chipCounts = () => Array.from(queue.querySelectorAll(".tk-view b")).map((e) => e.textContent).join("|");
+  check("the view counts follow the kind picked", chipCounts() === "0|1|0|0|1", chipCounts());
+  check("while the header keeps counting the whole queue", (queue.querySelector(".tk-sum")?.textContent ?? "").startsWith(`${tickets.rows.length} open`), queue.querySelector(".tk-sum")?.textContent ?? "");
   tickets.handleOob("ticket_remove", [], { id: "crash" });
   await settle();
   check("when that kind's last ticket leaves, the filter reads All and the list is not empty", queue.querySelector<HTMLSelectElement>(".tk-tools .tk-select")?.value === "all" && titles().length > 1, `${queue.querySelector<HTMLSelectElement>(".tk-tools .tk-select")?.value}|${titles().length}`);
+  check("and the counts read every kind again", chipCounts().split("|")[4] === String(tickets.rows.length) && tickets.rows.length > 1, chipCounts());
 
   // A player logging in moves their row up, live.
   tickets.handleOob("ticket_presence", [], { id: "clerk", presence: "room", seen: 0, sort: [0, 0, 0, now - 20000, 1000], account_online: true });
