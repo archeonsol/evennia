@@ -840,10 +840,31 @@ describe("the game asking for the New request form", () => {
     expect(tickets.wantsNewRequest).toBe(true);
   });
 
-  it("is forgotten at a new login", () => {
+  it("shows the picker when the game names no form", () => {
     tickets.handleOob("ticket_compose", [], {});
+    expect(tickets.composeKind).toBe("");
+  });
+
+  it("opens the form of the kind the game names", () => {
+    for (const kind of ["request", "bug", "report", "puppet"]) {
+      tickets.handleOob("ticket_compose", [], { kind });
+      expect(tickets.composeKind).toBe(kind);
+      expect(tickets.wantsNewRequest).toBe(true);
+      expect(tickets.assistTab).toBe("mine");
+    }
+  });
+
+  it("shows the picker for a kind it has no form for", () => {
+    tickets.handleOob("ticket_compose", [], { kind: "wish" });
+    expect(tickets.composeKind).toBe("");
+    expect(tickets.wantsNewRequest).toBe(true);
+  });
+
+  it("is forgotten at a new login", () => {
+    tickets.handleOob("ticket_compose", [], { kind: "bug" });
     tickets.reset();
     expect(tickets.wantsNewRequest).toBe(false);
+    expect(tickets.composeKind).toBe("");
   });
 });
 

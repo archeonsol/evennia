@@ -80,13 +80,17 @@
     return () => clearInterval(timer);
   });
 
-  // The game can ask for the form (`@request` typed in the terminal): leave any open
-  // request and show the picker at once, whether the panel was open or has just mounted.
+  // The game can ask for a form (`@request`, `@bug`, `@report` or `@puppetrequest` typed
+  // in the terminal): leave any open request and show the picker, or the form of the kind
+  // it names, at once, whether the panel was open or has just mounted.
   $effect(() => {
     if (!tickets.wantsNewRequest) return;
+    const named = tickets.composeKind;
     tickets.wantsNewRequest = false;
+    tickets.composeKind = "";
     tickets.closeMine();
     startNew();
+    if (named) kind = named;
   });
 
   function stamp(ts: number): string {

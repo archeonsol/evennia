@@ -37,6 +37,8 @@ export const ASSIST_ADDED_KEY = "underspire.assist.added";
 export const LEGACY_SEEN_KEYS = ["underspire.tickets.seen.v1", "underspire.queue.seen.v1"];
 const VIEW_KEY = "underspire.tickets.view.v2";
 const VIEWS: ViewKey[] = ["mine", "unanswered", "answered", "online", "all"];
+/** The forms the game may name in `ticket_compose`. */
+const COMPOSE_KINDS: RequestKind[] = ["request", "bug", "report", "puppet"];
 
 /** Which tab of the Assist panel is showing: the caller's own requests, or the staff queue. */
 export type AssistTab = "mine" | "queue";
@@ -168,6 +170,8 @@ class Tickets {
    * not on screen yet shows the form when it mounts.
    */
   wantsNewRequest = $state(false);
+  /** The form the game named (`@bug`, `@report`, `@puppetrequest`), or none for the picker. */
+  composeKind = $state<RequestKind | "">("");
   /** What the queue badge has been shown, for this account. */
   queueSeen = $state<Record<string, number>>({});
   /** The staff ticket last asked for; an older answer arriving later is dropped. */
@@ -204,8 +208,13 @@ class Tickets {
     this.openPanel?.("assist");
   }
 
-  /** Open the New request form in My requests, the panel brought forward. */
-  composeRequest(): void {
+  /**
+   * Open a New request form in My requests, the panel brought forward: the picker, or
+   * the form of one kind when the game names it. A name this client has no form for
+   * shows the picker.
+   */
+  composeRequest(kind?: unknown): void {
+    this.composeKind = COMPOSE_KINDS.includes(kind as RequestKind) ? (kind as RequestKind) : "";
     this.wantsNewRequest = true;
     this.showTab("mine");
   }
@@ -238,6 +247,7 @@ class Tickets {
     this.queueSeen = {};
     this.assistTab = "mine";
     this.wantsNewRequest = false;
+    this.composeKind = "";
     this.viewingId = null;
     for (const key of LEGACY_SEEN_KEYS) {
       try {
@@ -371,7 +381,7 @@ class Tickets {
         this.showThread(kwargs);
         break;
       case "ticket_compose":
-        this.composeRequest();
+        this.composeRequest(kwargs?.kind);
         break;
       case "ticket_alert":
         this.onAlert(kwargs);
