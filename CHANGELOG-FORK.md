@@ -25,6 +25,60 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.317: Shell plumbing off the command line
+
+### Webclient
+
+- **The compose preview, channel sync and unread marker are RPCs** ([`compose.svelte.ts`](evennia/web/webclient/client/src/lib/compose.svelte.ts),
+  [`compose-modes.ts`](evennia/web/webclient/client/src/lib/compose-modes.ts), [`chat.svelte.ts`](evennia/web/webclient/client/src/lib/chat.svelte.ts),
+  [`main.ts`](evennia/web/webclient/client/src/main.ts)). The shell sent
+  `@preview_rp <mode> <text>` on every pause in typing, `@sync_channels` on
+  connect and `@clear_unread <key>` on a channel tab click as typed command
+  lines. An open prompt or menu (a bug report, the handset menu, a choice
+  prompt) took the line as its answer, and the game counted it as an act of
+  the character, which dropped hiding. They are now requests:
+  `compose:compose_preview {mode, text}` answered with `{you, room, error}`,
+  `channels:sync_channels`, and `channels:clear_unread {key}`. Only the reply to
+  the latest preview request is shown, so a slow reply, or one that lands
+  after the draft was sent, no longer replaces a newer preview. A failed
+  preview reads "Preview unavailable."; a failed sync shows a toast
+  (`754531db9`).
+- `composeToPreview` returns `{mode, text}` or `null` in place of the
+  `@preview_rp` line, and `compose.setPreviewSender` is now
+  `setPreviewRequest`, taking a function that returns the reply.
+
+### Narrative
+
+- **`CharRef.standalone`** ([`render.py`](evennia/narrative/render.py)). A
+  possessive mention with nothing possessed after it (`"holding Kade's."`)
+  can be marked so the person it names reads "yours", not "your". Defaults to
+  `False` (`f8f50354d`).
+
+### Protocol
+
+- The `compose_preview` OOB event is gone from the generated
+  [`oob-events.ts`](evennia/web/webclient/client/src/lib/oob-events.ts); the
+  preview arrives as an RPC reply.
+
+### Migration
+
+- A game must serve `compose_preview`, `sync_channels` and `clear_unread` as
+  inputfuncs and list `compose:compose_preview`, `channels:sync_channels` and
+  `channels:clear_unread` in `AZABAN_PUBLIC_ACTIONS`. Without them the pad
+  shows "Preview unavailable." and channel tabs do not fill on connect.
+- A tab still running the old shell after a deploy sends the old command
+  lines until it is reloaded.
+
+### Tests
+
+- [`compose.test.ts`](evennia/web/webclient/client/src/lib/compose.test.ts): the request
+  carries the draft's mode and text, a stale reply and a reply after the send
+  are dropped, and a failed request reads as unavailable.
+- [`chat.test.ts`](evennia/web/webclient/client/src/lib/chat.test.ts): the sync and the
+  unread marker go out as requests and never on the command line.
+
+---
+
 ## 6.0.0+underspire.316: One Assist tab, and forget the account at every session end
 
 ### Webclient
