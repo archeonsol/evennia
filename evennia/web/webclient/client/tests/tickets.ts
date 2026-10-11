@@ -403,6 +403,25 @@ async function run(): Promise<void> {
   await settle();
   check("a player arriving moves their ticket to the top without a reload", titles()[0] === "The tall clerk", titles().join("|"));
 
+  // A picked order is the viewer's own; Queue order is the server's again.
+  tickets.handleOob("ticket_upsert", [], { ticket: row({ id: "stale", ref: "#900", title: "A week-old question", created: now - 604800, sort: [0, 9, 0, 0, 0] }), why: "changed", notify: false });
+  await settle();
+  const queueOrder = titles().join("|");
+  const sortPick = queue.querySelector<HTMLSelectElement>('select[aria-label="Sort tickets"]')!;
+  check("the queue starts in the server's order", sortPick?.value === "queue" && titles().at(-1) === "A week-old question", `${sortPick?.value}|${queueOrder}`);
+  sortPick.value = "oldest";
+  sortPick.dispatchEvent(new Event("change", { bubbles: true }));
+  await settle();
+  check("Oldest puts the oldest ticket first", titles()[0] === "A week-old question", titles().join("|"));
+  check("the picked order is remembered", localStorage.getItem("underspire.tickets.sort.v1") === "oldest", String(localStorage.getItem("underspire.tickets.sort.v1")));
+  sortPick.value = "queue";
+  sortPick.dispatchEvent(new Event("change", { bubbles: true }));
+  await settle();
+  check("Queue order puts the server's order back", titles().join("|") === queueOrder, titles().join("|"));
+  localStorage.removeItem("underspire.tickets.sort.v1");
+  tickets.handleOob("ticket_remove", [], { id: "stale" });
+  await settle();
+
   // A new ticket for staff on duty raises a toast in plain words.
   toasts.list.forEach((t) => toasts.dismiss(t.id));
   tickets.handleOob("ticket_upsert", [], { ticket: row({ id: "n", ref: "#1050", label: "Puppet Request", kind: "puppet", title: "The ferryman", requester_name: "Joss", presence: "room", sort: [0, 0, 0, now, 1050] }), why: "new", notify: true });

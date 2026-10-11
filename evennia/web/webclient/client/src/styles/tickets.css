@@ -146,6 +146,9 @@
   color: var(--fg-dim);
   font-size: 0.8rem;
 }
+.tk-select + .tk-select {
+  margin-left: 0;
+}
 
 /* -- buttons --------------------------------------------------------------- */
 

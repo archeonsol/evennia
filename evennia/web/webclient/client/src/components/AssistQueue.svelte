@@ -11,6 +11,7 @@
   import { isTypingTarget } from "../lib/focus";
   import { renderBody, renderSender } from "../lib/markup";
   import { tickets, type TicketResult } from "../lib/tickets.svelte";
+  import { TICKET_SORTS, loadTicketSort, saveTicketSort, sortTickets, type TicketSort } from "../lib/ticketSort";
   import {
     VIEW_LABELS,
     ageSince,
@@ -37,6 +38,7 @@
   let query = $state("");
   let kind = $state("all");
   let history = $state(false);
+  let order = $state<TicketSort>(loadTicketSort());
   let cursor = $state<string | null>(null);
   let tab = $state<"reply" | "note">("reply");
   let reply = $state("");
@@ -71,7 +73,7 @@
     let out = source.filter((r) => kind === "all" || r.kind === kind);
     if (history) return out; // the record is searched on the server
     out = out.filter((r) => inView(r, tickets.view, me));
-    return search(out, query);
+    return sortTickets(search(out, query), order);
   });
   const open = $derived(!!t && isOpen(t.status));
   const mine = $derived(!!t && t.assignee_id != null && t.assignee_id === me);
@@ -356,6 +358,18 @@
               <option value="all">All kinds</option>
               {#each kinds as [key, label] (key)}
                 <option value={key}>{label}</option>
+              {/each}
+            </select>
+          {/if}
+          {#if !history}
+            <select
+              class="tk-select"
+              bind:value={order}
+              onchange={() => saveTicketSort(order)}
+              aria-label="Sort tickets"
+            >
+              {#each TICKET_SORTS as o (o.key)}
+                <option value={o.key}>{o.label}</option>
               {/each}
             </select>
           {/if}
