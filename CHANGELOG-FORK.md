@@ -25,6 +25,38 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.323: The staff Tickets list keeps its share of the panel, and its counts follow the kind picked
+
+### Webclient
+
+- **A long ticket title no longer pushes the open ticket off the panel.** On a wide panel the list
+  and the open ticket sit side by side, the list taking 40% of the width up to 420px. Neither pane
+  could be narrower than its widest line, and a row's title does not wrap, so one long title set
+  the width of the list. The list kept that width and the open ticket was pushed past the right
+  edge of the panel, where only a strip of it showed (on production the list took about 830px of a
+  950px panel). [`tickets.css`](evennia/web/webclient/client/src/styles/tickets.css) now lets the
+  two panes (`min-width: 0`) and a row's single column (`minmax(0, 1fr)`) be narrower than their
+  content, so a long title is cut with an ellipsis, the list keeps its 40% and the open ticket has
+  the rest. My requests uses the same row.
+- **The view counts follow the kind picked.** Mine, Unanswered, Answered, Online and All counted the
+  whole queue whichever kind the picker showed, so a kind with three tickets sat under an All of
+  113. They now count the kind picked, and All kinds counts every ticket. The count in the header
+  still counts the whole queue. [`ofKind`](evennia/web/webclient/client/src/lib/ticketModel.ts)
+  narrows rows to a kind, for the list and for the counts.
+- The shell is rebuilt (`shell.js`, `shell.css`).
+
+### Tests
+
+- [`tests/tickets.ts`](evennia/web/webclient/client/tests/tickets.ts): a ticket with a very long
+  title is added beside an open ticket on a wide panel. The list keeps no more than 40% of the
+  panel, the open ticket stays inside it, and the list does not scroll sideways (the first two
+  checks fail without the change). The kind picker is used too: the counts follow the kind, the
+  header does not, and the counts read every kind again when the last ticket of that kind leaves.
+- [`ticketModel.test.ts`](evennia/web/webclient/client/src/lib/ticketModel.test.ts): `ofKind`, and
+  the counts of one kind and of every kind.
+
+---
+
 ## 6.0.0+underspire.322: The ticket form browser test reads the contact field by its label
 
 ### Tests
