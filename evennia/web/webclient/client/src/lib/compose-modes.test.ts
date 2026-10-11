@@ -84,24 +84,24 @@ describe("withBreaks", () => {
 
 describe("composeToPreview", () => {
   it("names the mode the server previews under", () => {
-    expect(composeToPreview("looc", "brb")).toBe("@preview_rp looc brb");
+    expect(composeToPreview("looc", "brb")).toEqual({ mode: "looc", text: "brb" });
   });
 
   it("sends nothing for an empty draft", () => {
-    expect(composeToPreview("pose", "")).toBe("");
-    expect(composeToPreview("pose", "  ")).toBe("");
+    expect(composeToPreview("pose", "")).toBeNull();
+    expect(composeToPreview("pose", "  ")).toBeNull();
   });
 
   it("covers every mode the pad offers", () => {
-    // A mode with no preview string would silently show a stale preview.
+    // A mode with no preview request would silently show a stale preview.
     for (const m of COMPOSE_MODES) {
-      expect(composeToPreview(m.id, "x")).toBe(`@preview_rp ${m.id} x`);
+      expect(composeToPreview(m.id, "x")).toEqual({ mode: m.id, text: "x" });
     }
   });
 
   it("previews the lines of a pose the way the send will read them", () => {
-    expect(composeToPreview("pose", "waves.\nsmiles.")).toBe("@preview_rp pose waves.|/smiles.");
-    expect(composeToPreview("say", "hello\nthere")).toBe("@preview_rp say hello there");
+    expect(composeToPreview("pose", "waves.\nsmiles.")).toEqual({ mode: "pose", text: "waves.|/smiles." });
+    expect(composeToPreview("say", "hello\nthere")).toEqual({ mode: "say", text: "hello there" });
   });
 });
 

@@ -105,13 +105,6 @@ export interface CompletionLexiconPayload {
   verbs: any[];
 }
 
-/** Live preview of a pose/emote/say before it is sent. */
-export interface ComposePreviewPayload {
-  you: string;
-  room: string;
-  error?: string;
-}
-
 /** args[0] = session_id; the server closed the editor. */
 export type EditorClosePayload = string;
 
@@ -201,7 +194,7 @@ export interface TicketMsgPayload {
   status?: string;
 }
 
-/** Whether this session works the staff ticket queue, and its account id. Sent at login, on @sync_channels, and on @quell / @unquell. */
+/** Whether this session works the staff ticket queue, and its account id. Sent at login, on each channel sync, and on @quell / @unquell. */
 export interface TicketRolePayload {
   staff: boolean;
   account: number;
@@ -249,7 +242,6 @@ export type OobEvent =
   | "community_kudos"
   | "community_milestone"
   | "completion_lexicon"
-  | "compose_preview"
   | "editor_close"
   | "editor_open"
   | "editor_status"
@@ -296,7 +288,6 @@ export interface OobEventMap {
   "community_kudos": CommunityKudosPayload;
   "community_milestone": CommunityMilestonePayload;
   "completion_lexicon": CompletionLexiconPayload;
-  "compose_preview": ComposePreviewPayload;
   "editor_close": EditorClosePayload;
   "editor_open": EditorOpenPayload;
   "editor_status": EditorStatusPayload;

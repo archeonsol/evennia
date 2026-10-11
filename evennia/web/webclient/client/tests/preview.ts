@@ -102,9 +102,9 @@ const helpSearches = helpFixtures.searches as Record<string, HelpPage>;
 };
 // The game answers a compose preview with the post as each reader sees it. A post
 // of several lines keeps them, with a gutter before every line after the first.
-compose.setPreviewSender((line) => {
-  const post = line.replace(/^@preview_rp \w+ /, "").split("|/").join("\n|x│|n ");
-  compose.applyPreview({ you: `You ${post}`, room: `A lean courier ${post}` });
+compose.setPreviewRequest(async (req) => {
+  const post = req.text.split("|/").join("\n|x│|n ");
+  return { you: `You ${post}`, room: `A lean courier ${post}` };
 });
 (connection as any).init = () => {};
 connection.state = "open";

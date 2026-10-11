@@ -343,12 +343,16 @@ class Chat {
       this.unread = u;
     }
     // Tell the server to clear its unread cache for this tab.
-    connection.sendCommand(`@clear_unread ${key}`);
+    connection.request("channels", "clear_unread", { key }).catch(() => {
+      /* offline: the next sync sends the server's counts again */
+    });
   }
 
   /** Ask the server to (re)push the channel list, comms status, ticket role and queue. */
   syncChannels(): void {
-    connection.sendCommand("@sync_channels");
+    connection.request("channels", "sync_channels").catch((err) => {
+      toasts.push("channels", "Channels", String(err?.message ?? err));
+    });
   }
 
   post(key: string, text: string): void {

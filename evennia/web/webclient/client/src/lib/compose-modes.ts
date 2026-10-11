@@ -1,5 +1,5 @@
 // Compose-pad modes: the mapping between a mode, the command it sends, and the
-// `@preview_rp` mode string the server previews it under. Rune-free so it can be
+// mode string the server previews it under. Rune-free so it can be
 // unit tested (same split as `scene-ops.ts` / `logcats.ts`).
 //
 // The legacy client documented five modes but shipped one: its `setComposeMode`
@@ -70,8 +70,14 @@ export function composeToCommand(mode: ComposeMode, text: string): string {
   }
 }
 
-/** The `@preview_rp <mode> <text>` line for a draft, or "" if there is nothing to preview. */
-export function composeToPreview(mode: ComposeMode, text: string): string {
+/** The `compose_preview` request for a draft. */
+export interface ComposePreviewRequest {
+  mode: ComposeMode;
+  text: string;
+}
+
+/** The preview request for a draft, or null if there is nothing to preview. */
+export function composeToPreview(mode: ComposeMode, text: string): ComposePreviewRequest | null {
   const t = withBreaks(mode, text);
-  return t ? `@preview_rp ${mode} ${t}` : "";
+  return t ? { mode, text: t } : null;
 }

@@ -6,13 +6,13 @@
 // The mode vocabulary and command mapping live in the rune-free
 // `compose-modes.ts`; this is the reactive container plus the debounce.
 
-import { composeToPreview, type ComposeMode } from "./compose-modes";
+import { composeToPreview, type ComposeMode, type ComposePreviewRequest } from "./compose-modes";
 
 export const DRAFT_KEY = "underspire.compose.draft.v2";
 /** The draft from before it was kept per account: the last user's unsent text. */
 const LEGACY_KEY = "underspire.compose.draft.v1";
 //: The pad requests a preview this long after the last keystroke. Long enough
-//: that ordinary typing does not put a command per character on the wire.
+//: that ordinary typing does not put a request per character on the wire.
 const PREVIEW_DEBOUNCE_MS = 520;
 
 export interface ComposePreview {
@@ -28,7 +28,9 @@ class Compose {
   preview = $state<ComposePreview>({ you: "", room: "", error: "" });
 
   private timer: ReturnType<typeof setTimeout> | null = null;
-  private send: ((line: string) => void) | null = null;
+  private request: ((req: ComposePreviewRequest) => Promise<Partial<ComposePreview>>) | null = null;
+  /** Counts preview requests; only the reply to the latest one is shown. */
+  private previewSeq = 0;
   /** The signed-in account; the draft is stored only under it. */
   private account: number | null = null;
 
@@ -60,8 +62,8 @@ class Compose {
   }
 
   /** Wire the preview request to the live connection (done once at startup). */
-  setPreviewSender(send: (line: string) => void): void {
-    this.send = send;
+  setPreviewRequest(request: (req: ComposePreviewRequest) => Promise<Partial<ComposePreview>>): void {
+    this.request = request;
   }
 
   /** True when there is a draft worth showing an indicator for. */
@@ -107,8 +109,8 @@ class Compose {
     return text;
   }
 
-  /** Apply a `compose_preview` OOB payload. */
-  applyPreview(payload: Partial<ComposePreview> | null | undefined): void {
+  /** Show a `compose_preview` reply. */
+  private applyPreview(payload: Partial<ComposePreview> | null | undefined): void {
     const p = payload ?? {};
     this.preview = {
       you: String(p.you ?? ""),
@@ -129,6 +131,7 @@ class Compose {
   }
 
   private cancelPreview(): void {
+    this.previewSeq++;
     if (this.timer) {
       clearTimeout(this.timer);
       this.timer = null;
@@ -138,14 +141,22 @@ class Compose {
   private schedulePreview(): void {
     this.cancelPreview();
     if (!this.open) return;
-    const line = composeToPreview(this.mode, this.text);
-    if (!line) {
+    const req = composeToPreview(this.mode, this.text);
+    if (!req) {
       this.preview = { you: "", room: "", error: "" };
       return;
     }
+    const seq = this.previewSeq;
     this.timer = setTimeout(() => {
       this.timer = null;
-      this.send?.(line);
+      this.request?.(req).then(
+        (payload) => {
+          if (seq === this.previewSeq) this.applyPreview(payload);
+        },
+        () => {
+          if (seq === this.previewSeq) this.applyPreview({ error: "Preview unavailable." });
+        },
+      );
     }, PREVIEW_DEBOUNCE_MS);
   }
 }

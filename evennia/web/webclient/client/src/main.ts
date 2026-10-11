@@ -78,9 +78,9 @@ routing.init();
 routing.setOnSync((fresh) => session.pruneMoved(fresh));
 notify.init();
 compose.init();
-// The preview is a real (silent) command, so it goes out on the command line
-// rather than as an RPC - `@preview_rp` answers with a `compose_preview` OOB.
-compose.setPreviewSender((line) => connection.sendCommand(line));
+// The preview is an RPC, not a command line: a line would be taken as the
+// answer to an open prompt or menu, and count as an act of the character.
+compose.setPreviewRequest((req) => connection.request("compose", "compose_preview", req));
 // A ticket toast opens its panel; the dock imports the chat store, so the
 // store is handed the opener rather than importing the dock.
 chat.setPanelOpener((view) => dock.openView(view));
@@ -274,8 +274,6 @@ connection.on("oob", (env) => {
     }
   } else if (is(event, "player_mention")) {
     chat.onMention(env.kwargs ?? {});
-  } else if (is(event, "compose_preview")) {
-    compose.applyPreview(env.kwargs ?? (Array.isArray(env.args) ? env.args[0] : env.args));
   } else if (is(event, "completion_lexicon")) {
     // Pushed from the game's azaban_hello: what verbs exist changes rarely, so
     // the command line completes from this instead of asking per keystroke.

@@ -376,3 +376,29 @@ describe("assist panel migration", () => {
     expect(api.added).toEqual([]);
   });
 });
+
+describe("channel requests", () => {
+  let request: MockInstance<typeof connection.request>;
+  let sendCommand: MockInstance<typeof connection.sendCommand>;
+  beforeEach(() => {
+    request = vi.spyOn(connection, "request").mockResolvedValue({});
+    sendCommand = vi.spyOn(connection, "sendCommand").mockImplementation(() => {});
+  });
+  afterEach(() => {
+    request.mockRestore();
+    sendCommand.mockRestore();
+  });
+
+  // A command line would be taken as the answer to an open prompt or menu.
+  it("clears an unread count by request, not on the command line", () => {
+    chat.clearUnread("ooc");
+    expect(request).toHaveBeenCalledWith("channels", "clear_unread", { key: "ooc" });
+    expect(sendCommand).not.toHaveBeenCalled();
+  });
+
+  it("syncs by request, not on the command line", () => {
+    chat.syncChannels();
+    expect(request).toHaveBeenCalledWith("channels", "sync_channels");
+    expect(sendCommand).not.toHaveBeenCalled();
+  });
+});
