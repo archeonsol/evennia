@@ -25,7 +25,7 @@ matching release procedure.
 
 ---
 
-## 6.0.0+underspire.317: Shell plumbing off the command line
+## 6.0.0+underspire.321: Shell plumbing off the command line
 
 ### Webclient
 
@@ -76,6 +76,252 @@ matching release procedure.
   are dropped, and a failed request reads as unavailable.
 - [`chat.test.ts`](evennia/web/webclient/client/src/lib/chat.test.ts): the sync and the
   unread marker go out as requests and never on the command line.
+
+---
+
+## 6.0.0+underspire.320: A release's web client reaches production, and the request forms lose their example text
+
+This release is 319 plus two changes. The first is why 317, 318 and 319 never reached the players who
+loaded the game: on underspire.net the web client of 316 was still being served after all three were deployed.
+
+### Static files
+
+- **A release that changed only the web client was never collected.** The launcher skips `collectstatic` when the
+  fingerprint of the static sources is unchanged, and
+  [`compute_static_fingerprint`](evennia/server/collectstatic_cache.py) hashed `STATICFILES_DIRS`, which holds the
+  game's own `web/static`. The engine's web client is an app's static folder (`evennia/web/static`, read by the
+  app-directories finder), so a release that changed only the client left the fingerprint as it was, `collectstatic`
+  did not run, and nginx kept serving the old `shell.js` from `STATIC_ROOT`. 316 was collected only because a file
+  of the game's own static folder changed in the same deploy.
+- **The fix.** The fingerprint now covers the `static` folder of every installed app as well, each read once. A
+  `(prefix, path)` pair in `STATICFILES_DIRS` is read by its path; it was read by its prefix, which is not a folder,
+  so it was skipped. The first start on this release sees a different fingerprint and collects once, which is what
+  puts the client of 317 to 320 in front of players.
+
+### Webclient
+
+- **No example text in the request forms.** The fields of the New request forms carry no placeholder (no "Crash when
+  I look at the market board"), so a label says what a field is. The `placeholders` block is gone from
+  [`ticketForm.ts`](evennia/web/webclient/client/src/lib/ticketForm.ts) and from what the client reads of the game's
+  answer.
+- **Plainer words.** The severity line reads "It helps us sort bugs." and the NPC choice reads "After requesting, you can
+  leave and go on with your RP while you wait." The game's own words (the `tickets.form` narratives) change the same
+  way, and the client keeps a copy so the two stay the same.
+- The shell is rebuilt (`shell.js`, `shell.css`).
+
+### Migration notes
+
+Deploy the engine pin and the game together. A client of 317 to 319 that is still open merges the game's words over its
+own defaults, so it keeps its example text and its longer severity line until the page is reloaded.
+
+### Tests
+
+- [`test_collectstatic_cache.py`](evennia/server/tests/test_collectstatic_cache.py): a change in an app's static folder
+  busts the cache, the engine's own web client is among the sources, a `(prefix, path)` pair is read by its path, and a
+  folder listed twice is read once.
+- [`ticketForm.test.ts`](evennia/web/webclient/client/src/lib/ticketForm.test.ts): the severity line, the NPC choice,
+  and that no field carries example text.
+- The forms were also run in a browser against the real component: no field has a placeholder, the bug form shows the
+  one severity line, and the NPC choice shows the new words.
+
+---
+
+## 6.0.0+underspire.319: The game can open a request form in the Assist panel
+
+This release is 318 plus one client change. A bare `@request`, `@bug`, `@report` or `@puppetrequest` in the web
+client printed a text menu or a guided flow in the terminal, though the Assist panel has the same choices as forms,
+with help topics that may answer a question first and the game's own words. The game can now ask the client to open
+the form, and the panel opens it.
+
+### Webclient
+
+- **`ticket_compose {kind?}`.** A new event handled by [`tickets.svelte.ts`](evennia/web/webclient/client/src/lib/tickets.svelte.ts).
+  `composeRequest(kind)` brings the Assist panel forward on My requests and sets `wantsNewRequest` and `composeKind`;
+  [`AssistMine.svelte`](evennia/web/webclient/client/src/components/AssistMine.svelte) reacts by leaving any request that
+  is open and showing the form of the kind the game named (`request`, `bug`, `report` or `puppet`), or the picker when
+  none is named or the name is not one it has a form for, then clears the flags. They are kept until the component
+  exists, so an event that arrives before the panel is on screen still shows the form when the panel mounts. A staff
+  member on the Tickets tab is taken to My requests.
+- **`ticket_hello` says so.** The hello request carries `{compose: true}`, so a game sends `ticket_compose` only to a
+  client that acts on it. A game that does not know the field ignores it.
+- **One note is shorter.** The question form's note read "Staff answer as they can. Writing that it is urgent does not
+  move it up." It now reads "Staff answer as they can." The game's own words (the `tickets.form` narratives) change the
+  same way, and [`ticketForm.ts`](evennia/web/webclient/client/src/lib/ticketForm.ts) keeps a copy of them, so the two
+  stay the same.
+- The shell is rebuilt (`shell.js`, `shell.css`).
+
+### Event catalog
+
+[`oob-events.ts`](evennia/web/webclient/client/src/lib/oob-events.ts) is regenerated from the game's registry:
+`ticket_compose` is new, with an optional `kind`.
+
+### Migration notes
+
+Deploy the engine pin and the game together. An older game never sends `ticket_compose`, and an older client never says
+it can show the form, so the side that lacks the feature keeps working: the menu and the guided flows stay in the
+terminal.
+
+### Tests
+
+- [`tickets.test.ts`](evennia/web/webclient/client/src/lib/tickets.test.ts): hello says the client can open the form; the
+  event brings the panel forward on My requests with the picker, or with the form of each kind it names; a name it has no
+  form for shows the picker; a staff member leaves the queue tab; what was asked is forgotten at a new login.
+- [`ticketForm.test.ts`](evennia/web/webclient/client/src/lib/ticketForm.test.ts): the shorter note.
+- The panel was also run in a browser against the real component: with the panel open, and with the event arriving
+  before it mounted, for a player and for a staff member, and for each kind, an unknown kind and none.
+
+---
+
+## 6.0.0+underspire.318: An idle console tab no longer floods the server with 500s
+
+This release is 317 plus one fix. A console tab left open past `CONSOLE_IDLE_TIMEOUT` made
+`/api/console/feed/` answer 500 about every two seconds, each with a traceback. On production that
+was about 3,700 errors on one day, 11 percent of all web requests, and it kept filling
+`web_errors.log`.
+
+### Console
+
+- **The cause.** `ConsoleIdle` and `ConsoleInsecure` derive from DRF's `PermissionDenied`, and
+  [`stream.py`](evennia/web/console/stream.py) caught Django's. The two are unrelated classes, so the
+  `except` never matched and the error escaped the plain async view. The client then retried every
+  second, because it treated any reply that was not OK as a fault.
+- **Server.** The feed answers an idle or insecure session with a 403 that carries the reason and
+  `reauthenticate`, in the shape the REST views already use. An open stream whose recheck finds the
+  session idle closes with that reason instead of raising. Revoked access still closes, now with a
+  sentence the console can show.
+- **Client** ([`feed.svelte.ts`](evennia/web/console/client/src/lib/feed.svelte.ts),
+  [`Strip.svelte`](evennia/web/console/client/src/components/Strip.svelte)). A 401 or 403 ends the
+  loop, and the reason is kept in `live.refusal` and shown as the LIVE lamp's title. Other failures
+  back off from one second to thirty instead of retrying every second. A `closed` frame keeps its
+  reason and is not retried. The console app is rebuilt.
+
+### Migration notes
+
+None. The webclient shell of 317 is unchanged.
+
+---
+
+## 6.0.0+underspire.317: The tickets workbench and My requests, inside the Assist panel
+
+The Assist panel of 316 keeps its shape and gains a new inside. Its two tabs are now **My requests**
+(every player) and **Tickets** (staff), and both are rebuilt around one store that hears only what
+changed. Staff get a workbench with the queue on one side and the open ticket on the other, and a
+player gets one form for the four things they can ask staff for. The words on that form belong to
+the game, so a change of wording is never a client release. This release is 316 plus that work; the
+queue's order is now decided by the game and is not sorted in the client.
+
+### Webclient
+
+- **One store for tickets** ([`tickets.svelte.ts`](evennia/web/webclient/client/src/lib/tickets.svelte.ts),
+  [`ticketModel.ts`](evennia/web/webclient/client/src/lib/ticketModel.ts),
+  [`ticketForm.ts`](evennia/web/webclient/client/src/lib/ticketForm.ts)). The ticket state left
+  [`chat.svelte.ts`](evennia/web/webclient/client/src/lib/chat.svelte.ts), which keeps `staff`,
+  `staffKnown` and `account` as readers of the store and empties it in `resetForLogin` and `logout`,
+  so the 316 rule that every session end forgets the account holds for tickets too. Ticket events
+  (`ticket_*`) are handed to the store. On every connection it asks the game for the lean protocol
+  with `connection.request("tickets", "ticket_hello")` (and again when `ticket_role` says staff
+  arrived and it has not begun), and from then on applies `ticket_upsert`, `ticket_remove` and
+  `ticket_presence` instead of replacing the whole queue after every change. A game that does not
+  answer keeps the whole-queue `ticket_inbox` push, which still works. `ticketModel.ts` is pure
+  functions (views, search, the words for a clock or a dot), so the rules are tested without a
+  browser.
+- **The queue's order is the game's.** Every row carries a `sort` key and the client never sorts,
+  so the puppet request of a player standing with the NPC is first on every screen. The Sort row of
+  316 (Newest, Last activity, Oldest, Priority) and `ticketSort.ts` are removed with it: a client
+  that sorts by priority was the reported bug, and the game now ranks by who is waiting in a scene.
+  The views (Mine, Unanswered, Answered, Online, All) and the search narrow the list and do not
+  reorder it.
+- **Tickets, the staff workbench** ([`AssistQueue.svelte`](evennia/web/webclient/client/src/components/AssistQueue.svelte),
+  [`tickets.css`](evennia/web/webclient/client/src/styles/tickets.css)). It was the Queue tab. One
+  flat list with the ticket open beside it on a wide panel and in place of it on a narrow one (a
+  container query at 760 px, so a docked half-width panel behaves like a phone). The views are Mine
+  (the tickets the staff member holds), Unanswered, Answered, Online and All, with a kind filter and
+  a search that narrows as staff type; History is a view for staff who may read the record and
+  searches on the server. A dot shows who is around on a puppet request, a clock shows a ticket that
+  is overdue, and the facts beside a ticket (character, place, who is present, a bug's traceback
+  behind a fold) sit with the conversation. Staff can claim or take, release, assign, set the
+  priority, close, reopen, approve or deny with a reason, merge, tag, and use **Puppet** on a puppet
+  request, which claims it and says where the NPC is. The reply box names who a reply goes to (or
+  says a note is for staff only), and a closed ticket shows "Reopen it to reply" in its place, as in
+  316. A kind filter whose last ticket left reads as All. Saved replies open with Ctrl+K and fill
+  the box so they can be edited before sending. Enter sends, Shift+Enter is a new line; j and k move
+  down and up the list, `/` searches, `c` claims, `r` replies. Every button is a request that
+  answers with the ticket as it now stands, so nothing types a command and no confirmation lands in
+  the terminal. An action that leaves the ticket unreadable to the staff member (a decision on an
+  application, for someone who may not read the record) answers with `ticket: null` and the panel
+  stops showing it.
+- **My requests** ([`AssistMine.svelte`](evennia/web/webclient/client/src/components/AssistMine.svelte)).
+  It was the Mine tab. It lists a player's requests in the game's order, marks the ones staff have
+  answered since the player last looked (kept by the game, so a reply read on one device is not new
+  on the next, and the Assist tab badge counts them as soon as the account is known), and searches
+  as the player types. A request opens as a thread with a reply box that says it goes to staff,
+  withdraws behind a second press, and reopens when the player replies to a closed one. **New
+  request** is a form for asking staff a question (with help topics that may answer it first),
+  reporting a bug (with a severity and what each severity means), reporting a player to senior
+  staff, and asking for an NPC to be puppeted (with contact information, so staff can reach the
+  player if they leave to wait). A player, who has no tab bar, sees the heading "My requests".
+- **The form's words come from the game** (`connection.request("tickets", "ticket_form")`).
+  [`ticketForm.ts`](evennia/web/webclient/client/src/lib/ticketForm.ts) keeps a copy to show until
+  the game has answered and when the game is older, and `mergeForm` lays the game's words over it,
+  so a missing word is never a blank label.
+- **Per account, as in 316.** The queue badge's marks are kept under `underspire.queue.seen.v2:<account>`,
+  the tab and the open threads are rebuilt for a new account, an answer that lands after the account
+  left is dropped, a ticket is appended only to the open thread of its audience (an owner line to
+  My requests, any other to the queue, so a staff note never reaches the owner's view of a staff
+  member's own request), and a thread names its `view` (`staff` or `owner`) when the game says. A
+  thread that names none opens by the session's role. Losing the staff role (`@quell`) drops the
+  queue already held. The player's own seen marks (`underspire.tickets.seen.v2:<account>`) are no
+  longer written, because the game keeps that mark; a config export still leaves the key out.
+- The shell is rebuilt (`shell.js`, `shell.css`).
+
+### Event catalog
+
+[`oob-events.ts`](evennia/web/webclient/client/src/lib/oob-events.ts) is regenerated from the
+registry of the game that carries the 316 line and this work together. New: `ticket_upsert`,
+`ticket_remove`, `ticket_presence`, `ticket_unread`. `ticket_role` gains `duty`, `ticket_msg` gains
+`number`, `ref`, `title` and `news` (316 already had `short_id`, `label`, `subject`, `origin` and
+`audience`), and `ticket_alert` gains `ref`, `title`, `level` and `held`. `assist_inbox` and
+`assist_thread` are gone with the game's Assist channel, and `channel_msg.own` is declared, so the
+terminal echo of 316 works with that game. A game that still sends the two Assist events is
+ignored by the client, as in 316.
+
+### Migration
+
+Deploy the engine pin and the game together. The panels make requests that only the matching
+game answers (`tickets:ticket_hello`, `ticket_get`, `ticket_form`, `ticket_open`,
+`ticket_suggest` and `ticket_replies`), and each must be on the game's
+`AZABAN_PUBLIC_ACTIONS`. The game must send `ticket_role` with `account` (316 already requires it).
+The game can ship first: a session still running an earlier client never says hello, so it keeps
+receiving the whole-queue `ticket_inbox` push and works as before. A new client against a game
+that does not know `ticket_hello` carries on with whole queues, but the workbench needs
+`ticket_get` to open a ticket.
+
+### Tests
+
+- [`ticketModel.test.ts`](evennia/web/webclient/client/src/lib/ticketModel.test.ts): the game's
+  order (keys compare element by element, a changed row moves where its key says), a player coming
+  and going, the views and their counts, search by number, name, summary and kind, how long in
+  words, who is around in words, which rows fade and which are hot, and stepping through the list.
+- [`tickets.test.ts`](evennia/web/webclient/client/src/lib/tickets.test.ts): who the game says the
+  tab is, the lean protocol and the fallback to whole queues, a change to the queue and when staff
+  are told, what counts as news and what does not, alerts and the login line, every staff action and
+  the ticket it answers with, a player's own requests, the words of the form, the badge on the queue
+  tab, a lost role, which view a thread opens in, a line reaching only the view of its audience,
+  state kept per account and forgotten at a new login, and answers that land late.
+- [`ticketForm.test.ts`](evennia/web/webclient/client/src/lib/ticketForm.test.ts): the words the
+  form starts with (the order of the kinds, a brief summary and details, a meaning for every
+  severity, and that none of the old labels or an em dash gets in), and the game's words laid
+  over them.
+- [`chat.test.ts`](evennia/web/webclient/client/src/lib/chat.test.ts) and
+  [`accountSession.test.ts`](evennia/web/webclient/client/src/lib/accountSession.test.ts): the
+  terminal echo and the layout migration of 316 as they were, and a quit or a second login leaving
+  nothing of the last account in the ticket store.
+- [`tests/tickets.ts`](evennia/web/webclient/client/tests/tickets.ts),
+  [`tests/tickets.html`](evennia/web/webclient/client/tests/tickets.html) and
+  [`tests/workspace.ts`](evennia/web/webclient/client/tests/workspace.ts): the real panels and stores
+  run in a browser against a stubbed connection that records every request and every typed
+  command. The checks are the order, the words, the sizes at a wide and a narrow panel, the
+  recipient line and the closed ticket, and what each button asks the game (`npm run test:browser`).
 
 ---
 

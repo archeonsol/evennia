@@ -51,7 +51,7 @@ async function run(): Promise<void> {
   localStorage.removeItem("underspire.assist.added:4");
   const host = document.getElementById("host")!;
 
-  // A staff session: the Assist panel appears with its Queue tab.
+  // A staff session: the Assist panel appears with its Tickets tab.
   let app = mount(Workspace, { target: host });
   await settle();
   chat.handleOob("ticket_role", [], { staff: true, account: 1 });
@@ -59,7 +59,7 @@ async function run(): Promise<void> {
   check("staff get the Assist panel", has("assist") && title("assist") === "Assist", title("assist"));
   dock.api?.getPanel("assist")?.api.setActive();
   await settle();
-  check("staff see the Mine and Queue tabs", tabs().join(",") === "Mine,Queue", tabs().join(","));
+  check("staff see the My requests and Tickets tabs", tabs().join(",") === "My requests,Tickets", tabs().join(","));
   dock.api?.getPanel("log")?.api.setActive(); // any layout change saves it
   await settle();
   const saved = localStorage.getItem(LKEY) ?? "";
@@ -67,7 +67,7 @@ async function run(): Promise<void> {
   unmount(app);
 
   // A player on the same browser, with a layout saved before the Assist
-  // panel: the old ticket queue panel becomes Assist, with no Queue tab.
+  // panel: the old ticket queue panel becomes Assist, with no Tickets tab.
   localStorage.setItem(LKEY, saved.replaceAll('"assist"', '"tickets"'));
   chat.resetForLogin();
   app = mount(Workspace, { target: host });
@@ -77,8 +77,8 @@ async function run(): Promise<void> {
   await settle();
   dock.api?.getPanel("assist")?.api.setActive();
   await settle();
-  check("a player sees no Queue tab", tabs().length === 0 && !assistEl()?.querySelector("#assist-queue"), tabs().join(","));
-  const search = assistEl()?.querySelector<HTMLInputElement>(".search");
+  check("a player sees no Tickets tab", tabs().length === 0 && !assistEl()?.querySelector("#assist-queue"), tabs().join(","));
+  const search = assistEl()?.querySelector<HTMLInputElement>(".tk-search");
   if (search) {
     search.value = "harassment by someone";
     search.dispatchEvent(new Event("input", { bubbles: true }));
@@ -87,7 +87,7 @@ async function run(): Promise<void> {
   chat.resetForLogin();
   chat.handleOob("ticket_role", [], { staff: false, account: 4 });
   await settle();
-  const after = assistEl()?.querySelector<HTMLInputElement>(".search");
+  const after = assistEl()?.querySelector<HTMLInputElement>(".tk-search");
   check("the next account does not see the last one's search", !!search && !!after && after.value === "", after?.value ?? "none");
   chat.resetForLogin();
   chat.handleOob("ticket_role", [], { staff: false, account: 2 });

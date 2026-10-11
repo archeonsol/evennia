@@ -6,6 +6,7 @@
   import { simple } from "../lib/simpleLayout.svelte";
   import { PANELS } from "../lib/panelRegistry";
   import { chat } from "../lib/chat.svelte";
+  import { tickets } from "../lib/tickets.svelte";
   import { puppets } from "../lib/puppets.svelte";
   import { activity } from "../lib/activity.svelte";
 
@@ -37,7 +38,7 @@
   // page body with it hidden. Put it on the new view's tab instead.
   $effect(() => {
     const id = simple.active;
-    chat.assistFocused = id === "assist";
+    tickets.assistFocused = id === "assist";
     tick().then(() => {
       const a = document.activeElement;
       if (!a || a === document.body || a.closest("[role=tabpanel][hidden]")) tabEls[id]?.focus();
@@ -50,7 +51,7 @@
       return n ? `${title} (${n} unread)` : title;
     }
     if (id === "puppets" && puppets.totalUnread) return `${title} (${puppets.totalUnread})`;
-    if (id === "assist" && (chat.queueUnseen || chat.mineUnseen)) return `${title} (new)`;
+    if (id === "assist" && (tickets.queueUnseen || tickets.myUnread)) return `${title} (new)`;
     return title;
   }
 

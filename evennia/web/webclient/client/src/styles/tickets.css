@@ -1,0 +1,760 @@
+/* The ticket panels: the staff workbench and a player's own requests.
+
+   Written for reading. Text is never smaller than 0.8rem (12px at the default
+   size), words are sentence case, and each colour means one thing:
+
+     green  a player who is around (a dot, a stripe)
+     gold   a ticket nobody has answered, and the staff note tab
+     red    only urgent, or well past its time
+
+   Everything is drawn from the theme tokens, so it follows the theme. */
+
+.tk {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  background: var(--bg-elev);
+  color: var(--fg);
+  font-size: 0.87rem;
+  line-height: 1.4;
+  container-type: inline-size;
+  container-name: tk;
+}
+.tk button,
+.tk input,
+.tk select,
+.tk textarea {
+  font: inherit;
+  color: inherit;
+}
+.tk-small {
+  font-size: 0.8rem;
+}
+.tk-dim {
+  color: var(--fg-dim);
+}
+.tk-faint {
+  color: var(--fg-faint);
+}
+
+/* -- header, banner, tools ------------------------------------------------- */
+
+.tk-hd {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: 0 0 auto;
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--border-bright);
+}
+.tk-title {
+  color: var(--gold);
+  font-size: 0.85rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+.tk-sum {
+  margin-left: auto;
+  color: var(--fg-dim);
+  font-size: 0.8rem;
+}
+.tk-fb {
+  margin: 0;
+  padding: 6px 12px;
+  flex: 0 0 auto;
+  color: var(--ok);
+  font-size: 0.8rem;
+  border-bottom: 1px solid var(--border);
+}
+.tk-fb.err {
+  color: var(--alert);
+}
+.tk-tools {
+  display: grid;
+  gap: 8px;
+  flex: 0 0 auto;
+  padding: 8px 12px 10px;
+  border-bottom: 1px solid var(--border);
+}
+.tk-search {
+  width: 100%;
+  min-height: 28px;
+  padding: 3px 2px 5px;
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid var(--border-bright);
+  border-radius: 0;
+  color: var(--fg);
+  font-size: 0.87rem;
+}
+.tk-search::placeholder {
+  color: var(--fg-faint);
+  opacity: 1;
+}
+.tk-search:focus {
+  outline: none;
+  border-bottom-color: var(--gold);
+}
+.tk-views {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.tk-radios {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.tk-view {
+  min-height: 26px;
+  padding: 1px 9px;
+  background: transparent;
+  border: 1px solid var(--border-bright);
+  border-radius: 0;
+  color: var(--fg-dim);
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+.tk-view b {
+  margin-left: 5px;
+  font-weight: normal;
+  color: var(--fg);
+}
+.tk-view:hover,
+.tk-view:focus-visible {
+  border-color: var(--fg-dim);
+  color: var(--fg);
+}
+.tk-view[aria-pressed="true"],
+.tk-view[aria-checked="true"] {
+  border-color: var(--gold);
+  color: var(--gold);
+}
+.tk-view[aria-pressed="true"] b,
+.tk-view[aria-checked="true"] b {
+  color: var(--gold);
+}
+.tk-select {
+  margin-left: auto;
+  min-height: 26px;
+  padding: 1px 4px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border-bright);
+  border-radius: 0;
+  color: var(--fg-dim);
+  font-size: 0.8rem;
+}
+
+/* -- buttons --------------------------------------------------------------- */
+
+.tk-btn {
+  min-height: 28px;
+  padding: 3px 12px;
+  background: transparent;
+  border: 1px solid var(--border-bright);
+  border-radius: 0;
+  color: var(--fg);
+  font-size: 0.8rem;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+}
+.tk-btn:hover:not(:disabled),
+.tk-btn:focus-visible {
+  border-color: var(--fg-dim);
+  background: color-mix(in srgb, var(--fg) 8%, transparent);
+}
+.tk-btn.primary {
+  background: var(--gold);
+  border-color: var(--gold);
+  color: var(--bg-deep);
+}
+.tk-btn.primary:hover:not(:disabled),
+.tk-btn.primary:focus-visible {
+  background: color-mix(in srgb, var(--gold) 85%, white);
+}
+.tk-btn.quiet {
+  color: var(--fg-dim);
+}
+.tk-btn.warn {
+  color: var(--alert);
+  border-color: var(--alert);
+}
+.tk-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.tk-btn:focus-visible,
+.tk-view:focus-visible,
+.tk-row:focus-visible,
+.tk-tab:focus-visible {
+  outline: 2px solid var(--gold);
+  outline-offset: 1px;
+}
+
+/* -- the list -------------------------------------------------------------- */
+
+.tk-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+.tk-row {
+  position: relative;
+  display: grid;
+  gap: 2px;
+  width: 100%;
+  padding: 9px 12px 9px 17px;
+  background: none;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  border-radius: 0;
+  color: var(--fg);
+  text-align: left;
+  cursor: pointer;
+}
+.tk-row::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: transparent;
+}
+.tk-row.here::before {
+  background: var(--ok);
+}
+.tk-row.hot::before {
+  background: var(--alert);
+}
+.tk-row.new::before {
+  background: var(--gold);
+}
+.tk-row.faint {
+  opacity: 0.66;
+}
+.tk-row:hover {
+  background: color-mix(in srgb, var(--fg) 6%, transparent);
+}
+.tk-row[aria-current="true"] {
+  background: color-mix(in srgb, var(--gold) 10%, transparent);
+}
+.tk-row.cursor:not([aria-current="true"]) {
+  box-shadow: inset 0 0 0 1px var(--border-bright);
+}
+.tk-l1 {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.tk-dot {
+  flex: none;
+  align-self: center;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--ok);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--ok) 28%, transparent);
+}
+.tk-dot.here {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 50%, transparent);
+}
+.tk-dot.away {
+  background: transparent;
+  border: 1px solid var(--gold);
+  box-shadow: none;
+}
+.tk-dot.off {
+  background: transparent;
+  border: 1px solid var(--fg-faint);
+  box-shadow: none;
+}
+.tk-row-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg);
+  font-size: 0.93rem;
+}
+.tk-row.new .tk-row-title {
+  color: var(--gold);
+}
+.tk-clock {
+  flex: none;
+  color: var(--fg-dim);
+  font-size: 0.87rem;
+}
+.tk-clock.warn {
+  color: var(--gold);
+}
+.tk-clock.bad {
+  color: var(--alert);
+}
+.tk-l2 {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 10px;
+  padding-left: 17px;
+  color: var(--fg-dim);
+  font-size: 0.8rem;
+}
+.tk-row.plain .tk-l2 {
+  padding-left: 0;
+}
+.tk-id {
+  color: var(--fg-faint);
+}
+.tk-state {
+  color: var(--gold);
+}
+.tk-state.mute {
+  color: var(--fg-dim);
+}
+.tk-chip {
+  padding: 0 6px;
+  border: 1px solid var(--border-bright);
+  color: var(--fg-dim);
+  font-size: 0.8rem;
+}
+.tk-chip.hi {
+  border-color: var(--alert);
+  color: var(--alert);
+}
+.tk-l3 {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding-left: 17px;
+  color: var(--fg-faint);
+  font-size: 0.8rem;
+}
+.tk-row.plain .tk-l3 {
+  padding-left: 0;
+}
+.tk-empty {
+  margin: 0;
+  padding: 16px 12px;
+  color: var(--fg-faint);
+  font-size: 0.87rem;
+}
+.tk-empty.err {
+  color: var(--alert);
+}
+.tk-more {
+  display: block;
+  margin: 10px 12px;
+}
+.tk-keys {
+  flex: 0 0 auto;
+  padding: 6px 12px;
+  border-top: 1px solid var(--border);
+  color: var(--fg-faint);
+  font-size: 0.8rem;
+}
+.tk-keys kbd {
+  padding: 0 4px;
+  border: 1px solid var(--border-bright);
+  font: inherit;
+  color: var(--fg-dim);
+}
+
+/* -- the open ticket ------------------------------------------------------- */
+
+.tk-detail {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+.tk-dh {
+  display: grid;
+  gap: 6px;
+  flex: 0 0 auto;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+}
+.tk-dt {
+  color: var(--fg);
+  font-size: 1.05rem;
+  overflow-wrap: anywhere;
+}
+.tk-ds {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+  color: var(--fg-dim);
+  font-size: 0.8rem;
+}
+.tk-ds .here {
+  color: var(--ok);
+}
+.tk-ds .asked {
+  color: var(--gold);
+}
+.tk-btns {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+}
+.tk-inline {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+}
+.tk-inline input {
+  flex: 1 1 14ch;
+  min-height: 28px;
+  padding: 2px 6px;
+  background: transparent;
+  border: 1px solid var(--border-bright);
+  border-radius: 0;
+  color: var(--fg);
+}
+.tk-inline input:focus {
+  outline: none;
+  border-color: var(--gold);
+}
+.tk-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+.tk-card {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 3px 14px;
+  margin: 10px 12px;
+  padding: 8px 10px;
+  border: 1px solid var(--border-bright);
+  font-size: 0.87rem;
+}
+.tk-card dt {
+  color: var(--fg-faint);
+}
+.tk-card dd {
+  margin: 0;
+  color: var(--fg);
+  overflow-wrap: anywhere;
+}
+.tk-bug {
+  margin: 0 12px 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--border-bright);
+  font-size: 0.8rem;
+}
+.tk-bug pre {
+  margin: 4px 0 8px;
+  padding: 6px;
+  max-height: 200px;
+  overflow: auto;
+  background: var(--bg-deep);
+  color: var(--fg-dim);
+  font-size: 0.8rem;
+  white-space: pre-wrap;
+}
+.tk-msgs {
+  display: grid;
+  gap: 10px;
+  padding: 4px 12px 12px;
+}
+.tk-msg {
+  display: grid;
+  gap: 1px;
+  padding-left: 10px;
+  border-left: 2px solid var(--border-bright);
+}
+.tk-msg.staff {
+  border-left-color: var(--accent);
+}
+.tk-msg.note {
+  padding: 5px 10px;
+  border-left: 2px dashed var(--gold);
+  background: color-mix(in srgb, var(--gold) 8%, transparent);
+}
+.tk-who {
+  color: var(--fg-dim);
+  font-size: 0.8rem;
+}
+.tk-who b {
+  margin-right: 6px;
+  font-weight: normal;
+  color: var(--gold);
+}
+.tk-msg.staff .tk-who b {
+  color: var(--accent-bright);
+}
+.tk-msg.mine .tk-who b {
+  color: var(--fg-dim);
+}
+.tk-text {
+  color: var(--fg);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.tk-sys {
+  padding-left: 12px;
+  color: var(--fg-faint);
+  font-size: 0.8rem;
+}
+
+/* -- the composer ---------------------------------------------------------- */
+
+.tk-composer {
+  display: grid;
+  gap: 8px;
+  flex: 0 0 auto;
+  padding: 8px 12px 10px;
+  border-top: 1px solid var(--border-bright);
+}
+.tk-tabs {
+  display: flex;
+}
+.tk-tab {
+  padding: 3px 12px;
+  background: transparent;
+  border: 1px solid var(--border-bright);
+  border-radius: 0;
+  color: var(--fg-dim);
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+.tk-tab + .tk-tab {
+  border-left: 0;
+}
+.tk-tab[aria-selected="true"] {
+  background: var(--bg-deep);
+  border-color: var(--fg-dim);
+  color: var(--fg);
+}
+.tk-tab.note {
+  color: var(--gold);
+}
+/* Who a reply goes to, above the box, so a note is never mistaken for a reply. */
+.tk-to {
+  color: var(--fg-dim);
+  font-size: 0.8rem;
+}
+.tk-to b {
+  color: var(--gold);
+  font-weight: normal;
+}
+.tk-to.note {
+  color: var(--gold);
+}
+.tk-closed {
+  margin: 0;
+  padding: 8px 12px;
+  border-top: 1px solid var(--border);
+  color: var(--fg-dim);
+  font-size: 0.8rem;
+}
+.tk-box {
+  width: 100%;
+  min-height: 62px;
+  padding: 7px 9px;
+  resize: vertical;
+  background: var(--bg-deep);
+  border: 1px solid var(--border-bright);
+  border-radius: 0;
+  color: var(--fg);
+}
+.tk-box:focus {
+  outline: none;
+  border-color: var(--gold);
+}
+.tk-box.note {
+  border-color: color-mix(in srgb, var(--gold) 60%, var(--border-bright));
+}
+.tk-box::placeholder {
+  color: var(--fg-faint);
+  opacity: 1;
+}
+.tk-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 10px;
+  color: var(--fg-faint);
+  font-size: 0.8rem;
+}
+.tk-foot .grow {
+  margin-left: auto;
+}
+.tk-menu {
+  display: grid;
+  max-height: 180px;
+  overflow-y: auto;
+  border: 1px solid var(--border-bright);
+  background: var(--bg-deep);
+}
+.tk-menu button {
+  display: grid;
+  gap: 1px;
+  padding: 5px 9px;
+  background: none;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  color: var(--fg);
+  text-align: left;
+  cursor: pointer;
+}
+.tk-menu button:hover,
+.tk-menu button:focus-visible {
+  background: color-mix(in srgb, var(--gold) 12%, transparent);
+}
+.tk-menu small {
+  color: var(--fg-faint);
+  font-size: 0.8rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* -- a player's new request ------------------------------------------------ */
+
+.tk-pick {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+}
+.tk-pick button {
+  display: grid;
+  gap: 2px;
+  padding: 10px 12px;
+  background: none;
+  border: 1px solid var(--border-bright);
+  border-radius: 0;
+  color: var(--fg);
+  text-align: left;
+  cursor: pointer;
+}
+.tk-pick button:hover,
+.tk-pick button:focus-visible {
+  border-color: var(--gold);
+}
+.tk-pick small {
+  color: var(--fg-dim);
+  font-size: 0.8rem;
+}
+.tk-form {
+  display: grid;
+  gap: 12px;
+  padding: 12px;
+  overflow-y: auto;
+}
+.tk-form label {
+  display: grid;
+  gap: 4px;
+}
+.tk-form label > span {
+  color: var(--fg-dim);
+  font-size: 0.8rem;
+}
+.tk-form input,
+.tk-form select,
+.tk-form textarea {
+  min-height: 30px;
+  padding: 4px 7px;
+  background: var(--bg-deep);
+  border: 1px solid var(--border-bright);
+  border-radius: 0;
+  color: var(--fg);
+}
+.tk-form input:focus,
+.tk-form select:focus,
+.tk-form textarea:focus {
+  outline: none;
+  border-color: var(--gold);
+}
+.tk-tips {
+  padding: 8px 10px;
+  border: 1px solid var(--border-bright);
+  color: var(--fg-dim);
+  font-size: 0.8rem;
+}
+.tk-tips button {
+  display: block;
+  margin-top: 4px;
+  padding: 0;
+  background: none;
+  border: 0;
+  color: var(--gold);
+  text-align: left;
+  cursor: pointer;
+}
+.tk-note {
+  margin: 0;
+  color: var(--fg-dim);
+  font-size: 0.8rem;
+}
+
+/* -- wide panels: the list and the open ticket side by side ---------------- */
+
+.tk-split {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
+}
+.tk-pane-list,
+.tk-pane-detail {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1;
+}
+.tk-split.open .tk-pane-list {
+  display: none;
+}
+.tk-split:not(.open) .tk-pane-detail {
+  display: none;
+}
+.tk-back {
+  display: inline-flex;
+}
+@container tk (min-width: 760px) {
+  .tk-split {
+    flex-direction: row;
+  }
+  .tk-split.open .tk-pane-list,
+  .tk-split:not(.open) .tk-pane-detail {
+    display: flex;
+  }
+  .tk-pane-list {
+    flex: 0 0 min(40%, 420px);
+    border-right: 1px solid var(--border-bright);
+  }
+  .tk-back {
+    display: none;
+  }
+}
+
+/* A narrow panel with a ticket open: the Back button takes the summary's place. */
+@container tk (max-width: 759px) {
+  .tk.has-ticket .tk-sum {
+    display: none;
+  }
+  .tk.has-ticket .tk-hd .tk-btn:last-child {
+    margin-left: auto;
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .tk-row,
+  .tk-btn,
+  .tk-view {
+    transition:
+      background-color 0.12s ease,
+      border-color 0.12s ease;
+  }
+}

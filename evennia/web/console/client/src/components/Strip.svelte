@@ -31,7 +31,12 @@
       state={live.health?.io_owner ?? (session.degraded ? "attn" : "ok")}
       check="io_owner"
     />
-    <Lamp label="LIVE" state={live.connected ? "ok" : "attn"} title="The live feed" live />
+    <Lamp
+      label="LIVE"
+      state={live.connected ? "ok" : "attn"}
+      title={live.refusal ? live.refusal.detail : "The live feed"}
+      live
+    />
     {#each DANGEROUS as [key, label] (key)}
       <Lamp {label} state={session.settings[key] ? "attn" : "off"} />
     {/each}

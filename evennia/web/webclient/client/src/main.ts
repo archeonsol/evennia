@@ -16,6 +16,7 @@ import { keybinds } from "./lib/keybinds.svelte";
 import { panelPrefs } from "./lib/panelPrefs.svelte";
 import { routing } from "./lib/routing.svelte";
 import { chat } from "./lib/chat.svelte";
+import { tickets } from "./lib/tickets.svelte";
 import { toasts } from "./lib/toasts.svelte";
 import { notify } from "./lib/notify.svelte";
 import { renderNodeHtml } from "./lib/render";
@@ -189,6 +190,8 @@ connection.on("hello", (env) => {
 connection.on("connection_open", () => {
   void activity.ensureSubscribed();
   refreshPuppetManifest();
+  // The lean ticket protocol is a session flag, so every connection asks again.
+  void tickets.hello();
   // Screen size is a session flag, so a new connection starts without one.
   screenSize.resend();
   // The session flag starts off on every connection, and the settings store's

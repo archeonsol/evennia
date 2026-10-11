@@ -170,12 +170,22 @@ export interface TicketAlertPayload {
   label: string;
   who: string;
   age_mins: number;
+  ref?: string;
+  title?: string;
+  level?: string;
+  held?: boolean;
+}
+
+/** Open a New request form in My requests, with the Assist panel brought forward. Sent to a client that said it can (ticket_hello with compose) when its player types a bare @request (the picker), @bug, @puppetrequest or @report. kind is request, bug, report or puppet to open that form at once; without it the panel shows the picker. */
+export interface TicketComposePayload {
+  kind?: string;
 }
 
 export interface TicketInboxPayload {
   tickets: any[];
 }
 
+/** One message on a ticket, pushed live. origin is staff, player or system; audience is owner, assignee or staff (who this copy is for); news is false for a claim or an assignment, which a player is not told is unread. */
 export interface TicketMsgPayload {
   id: string;
   short_id: string;
@@ -192,16 +202,49 @@ export interface TicketMsgPayload {
   visibility?: string;
   ts: number;
   status?: string;
+  number?: number;
+  ref?: string;
+  title?: string;
+  news?: boolean;
 }
 
-/** Whether this session works the staff ticket queue, and its account id. Sent at login, on each channel sync, and on @quell / @unquell. */
+/** Lean ticket protocol: a puppet requester came, went or moved. sort is the row's new order key. */
+export interface TicketPresencePayload {
+  id: string;
+  presence: string;
+  seen: number;
+  sort: any[];
+  account_online?: boolean;
+}
+
+/** Lean ticket protocol: the ticket left the open queue (closed, withdrawn, decided). */
+export interface TicketRemovePayload {
+  id: string;
+}
+
+/** Whether this session works the staff ticket queue, its account id, and whether it is on duty. Sent at login, on each channel sync, and on @quell / @unquell. */
 export interface TicketRolePayload {
   staff: boolean;
   account: number;
+  duty?: boolean;
 }
 
 /** A full ticket dict (see tickets.core.to_dict). */
 export type TicketThreadPayload = Record<string, any>;
+
+/** Sent at login to a web session: requests with a reply the player has not read, and for staff how many tickets are unanswered and how many of those nobody holds. */
+export interface TicketUnreadPayload {
+  mine?: number;
+  unanswered?: number;
+  unclaimed?: number;
+}
+
+/** Lean ticket protocol (after the ticket_hello request): one open-queue row to add or replace. why is new, reopened or changed; notify is true when this staff member should be told. */
+export interface TicketUpsertPayload {
+  ticket: Record<string, any>;
+  why?: string;
+  notify?: boolean;
+}
 
 /** A UI component spec (see evennia.server.ui). */
 export type UiComponentPayload = Record<string, any>;
@@ -257,10 +300,15 @@ export type OobEvent =
   | "stop_music_now"
   | "text_done"
   | "ticket_alert"
+  | "ticket_compose"
   | "ticket_inbox"
   | "ticket_msg"
+  | "ticket_presence"
+  | "ticket_remove"
   | "ticket_role"
   | "ticket_thread"
+  | "ticket_unread"
+  | "ticket_upsert"
   | "ui_component"
   | "ui_remove"
   | "video"
@@ -303,10 +351,15 @@ export interface OobEventMap {
   "stop_music_now": StopMusicNowPayload;
   "text_done": TextDonePayload;
   "ticket_alert": TicketAlertPayload;
+  "ticket_compose": TicketComposePayload;
   "ticket_inbox": TicketInboxPayload;
   "ticket_msg": TicketMsgPayload;
+  "ticket_presence": TicketPresencePayload;
+  "ticket_remove": TicketRemovePayload;
   "ticket_role": TicketRolePayload;
   "ticket_thread": TicketThreadPayload;
+  "ticket_unread": TicketUnreadPayload;
+  "ticket_upsert": TicketUpsertPayload;
   "ui_component": UiComponentPayload;
   "ui_remove": UiRemovePayload;
   "video": VideoPayload;
