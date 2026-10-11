@@ -30,15 +30,38 @@ def _static_root_signal() -> str:
     return "static_root:%d" % count
 
 
+def _app_static_dirs():
+    """The ``static`` folder of every installed app, as collectstatic's app finder reads them.
+
+    The engine's own web client (``evennia/web/static``) is one of them. It is not in
+    ``STATICFILES_DIRS``, so a fingerprint of that alone never saw a release that changed
+    only the client: the new bundle was not collected and the old one kept being served.
+    """
+    try:
+        from django.contrib.staticfiles.finders import AppDirectoriesFinder
+
+        return [
+            storage.location
+            for storage in AppDirectoriesFinder().storages.values()
+            if getattr(storage, "location", None)
+        ]
+    except Exception:  # noqa: BLE001 - a fingerprint must never stop a start
+        return []
+
+
 def _iter_static_sources():
-    dirs = getattr(settings, "STATICFILES_DIRS", None) or []
-    for entry in dirs:
-        if isinstance(entry, (tuple, list)):
-            path = entry[0]
-        else:
-            path = entry
-        if path and os.path.isdir(path):
-            yield os.path.abspath(path)
+    """Every folder collectstatic reads: ``STATICFILES_DIRS`` and each app's ``static``."""
+    seen = set()
+    entries = list(getattr(settings, "STATICFILES_DIRS", None) or [])
+    for entry in entries + _app_static_dirs():
+        # A (prefix, path) pair names the folder by its path, the last item.
+        path = entry[-1] if isinstance(entry, (tuple, list)) else entry
+        if not path or not os.path.isdir(path):
+            continue
+        full = os.path.abspath(path)
+        if full not in seen:
+            seen.add(full)
+            yield full
 
 
 def compute_static_fingerprint() -> str:

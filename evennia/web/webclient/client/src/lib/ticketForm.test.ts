@@ -12,10 +12,10 @@ describe("the words the form starts with", () => {
     expect(DEFAULT_FORM.details).toBe("Details");
   });
 
-  it("gives every severity a meaning and the advice to pick the lowest that fits", () => {
+  it("gives every severity a meaning and a line saying it helps sort bugs", () => {
     expect(DEFAULT_FORM.severities.map((s) => s.key)).toEqual(["Trivial", "Minor", "Moderate", "Severe", "Critical"]);
     for (const s of DEFAULT_FORM.severities) expect(s.text.startsWith(`${s.key}: `)).toBe(true);
-    expect(DEFAULT_FORM.severity_advice).toContain("lowest one that fits");
+    expect(DEFAULT_FORM.severity_advice).toBe("It helps us sort bugs.");
   });
 
   it("tells a player staff answer as they can", () => {
@@ -26,7 +26,7 @@ describe("the words the form starts with", () => {
     expect(DEFAULT_FORM.notes.puppet).toContain("leave and wait");
     expect(DEFAULT_FORM.notes.puppet).toContain("contact information");
     expect(DEFAULT_FORM.contact).toBe("Contact information");
-    expect(DEFAULT_FORM.kinds.find((k) => k.kind === "puppet")?.hint).toBe("Send it from the room the NPC is in. You can leave and wait for a reply.");
+    expect(DEFAULT_FORM.kinds.find((k) => k.kind === "puppet")?.hint).toBe("After requesting, you can leave and go on with your RP while you wait.");
   });
 
   it("does not call lost items or money critical", () => {
@@ -71,10 +71,12 @@ describe("laying the game's words over them", () => {
     expect(form.severities).toEqual([{ key: "Minor", text: "Minor: small" }]);
   });
 
-  it("fills a placeholder or a note the game did not write from the defaults", () => {
-    const form = mergeForm({ placeholders: { npc: "The ferryman" }, notes: { report: "Private." } });
-    expect(form.placeholders.npc).toBe("The ferryman");
-    expect(form.placeholders.bug_details).toBe(DEFAULT_FORM.placeholders.bug_details);
+  it("carries no example text for a field", () => {
+    expect((DEFAULT_FORM as unknown as Record<string, unknown>).placeholders).toBeUndefined();
+  });
+
+  it("fills a note the game did not write from the defaults", () => {
+    const form = mergeForm({ notes: { report: "Private." } });
     expect(form.notes.report).toBe("Private.");
     expect(form.notes.puppet).toBe(DEFAULT_FORM.notes.puppet);
   });

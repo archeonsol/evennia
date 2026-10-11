@@ -25,6 +25,53 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.320: A release's web client reaches production, and the request forms lose their example text
+
+This release is 319 plus two changes. The first is why 317, 318 and 319 never reached the players who
+loaded the game: on underspire.net the web client of 316 was still being served after all three were deployed.
+
+### Static files
+
+- **A release that changed only the web client was never collected.** The launcher skips `collectstatic` when the
+  fingerprint of the static sources is unchanged, and
+  [`compute_static_fingerprint`](evennia/server/collectstatic_cache.py) hashed `STATICFILES_DIRS`, which holds the
+  game's own `web/static`. The engine's web client is an app's static folder (`evennia/web/static`, read by the
+  app-directories finder), so a release that changed only the client left the fingerprint as it was, `collectstatic`
+  did not run, and nginx kept serving the old `shell.js` from `STATIC_ROOT`. 316 was collected only because a file
+  of the game's own static folder changed in the same deploy.
+- **The fix.** The fingerprint now covers the `static` folder of every installed app as well, each read once. A
+  `(prefix, path)` pair in `STATICFILES_DIRS` is read by its path; it was read by its prefix, which is not a folder,
+  so it was skipped. The first start on this release sees a different fingerprint and collects once, which is what
+  puts the client of 317 to 320 in front of players.
+
+### Webclient
+
+- **No example text in the request forms.** The fields of the New request forms carry no placeholder (no "Crash when
+  I look at the market board"), so a label says what a field is. The `placeholders` block is gone from
+  [`ticketForm.ts`](evennia/web/webclient/client/src/lib/ticketForm.ts) and from what the client reads of the game's
+  answer.
+- **Plainer words.** The severity line reads "It helps us sort bugs." and the NPC choice reads "After requesting, you can
+  leave and go on with your RP while you wait." The game's own words (the `tickets.form` narratives) change the same
+  way, and the client keeps a copy so the two stay the same.
+- The shell is rebuilt (`shell.js`, `shell.css`).
+
+### Migration notes
+
+Deploy the engine pin and the game together. A client of 317 to 319 that is still open merges the game's words over its
+own defaults, so it keeps its example text and its longer severity line until the page is reloaded.
+
+### Tests
+
+- [`test_collectstatic_cache.py`](evennia/server/tests/test_collectstatic_cache.py): a change in an app's static folder
+  busts the cache, the engine's own web client is among the sources, a `(prefix, path)` pair is read by its path, and a
+  folder listed twice is read once.
+- [`ticketForm.test.ts`](evennia/web/webclient/client/src/lib/ticketForm.test.ts): the severity line, the NPC choice,
+  and that no field carries example text.
+- The forms were also run in a browser against the real component: no field has a placeholder, the bug form shows the
+  one severity line, and the NPC choice shows the new words.
+
+---
+
 ## 6.0.0+underspire.319: The game can open a request form in the Assist panel
 
 This release is 318 plus one client change. A bare `@request`, `@bug`, `@report` or `@puppetrequest` in the web

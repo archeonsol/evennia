@@ -19,7 +19,6 @@ export interface TicketForm {
   kinds: FormKind[];
   summary: string;
   details: string;
-  placeholders: Record<string, string>;
   npc: string;
   said: string;
   goal: string;
@@ -51,21 +50,11 @@ export const DEFAULT_FORM: TicketForm = {
     {
       kind: "puppet",
       name: "Ask for an NPC to be puppeted",
-      hint: "Send it from the room the NPC is in. You can leave and wait for a reply.",
+      hint: "After requesting, you can leave and go on with your RP while you wait.",
     },
   ],
   summary: "Brief summary",
   details: "Details",
-  placeholders: {
-    request_summary: "The east door will not open",
-    request_details: "What you need help with",
-    report_summary: "What happened, in a few words",
-    report_details: "What happened, and who was there",
-    bug_summary: "Crash when I look at the market board",
-    bug_details: "What went wrong, and the steps to make it happen again",
-    npc: "The tall clerk, as you see them",
-    contact: "A handset ID, or another way to reach your character",
-  },
   npc: "Which NPC",
   said: "What has happened so far",
   goal: "What you want from the scene",
@@ -80,7 +69,7 @@ export const DEFAULT_FORM: TicketForm = {
     { key: "Severe", text: "Severe: a major failure, or a crash" },
     { key: "Critical", text: "Critical: the game stops, or an exploit" },
   ],
-  severity_advice: "Pick the lowest one that fits. It helps staff sort bugs and does not bring a reply sooner.",
+  severity_advice: "It helps us sort bugs.",
   notes: {
     request: "Staff answer as they can.",
     report: "Senior staff investigate it. The player you name is not told.",
@@ -109,7 +98,6 @@ export function mergeForm(answer: Partial<TicketForm> | null | undefined): Ticke
     kinds,
     severities,
     categories,
-    placeholders: { ...DEFAULT_FORM.placeholders, ...(answer.placeholders ?? {}) },
     notes: { ...DEFAULT_FORM.notes, ...(answer.notes ?? {}) },
   } as TicketForm;
 }

@@ -218,16 +218,11 @@
       {#if kind === "request" || kind === "report"}
         <label>
           <span>{f.summary}</span>
-          <input
-            bind:value={fields.subject}
-            maxlength="120"
-            placeholder={f.placeholders[`${kind}_summary`] ?? ""}
-            use:focusOnMount
-          />
+          <input bind:value={fields.subject} maxlength="120" use:focusOnMount />
         </label>
         <label>
           <span>{f.details}</span>
-          <textarea bind:value={fields.text} rows="6" placeholder={f.placeholders[`${kind}_details`] ?? ""}></textarea>
+          <textarea bind:value={fields.text} rows="6"></textarea>
         </label>
         {#if kind === "request" && tips.length}
           <div class="tk-tips">
@@ -241,7 +236,7 @@
       {:else if kind === "bug"}
         <label>
           <span>{f.summary}</span>
-          <input bind:value={fields.title} maxlength="120" placeholder={f.placeholders.bug_summary ?? ""} use:focusOnMount />
+          <input bind:value={fields.title} maxlength="120" use:focusOnMount />
         </label>
         <label>
           <span>{f.category}</span>
@@ -258,12 +253,12 @@
         </label>
         <label>
           <span>{f.details}</span>
-          <textarea bind:value={fields.text} rows="6" placeholder={f.placeholders.bug_details ?? ""}></textarea>
+          <textarea bind:value={fields.text} rows="6"></textarea>
         </label>
       {:else}
         <label>
           <span>{f.npc}</span>
-          <input bind:value={fields.npc} maxlength="120" placeholder={f.placeholders.npc ?? ""} use:focusOnMount />
+          <input bind:value={fields.npc} maxlength="120" use:focusOnMount />
         </label>
         <label>
           <span>{f.said}</span>
@@ -275,7 +270,7 @@
         </label>
         <label>
           <span>{f.contact}</span>
-          <input bind:value={fields.contact} maxlength="240" placeholder={f.placeholders.contact ?? ""} />
+          <input bind:value={fields.contact} maxlength="240" />
         </label>
         {#if f.notes.puppet}<p class="tk-note">{f.notes.puppet}</p>{/if}
       {/if}

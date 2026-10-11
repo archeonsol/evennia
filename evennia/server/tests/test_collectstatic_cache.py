@@ -44,6 +44,58 @@ class CollectstaticCacheTest(SimpleTestCase):
                     fil.write("v2")
                 self.assertTrue(static_sources_changed(tmp))
 
+    def test_a_change_in_an_apps_static_folder_busts_the_cache(self):
+        # The engine's own web client is an app's static folder, not a STATICFILES_DIRS
+        # entry. A release that changed only that was never seen: the new client was not
+        # collected and the old bundle kept being served.
+        with tempfile.TemporaryDirectory() as tmp:
+            app_static = os.path.join(tmp, "app", "static")
+            os.makedirs(app_static)
+            path = os.path.join(app_static, "shell.js")
+            with open(path, "w", encoding="utf-8") as fil:
+                fil.write("v1")
+
+            with mock.patch(
+                "evennia.server.collectstatic_cache._app_static_dirs", return_value=[app_static]
+            ), override_settings(STATICFILES_DIRS=[]):
+                write_cached_fingerprint(tmp, compute_static_fingerprint())
+                self.assertFalse(static_sources_changed(tmp))
+                with open(path, "w", encoding="utf-8") as fil:
+                    fil.write("version two")
+                self.assertTrue(static_sources_changed(tmp))
+
+    def test_the_engines_own_web_client_is_among_the_sources(self):
+        from evennia.server.collectstatic_cache import _iter_static_sources
+
+        found = [os.path.normpath(path) for path in _iter_static_sources()]
+        client = os.path.join("evennia", "web", "static")
+        self.assertTrue(any(path.endswith(client) for path in found), found)
+
+    def test_a_prefix_and_path_pair_names_the_folder_by_its_path(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            static_dir = os.path.join(tmp, "static")
+            os.makedirs(static_dir)
+            with open(os.path.join(static_dir, "app.css"), "w", encoding="utf-8") as fil:
+                fil.write("body {}")
+
+            with mock.patch(
+                "evennia.server.collectstatic_cache._app_static_dirs", return_value=[]
+            ), override_settings(STATICFILES_DIRS=[("assets", static_dir)]):
+                first = compute_static_fingerprint()
+                with open(os.path.join(static_dir, "new.css"), "w", encoding="utf-8") as fil:
+                    fil.write("a {}")
+                second = compute_static_fingerprint()
+            self.assertNotEqual(first, second)
+
+    def test_a_folder_listed_twice_is_read_once(self):
+        from evennia.server.collectstatic_cache import _iter_static_sources
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with mock.patch(
+                "evennia.server.collectstatic_cache._app_static_dirs", return_value=[tmp]
+            ), override_settings(STATICFILES_DIRS=[tmp]):
+                self.assertEqual(list(_iter_static_sources()), [os.path.abspath(tmp)])
+
     def test_read_cached_fingerprint_missing(self):
         with tempfile.TemporaryDirectory() as tmp:
             self.assertIsNone(read_cached_fingerprint(tmp))
