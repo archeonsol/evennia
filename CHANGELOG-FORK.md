@@ -25,6 +25,17 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.322: The ticket form browser test reads the contact field by its label
+
+### Tests
+
+- [`tests/tickets.ts`](evennia/web/webclient/client/tests/tickets.ts): the NPC request
+  check looked for the contact field by its "handset ID" placeholder, which 320 removed
+  (`0ad089bb2`), so `npm run test:browser` failed on every release since. It now finds the
+  field by its "Contact information" label (`fd6d2163c`). No runtime change.
+
+---
+
 ## 6.0.0+underspire.321: Shell plumbing off the command line
 
 ### Webclient
