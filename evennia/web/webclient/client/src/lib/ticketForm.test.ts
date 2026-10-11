@@ -18,8 +18,8 @@ describe("the words the form starts with", () => {
     expect(DEFAULT_FORM.severity_advice).toContain("lowest one that fits");
   });
 
-  it("tells a player that writing urgent does not move a question up", () => {
-    expect(DEFAULT_FORM.notes.request).toContain("does not move it up");
+  it("tells a player staff answer as they can", () => {
+    expect(DEFAULT_FORM.notes.request).toBe("Staff answer as they can.");
   });
 
   it("tells a player they may leave and wait, and asks for contact information", () => {

@@ -183,6 +183,9 @@ export interface TicketAlertPayload {
   held?: boolean;
 }
 
+/** Open the New request form in My requests, with the Assist panel brought forward. Sent to a client that said it can (ticket_hello with compose) when its player types a bare @request. */
+export type TicketComposePayload = any;
+
 export interface TicketInboxPayload {
   tickets: any[];
 }
@@ -303,6 +306,7 @@ export type OobEvent =
   | "stop_music_now"
   | "text_done"
   | "ticket_alert"
+  | "ticket_compose"
   | "ticket_inbox"
   | "ticket_msg"
   | "ticket_presence"
@@ -354,6 +358,7 @@ export interface OobEventMap {
   "stop_music_now": StopMusicNowPayload;
   "text_done": TextDonePayload;
   "ticket_alert": TicketAlertPayload;
+  "ticket_compose": TicketComposePayload;
   "ticket_inbox": TicketInboxPayload;
   "ticket_msg": TicketMsgPayload;
   "ticket_presence": TicketPresencePayload;

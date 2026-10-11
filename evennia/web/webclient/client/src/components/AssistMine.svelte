@@ -80,6 +80,15 @@
     return () => clearInterval(timer);
   });
 
+  // The game can ask for the form (`@request` typed in the terminal): leave any open
+  // request and show the picker at once, whether the panel was open or has just mounted.
+  $effect(() => {
+    if (!tickets.wantsNewRequest) return;
+    tickets.wantsNewRequest = false;
+    tickets.closeMine();
+    startNew();
+  });
+
   function stamp(ts: number): string {
     if (!ts) return "";
     const d = new Date(ts * 1000);
