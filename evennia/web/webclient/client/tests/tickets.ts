@@ -301,6 +301,29 @@ async function run(): Promise<void> {
   check("opening a ticket asks the server for it by id", calls.filter((c) => c.action === "ticket_get").at(-1)?.data?.id === "dov");
   check("the list stays beside the open ticket on a wide panel", shown(queue.querySelector(".tk-pane-list")) && shown(queue.querySelector(".tk-pane-detail")));
   check("the Back button is not shown when the list is beside it", !shown(queue.querySelector(".tk-back")));
+
+  // One long title must not widen the list: the open ticket stays inside the panel.
+  tickets.handleOob("ticket_upsert", [], {
+    ticket: row({
+      id: "long",
+      number: 1060,
+      ref: "#1060",
+      kind: "bug",
+      label: "Bug Report",
+      title: "When I try to craft a vessel in the foundry the game says I do not have the materials even though I do and they are on the table in front of me",
+      sort: [9, 9, 9, 0, 0],
+    }),
+  });
+  await settle();
+  const panelBox = queue.querySelector<HTMLElement>(".tk")!.getBoundingClientRect();
+  const listBox = queue.querySelector<HTMLElement>(".tk-pane-list")!.getBoundingClientRect();
+  const detailBox = queue.querySelector<HTMLElement>(".tk-pane-detail")!.getBoundingClientRect();
+  const listScroller = queue.querySelector<HTMLElement>(".tk-list")!;
+  check("a very long title leaves the list no more than its share of the panel", listBox.width <= panelBox.width * 0.4 + 1, `${listBox.width} of ${panelBox.width}`);
+  check("and the open ticket stays inside the panel", detailBox.right <= panelBox.right + 1 && detailBox.width > panelBox.width * 0.5, `${detailBox.left}..${detailBox.right} in ${panelBox.left}..${panelBox.right}`);
+  check("and the list does not scroll sideways", listScroller.scrollWidth <= listScroller.clientWidth, `${listScroller.scrollWidth} in ${listScroller.clientWidth}`);
+  tickets.handleOob("ticket_remove", [], { id: "long" });
+  await settle();
   const card = Array.from(queue.querySelectorAll(".tk-card dt")).map((e) => e.textContent);
   check("the facts are labelled in plain words", card.includes("NPC") && card.includes("Wants") && card.includes("Player is in"), card.join("|"));
   check("the header says the player is in the room, and where", queue.querySelector(".tk-ds")!.textContent!.includes("Mira Thane is in the room, Lift Lobby"), queue.querySelector(".tk-ds")?.textContent ?? "");
