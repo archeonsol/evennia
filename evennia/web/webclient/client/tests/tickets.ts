@@ -544,7 +544,8 @@ async function run(): Promise<void> {
   await settle();
   const note = mine.querySelector(".tk-form .tk-note")?.textContent ?? "";
   check("an NPC request says a player may leave and wait, and asks for contact information", note.includes("leave and wait") && note.includes("contact information"), note);
-  check("and has a field for it", mine.querySelectorAll(".tk-form input").length === 2 && mine.querySelectorAll<HTMLInputElement>(".tk-form input")[1].placeholder.includes("handset ID"), `${mine.querySelectorAll(".tk-form input").length}`);
+  const contactLabel = mine.querySelectorAll<HTMLInputElement>(".tk-form input")[1]?.closest("label")?.textContent ?? "";
+  check("and has a field for it", mine.querySelectorAll(".tk-form input").length === 2 && contactLabel.includes("Contact information"), `${mine.querySelectorAll(".tk-form input").length} ${contactLabel}`);
   type(mine.querySelectorAll<HTMLInputElement>(".tk-form input")[0], "the tall clerk");
   type(mine.querySelector<HTMLTextAreaElement>(".tk-form textarea")!, "I asked about the crate.");
   type(mine.querySelectorAll<HTMLInputElement>(".tk-form input")[1], "handset 5512");
