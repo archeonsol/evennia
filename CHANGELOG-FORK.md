@@ -25,6 +25,35 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.318: An idle console tab no longer floods the server with 500s
+
+This release is 317 plus one fix. A console tab left open past `CONSOLE_IDLE_TIMEOUT` made
+`/api/console/feed/` answer 500 about every two seconds, each with a traceback. On production that
+was about 3,700 errors on one day, 11 percent of all web requests, and it kept filling
+`web_errors.log`.
+
+### Console
+
+- **The cause.** `ConsoleIdle` and `ConsoleInsecure` derive from DRF's `PermissionDenied`, and
+  [`stream.py`](evennia/web/console/stream.py) caught Django's. The two are unrelated classes, so the
+  `except` never matched and the error escaped the plain async view. The client then retried every
+  second, because it treated any reply that was not OK as a fault.
+- **Server.** The feed answers an idle or insecure session with a 403 that carries the reason and
+  `reauthenticate`, in the shape the REST views already use. An open stream whose recheck finds the
+  session idle closes with that reason instead of raising. Revoked access still closes, now with a
+  sentence the console can show.
+- **Client** ([`feed.svelte.ts`](evennia/web/console/client/src/lib/feed.svelte.ts),
+  [`Strip.svelte`](evennia/web/console/client/src/components/Strip.svelte)). A 401 or 403 ends the
+  loop, and the reason is kept in `live.refusal` and shown as the LIVE lamp's title. Other failures
+  back off from one second to thirty instead of retrying every second. A `closed` frame keeps its
+  reason and is not retried. The console app is rebuilt.
+
+### Migration notes
+
+None. The webclient shell of 317 is unchanged.
+
+---
+
 ## 6.0.0+underspire.317: The tickets workbench and My requests, inside the Assist panel
 
 The Assist panel of 316 keeps its shape and gains a new inside. Its two tabs are now **My requests**
