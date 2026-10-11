@@ -417,9 +417,13 @@ async function run(): Promise<void> {
   kindPick.dispatchEvent(new Event("change", { bubbles: true }));
   await settle();
   check("a kind filter shows only that kind", titles().join("|") === "Crash when I look at the market board", titles().join("|"));
+  const chipCounts = () => Array.from(queue.querySelectorAll(".tk-view b")).map((e) => e.textContent).join("|");
+  check("the view counts follow the kind picked", chipCounts() === "0|1|0|0|1", chipCounts());
+  check("while the header keeps counting the whole queue", (queue.querySelector(".tk-sum")?.textContent ?? "").startsWith(`${tickets.rows.length} open`), queue.querySelector(".tk-sum")?.textContent ?? "");
   tickets.handleOob("ticket_remove", [], { id: "crash" });
   await settle();
   check("when that kind's last ticket leaves, the filter reads All and the list is not empty", queue.querySelector<HTMLSelectElement>(".tk-tools .tk-select")?.value === "all" && titles().length > 1, `${queue.querySelector<HTMLSelectElement>(".tk-tools .tk-select")?.value}|${titles().length}`);
+  check("and the counts read every kind again", chipCounts().split("|")[4] === String(tickets.rows.length) && tickets.rows.length > 1, chipCounts());
 
   // A player logging in moves their row up, live.
   tickets.handleOob("ticket_presence", [], { id: "clerk", presence: "room", seen: 0, sort: [0, 0, 0, now - 20000, 1000], account_online: true });
