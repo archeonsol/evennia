@@ -254,6 +254,8 @@ export class PuppetScenes {
         if (occupant && !scene.occupants.some((item) => item.handle === occupant.handle)) {
           scene = { ...scene, occupants: [...scene.occupants, occupant] };
         }
+      } else if (op.op === "set" && path === "/occupants") {
+        scene = { ...scene, occupants: op.value ?? [] };
       } else if (op.op === "del" && path === "/occupants") {
         scene = {
           ...scene,

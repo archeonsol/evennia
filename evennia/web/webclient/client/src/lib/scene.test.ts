@@ -77,6 +77,15 @@ describe("reduceScene", () => {
     expect(s.occupants.map((o) => o.handle)).toEqual(["h2"]);
   });
 
+  it("replaces the occupant list", () => {
+    let s = apply([
+      { op: "add", path: "/occupants/-", value: { handle: "h1", name: "x" } },
+      { op: "add", path: "/occupants/-", value: { handle: "h2", name: "y" } },
+    ]);
+    s = apply([{ op: "set", path: "/occupants", value: [{ handle: "h2", name: "y" }] }], undefined, s);
+    expect(s.occupants.map((o) => o.handle)).toEqual(["h2"]);
+  });
+
   it("replaces the exit list", () => {
     const s = apply([{ op: "set", path: "/exits", value: [{ key: "n", name: "north" }] }]);
     expect(s.exits).toEqual([{ key: "n", name: "north" }]);

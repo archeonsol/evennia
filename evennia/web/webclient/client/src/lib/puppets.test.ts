@@ -112,6 +112,26 @@ describe("puppet scene protocol", () => {
     expect(scenes.list[0].revision).toBe(2);
   });
 
+  it("replaces the occupant list", () => {
+    const scenes = new PuppetScenes();
+    scenes.apply(snapshot(123, 2, 1));
+    scenes.apply({
+      target: "puppets",
+      meta: { npc_id: 123, slot: 2, revision: 2 },
+      ops: [
+        { op: "add", path: "/123/scene/occupants/-", value: { handle: "person:7", name: "Visitor" } },
+      ],
+    });
+
+    scenes.apply({
+      target: "puppets",
+      meta: { npc_id: 123, slot: 2, revision: 3 },
+      ops: [{ op: "set", path: "/123/scene/occupants", value: [] }],
+    });
+
+    expect(scenes.list[0].scene.occupants).toEqual([]);
+  });
+
   it("requests one resync for a revision gap and ignores the delta", () => {
     const request = vi.fn();
     const scenes = new PuppetScenes(request);

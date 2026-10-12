@@ -9,6 +9,7 @@
 //   {op:"set", path:"/exits"}                            whole exit list
 //   {op:"set", path:"/fields"}       | "/fields/<key>"   live readouts
 //   {op:"del", path:"/fields/<key>"}                     drop a readout
+//   {op:"set", path:"/occupants",    value:[{handle,name}]}  whole occupant list
 //   {op:"add", path:"/occupants/-",  value:{handle,name}}
 //   {op:"del", path:"/occupants",    handle:"…"}         by opaque handle
 //
@@ -77,6 +78,8 @@ export function reduceScene(
       next.present = true;
     } else if (op.op === "set" && parts[0] === "room") {
       next.room = parts.length === 1 ? (op.value ?? {}) : { ...next.room, [parts[1]]: op.value };
+    } else if (op.op === "set" && parts[0] === "occupants" && parts.length === 1) {
+      next.occupants = (op.value as Occupant[]) ?? [];
     } else if (op.op === "set" && parts[0] === "exits" && parts.length === 1) {
       next.exits = (op.value as SceneExit[]) ?? [];
     } else if (op.op === "set" && parts[0] === "fields") {
