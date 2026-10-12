@@ -207,10 +207,37 @@ class TestHold(_ContinuityBase):
         self.assertEqual(browser["webclient_authenticated_uid"], 7)
         self.assertIn("into the void", sock.out_buffer[-1][1])
 
-    def test_tab_close_ends_the_session_and_signs_the_browser_out(self):
+    def test_a_closed_page_is_held_for_the_short_grace(self):
         browser = _signed_in()
         sock = self._connected(browser)
         sock.onClose(True, 1001, "")
+        self.assertLessEqual(
+            sock._held_until - webclient_mod.time.monotonic(), webclient_mod.LEAVE_GRACE_SECONDS
+        )
+        self.assertNotIn(amp.PDISCONN, self._ops())
+        self.assertEqual(browser["webclient_authenticated_uid"], 7)
+
+    def test_a_closed_tab_signs_the_browser_out_when_its_hold_runs_out(self):
+        browser = _signed_in()
+        sock = self._connected(browser)
+        sock.onClose(True, 1001, "")
+        sock._expire_hold()
+        self.assertIn(amp.PDISCONN, self._ops())
+        self.assertIsNone(browser["webclient_authenticated_uid"])
+
+    @patch.object(webclient_mod.settings, "WEBCLIENT_LEAVE_GRACE", 0, create=True)
+    def test_a_zero_leave_grace_ends_a_closed_page_at_once(self):
+        browser = _signed_in()
+        sock = self._connected(browser)
+        sock.onClose(True, 1001, "")
+        self.assertIsNone(sock._held_until)
+        self.assertIn(amp.PDISCONN, self._ops())
+        self.assertIsNone(browser["webclient_authenticated_uid"])
+
+    def test_the_clients_own_close_ends_the_session_at_once(self):
+        browser = _signed_in()
+        sock = self._connected(browser)
+        sock.onClose(True, 1000, "")
         self.assertIsNone(sock._held_until)
         self.assertIn(amp.PDISCONN, self._ops())
         self.assertIsNone(browser["webclient_authenticated_uid"])
@@ -344,6 +371,23 @@ class TestTakeover(_ContinuityBase):
         _old, new, reply, _ops = self._drop_and_return(last_seq=0)
         self.assertEqual(self._texts(new), ["before the drop", "while you were away"])
         self.assertNotIn("gap", reply)
+
+    def test_a_reloaded_page_takes_its_session_back_with_its_scrollback(self):
+        browser = _signed_in()
+        old = self._connected(browser)
+        self._say(old, "before the reload")
+        old.onClose(True, 1001, "")
+        ops = len(self._ops())
+        # Loading the page again moves the browser's auto-login nonce on.
+        browser["webclient_authenticated_nonce"] += 1
+        new = self._socket(browser)
+        new.onOpen()
+        reply = self._hello(new, token=old.resume_token, last_seq=0)
+        self.assertTrue(reply["resumed"])
+        self.assertEqual(self._texts(new), ["before the reload"])
+        self.assertNotIn(amp.PDISCONN, self._ops()[ops:])
+        self.assertNotIn(amp.PCONN, self._ops()[ops:])
+        self.assertEqual(browser["webclient_authenticated_uid"], 7)
 
     def test_output_now_reaches_the_new_socket(self):
         _old, new, _reply, _ops = self._drop_and_return()

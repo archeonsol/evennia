@@ -58,11 +58,13 @@ _CLIENT_SESSIONS = mod_import(settings.SESSION_ENGINE).SessionStore
 # --- Session continuity ---
 # A socket and a game session are different things. A phone that changes
 # network, sleeps, or loses its radio for a few seconds drops the socket, but
-# the player has not left. So only an explicit end finishes the session: the
-# browser closing with 1000/1001 (a closed tab, a navigation), the client's
-# `websocket_close`, or the Server disconnecting it. Any other loss *holds* the
-# session: the Portal keeps it under its sessid for WEBCLIENT_RESUME_GRACE
-# seconds, still recording what the Server sends, and the Server is not told.
+# the player has not left. So only an explicit end finishes the session at
+# once: the client's 1000 close or `websocket_close`, or the Server
+# disconnecting it. A browser closes with 1001 both for a closed tab and for a
+# reload, and only the tab coming back tells them apart, so a 1001 holds the
+# session for WEBCLIENT_LEAVE_GRACE seconds. Any other loss *holds* it for
+# WEBCLIENT_RESUME_GRACE seconds. While held, the Portal keeps the session under
+# its sessid, still recording what the Server sends, and the Server is not told.
 # A reconnect that proves it is the same tab of the same account takes the
 # session over in place (same sessid, same Server session, no logout or login
 # hooks) and is replayed what it missed. Only an unclaimed hold reaches the
@@ -82,6 +84,9 @@ _CLIENT_SESSIONS = mod_import(settings.SESSION_ENGINE).SessionStore
 RESUME_BUFFER_MAX = 400  # frames kept per connection
 #: Default seconds a dropped session is held (``settings.WEBCLIENT_RESUME_GRACE``).
 RESUME_GRACE_SECONDS = 90
+#: Default seconds a 1001 close (a closed tab or a reload) is held
+#: (``settings.WEBCLIENT_LEAVE_GRACE``). A reloaded page is back in a few seconds.
+LEAVE_GRACE_SECONDS = 15
 #: Hard cap on sessions held at once. Each keeps a Server session and up to
 #: RESUME_BUFFER_MAX frames alive, so the oldest hold ends first past this.
 RESUME_HOLD_MAX = 512
@@ -189,6 +194,11 @@ def _setting_seconds(name, default):
 def _resume_grace():
     """Seconds a dropped session is held for its tab to come back (0 disables)."""
     return _setting_seconds("WEBCLIENT_RESUME_GRACE", RESUME_GRACE_SECONDS)
+
+
+def _leave_grace():
+    """Seconds a 1001 close is held for a reloaded page to come back (0 disables)."""
+    return _setting_seconds("WEBCLIENT_LEAVE_GRACE", LEAVE_GRACE_SECONDS)
 
 
 def _keepalive_timing():
@@ -386,6 +396,8 @@ class WebSocketClient(WSProtocolBase, _BASE_SESSION_CLASS):
     _link_lost = False
     #: Monotonic deadline while the session is held for a reconnect.
     _held_until = None
+    #: The browser closed the page, so a hold nobody claims signs it out.
+    _hold_signs_out = False
     #: Another socket took this session over; this object speaks for no one.
     _superseded = False
     #: The session is over and nothing may revive it.
@@ -735,8 +747,8 @@ class WebSocketClient(WSProtocolBase, _BASE_SESSION_CLASS):
         disconnect this protocol.
 
         This ends the session: the Server has disconnected it, the client asked
-        to close, or the browser closed the page. A dropped socket does not come
-        here; see ``_link_down``.
+        to close, or a closed page was not reloaded. A dropped socket does not
+        come here; see ``_link_down``.
 
         Args:
             reason (str or None): Motivation for the disconnection.
@@ -825,17 +837,21 @@ class WebSocketClient(WSProtocolBase, _BASE_SESSION_CLASS):
                 self._flush_batch()
             except Exception:
                 logger.log_trace("webclient: flushing a batch on link loss")
-        if code in (CLOSE_NORMAL, GOING_AWAY):
-            # GOING_AWAY (1001) is an ordinary browser tab-close/navigation, so it
-            # must clear the auto-login stamp like a normal close. A portal reboot
-            # keeps the stamp via the _disconnect_all guard in _end_session().
+        if code == GOING_AWAY and self._hold(_leave_grace(), signs_out=True):
+            self._log_link_down(
+                code, clean, cause, "held %ds for a reload" % round(_leave_grace())
+            )
+        elif code in (CLOSE_NORMAL, GOING_AWAY):
+            # A closed tab clears the auto-login stamp like a normal close. A
+            # portal reboot keeps the stamp via the _disconnect_all guard in
+            # _end_session().
             self._log_link_down(code, clean, cause, "session ended")
             self.disconnect()
         elif not self._session_bound:
             # Gone before its session started: there is nothing to hold or end.
             self._ended = True
             self._log_link_down(code, clean, cause, "dropped before hello")
-        elif self._hold():
+        elif self._hold(_resume_grace()):
             self._log_link_down(
                 code, clean, cause, "held %ds for a reconnect" % round(_resume_grace())
             )
@@ -868,18 +884,22 @@ class WebSocketClient(WSProtocolBase, _BASE_SESSION_CLASS):
             )
         )
 
-    def _hold(self):
+    def _hold(self, grace, signs_out=False):
         """Keep this session for its tab to reclaim, if it can be reclaimed.
 
         Only a signed-in session that was issued a resume token can be claimed
         back, so nothing else is held: an anonymous login screen is cheaper to
         redraw than to keep.
 
+        Args:
+            grace (float): Seconds to hold it; 0 holds nothing.
+            signs_out (bool): The browser closed the page, so if nobody claims the
+                session, its end clears the browser's auto-login stamp.
+
         Returns:
             bool: Whether the session is now held.
 
         """
-        grace = _resume_grace()
         token = self.resume_token
         if (
             not grace
@@ -890,6 +910,7 @@ class WebSocketClient(WSProtocolBase, _BASE_SESSION_CLASS):
         ):
             return False
         self._held_until = time.monotonic() + grace
+        self._hold_signs_out = signs_out
         self._hold_timer = _call_later(grace, self._expire_hold, "grace expired")
         _enforce_hold_limits()
         return not self._ended
@@ -907,7 +928,7 @@ class WebSocketClient(WSProtocolBase, _BASE_SESSION_CLASS):
             "webclient: session %s (uid %s) was not reclaimed (%s); ending it"
             % (self.sessid, self.uid, why)
         )
-        self._end_session(clear_browser_auth=False)
+        self._end_session(clear_browser_auth=self._hold_signs_out)
 
     def _keepalive_tick(self, now, timeout):
         """Ping this socket, or drop it if it has been silent past ``timeout``.

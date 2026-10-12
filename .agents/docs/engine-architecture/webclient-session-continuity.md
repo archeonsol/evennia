@@ -11,12 +11,14 @@ Code: `evennia/server/portal/webclient.py` (hold, takeover, keepalive),
 ## Holding and takeover
 
 A socket and a game session are different things. Only an explicit end finishes
-a session: the browser closing with 1000/1001 (tab closed, navigation), the
-client's `websocket_close`, or the Server disconnecting it. Any other loss (no
-close frame, another close code, a write that finds the socket dead, a keepalive
-timeout) **holds** the session for `WEBCLIENT_RESUME_GRACE` seconds (default 90).
-The Portal keeps it under its sessid and keeps recording Server output into its
-replay buffer. The Server is not told.
+a session at once: the client closing with 1000 or sending `websocket_close`, or
+the Server disconnecting it. A browser closes with 1001 both for a closed tab and
+for a reload or navigation, and only the tab coming back tells them apart, so a
+1001 **holds** the session for `WEBCLIENT_LEAVE_GRACE` seconds (default 15). Any
+other loss (no close frame, another close code, a write that finds the socket
+dead, a keepalive timeout) holds it for `WEBCLIENT_RESUME_GRACE` seconds (default
+90). The Portal keeps a held session under its sessid and keeps recording Server
+output into its replay buffer. The Server is not told.
 
 A reconnect that proves ownership **takes the session over in place**
 (`WebSocketClient._adopt`, `PortalSessionHandler.rebind`): same sessid, same bus
@@ -44,11 +46,16 @@ Properties, each wrong under the obvious implementation:
 - **A replaced socket changes nothing.** Its late close, frames, and timers are
   ignored, and the session handler refuses to disconnect a sessid on behalf of
   anything but its current holder.
-- **Losing the link is not a logout.** A held session keeps the browser's
-  auto-login stamp. An expired hold keeps it too: the browser never asked to
-  leave. Before this, a write that raised `Disconnected` on a half-closed socket
-  ran a full `disconnect()`, which cleared the stamp, so the reconnect came back
-  signed out.
+- **A reload is not a logout.** The reloaded page presents its token with no
+  cursor and is sent the whole replay window, so its scrollback comes back, and
+  the character never leaves the game. A 1001 hold that nobody claims was a
+  closed tab: its end clears the auto-login stamp. The nonce check in `_end_session` keeps the stamp when another page of the
+  same browser has loaded since.
+- **Losing the link is not a logout.** A session held after any other loss keeps
+  the browser's auto-login stamp. An expired hold keeps it too: the browser
+  never asked to leave. Before this, a write that raised `Disconnected` on a
+  half-closed socket ran a full `disconnect()`, which cleared the stamp, so the
+  reconnect came back signed out.
 - **A socket that started its own session does not adopt another.** If a
   `hello` arrives after the wait expired, adopting would orphan that session.
 
@@ -82,7 +89,7 @@ A page cannot see protocol pings, so the shell checks the other direction itself
 After 25 seconds with nothing received it sends `{"t": "ping"}`; the Portal
 answers `{"t": "pong"}` directly (never stamped, buffered, replayed, or sent to
 the Server). No answer in 10 seconds: the shell gives the socket up with close
-code 4000, which is not 1000/1001 and so holds the session, and reconnects at
+code 4000, which holds the session for the longer grace, and reconnects at
 once. It also probes, or cuts a reconnect backoff short, when the tab becomes
 visible, the network comes back, or the page returns from the back-forward cache.
 

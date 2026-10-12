@@ -214,9 +214,15 @@ WEBCLIENT_PING_DELAY = 20
 WEBCLIENT_PING_TIMEOUT = 60
 # Seconds a signed-in web session outlives a dropped connection. A phone that
 # changes network or sleeps briefly reconnects into the same session: no logout
-# or login, and the output it missed is replayed. Only closing the tab, quitting,
-# or being disconnected by the server ends a session at once. 0 turns this off.
+# or login, and the output it missed is replayed. Only quitting or being
+# disconnected by the server ends a session at once. 0 turns this off.
 WEBCLIENT_RESUME_GRACE = 90
+# Seconds a signed-in web session outlives a closed or reloaded page. A browser
+# closes the connection the same way for both, so a reloaded page that comes
+# back in time takes the session over and is sent its scrollback again. A closed
+# tab ends the session and signs the browser out when this runs out. 0 ends it
+# at once.
+WEBCLIENT_LEAVE_GRACE = 15
 # Actual URL for webclient component to reach the websocket. You only need
 # to set this if you know you need it, like using some sort of proxy setup.
 # If given it must be on the form "ws[s]://hostname[:port]". If left at None,
