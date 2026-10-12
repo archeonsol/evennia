@@ -25,6 +25,19 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.325: Present drops whoever leaves
+
+### Webclient
+
+- **The Present list drops a character who leaves** ([`scene-ops.ts`](evennia/web/webclient/client/src/lib/scene-ops.ts),
+  [`puppets.svelte.ts`](evennia/web/webclient/client/src/lib/puppets.svelte.ts)). On a departure the
+  game sends the whole remaining occupant list (`{op: "set", path: "/occupants", value: [...]}`), so
+  a leave cannot tie a character's disguise handles together. Neither the scene reducer nor the
+  puppet pane reducer handled that op, so a character who walked out stayed in Present until the
+  next look. Both now replace the list. Games that send `del /occupants` by handle are unaffected.
+  `8c5e0538f`.
+- The shell is rebuilt (`shell.js`).
+
 ## 6.0.0+underspire.324: Staff can sort the Assist queue
 
 ### Webclient
