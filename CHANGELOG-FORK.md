@@ -25,6 +25,38 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.327: Speech that opens with a slash, and a reload keeps the session
+
+### Actions
+
+- **A line that opens with the say quote and a slash is speech** ([`parser.py`](evennia/actions/parser.py)).
+  `"/Fast/ things.` was split at the first slash as the say quote with a switch named `Fast`, so
+  the speech lost its first word and both slashes. A verb with no letter or digit in it (the say
+  quotes) is no longer split at a slash, and the glued-symbol match reads the line whole. A word
+  verb still takes switches (`say/loud hello`). Tests:
+  `test_slash_after_the_quote_is_speech_not_a_switch` and `test_a_word_verb_still_takes_switches`
+  in [`test_parser.py`](evennia/actions/tests/test_parser.py). `8a58f4f4a`.
+
+### Portal
+
+- **A reloaded page resumes its session** ([`webclient.py`](evennia/server/portal/webclient.py),
+  [`settings_default.py`](evennia/settings_default.py)). A browser closes with 1001 for a closed
+  tab and for a reload, and the Portal ended the session on 1001 at once, so a reload logged the
+  character out and back in and the page came back with an empty log. A 1001 now holds the session
+  for `WEBCLIENT_LEAVE_GRACE` seconds (default 15). A reloaded page claims it and is sent the replay
+  window; a closed tab ends when the hold runs out and signs the browser out, as before. This
+  landed on `underspire` after `.326` without a tag (`f838ee1e2`, Kristen Metcalfe) and ships here.
+  Tests are in [`test_webclient_resume.py`](evennia/server/portal/test_webclient_resume.py), and
+  the design note is
+  [`webclient-session-continuity.md`](.agents/docs/engine-architecture/webclient-session-continuity.md).
+
+### Migration
+
+- New setting `WEBCLIENT_LEAVE_GRACE` (seconds, default 15, 0 ends the session at once as before).
+  No game change is required.
+- The Portal code changed, so a deploy that picks this release restarts the Portal.
+- No webclient source changed, so the shell is not rebuilt.
+
 ## 6.0.0+underspire.326: Quit no longer freezes the tab
 
 ### Webclient
