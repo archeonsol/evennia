@@ -179,6 +179,10 @@ class ActionParser:
             return verb_token, []
         parts = verb_token.split("/")
         verb = parts[0]
+        if not any(char.isalnum() for char in verb):
+            # A verb of marks only (the say quote) takes no switches: `"/Fast/ things` is
+            # speech that opens with a slash, and the glued-symbol match reads it whole.
+            return verb_token, []
         switches = [p for p in parts[1:] if p]
         return verb, switches
 

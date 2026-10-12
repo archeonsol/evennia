@@ -248,6 +248,16 @@ class TestSymbolPrefix(unittest.TestCase):
         self.assertIsInstance(res.action, Emit)
         self.assertEqual(res.action.text, "wave a hand")
 
+    def test_slash_after_the_quote_is_speech_not_a_switch(self):
+        res = self._p().parse('"/Fast/ things.', _actor())
+        self.assertIsInstance(res.action, Speak)
+        self.assertEqual(res.action.message, "/Fast/ things.")
+
+    def test_a_word_verb_still_takes_switches(self):
+        res = ActionParser(registry=_symbol_registry()).parse("say/loud hello", _actor())
+        self.assertIsInstance(res.action, Speak)
+        self.assertEqual(res.action.message, "hello")
+
     def test_matched_verb_threaded_into_parse(self):
         res = self._p().parse('"hi', _actor())
         self.assertEqual(res.action.matched, '"')
