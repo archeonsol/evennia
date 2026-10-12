@@ -159,6 +159,14 @@ describe("liveness", () => {
   });
 });
 
+describe("a logout", () => {
+  it("reads as closed before the socket's close event", () => {
+    const conn = connected();
+    conn.markLoggedOut("quit");
+    expect(conn.state).toBe("closed");
+  });
+});
+
 describe("a session taken over by another window", () => {
   it("raises the quit menu instead of reconnecting", () => {
     const conn = connected();

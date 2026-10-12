@@ -210,6 +210,9 @@ export class AzabanConnection {
     this.logoutReason = reason;
     this.manualClose = true; // suppress the auto-reconnect on the close that follows
     this.stopLiveness();
+    // Set before the close event: a panel that reloads while "open" would
+    // retry its failing request in a microtask loop and starve that event.
+    this.state = "closed";
     this.ws?.close();
   }
 
