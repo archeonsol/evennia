@@ -25,6 +25,22 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.326: Quit no longer freezes the tab
+
+### Webclient
+
+- **`quit` no longer freezes the tab for players with the Help panel**
+  ([`evennia.svelte.ts`](evennia/web/webclient/client/src/lib/evennia.svelte.ts)). Since
+  underspire.316 (`38fc718ed`) a logout empties the help store. `markLoggedOut()` closed the socket
+  but left `connection.state` at `"open"` until the close event. A mounted
+  [`HelpPanel`](evennia/web/webclient/client/src/components/HelpPanel.svelte) reloads its index
+  whenever it has no page and the connection reads open, so it asked again, failed at once against
+  the closing socket, and asked again, each turn a microtask. The close event, painting and input
+  never ran. The dock keeps panels mounted in background tabs and screen reader mode keeps every
+  view mounted, so anyone who had opened Help in the panel was affected. `markLoggedOut()` now sets
+  the state to `"closed"` before it closes the socket. `88b03da7f`.
+- The shell is rebuilt (`shell.js`).
+
 ## 6.0.0+underspire.325: Present drops whoever leaves
 
 ### Webclient
