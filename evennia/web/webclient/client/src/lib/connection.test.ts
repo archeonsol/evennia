@@ -177,3 +177,214 @@ describe("a session taken over by another window", () => {
     expect(FakeSocket.made.length).toBe(1);
   });
 });
+
+describe("starting from a saved place", () => {
+  it("asks only for what came after the seq the saved scrollback reached", () => {
+    storage.set("underspire.client.token", "T1");
+    const conn = new AzabanConnection();
+    conn.seedResume({ seq: 17 });
+    conn.init();
+    latest().accept();
+    expect(latest().sent[0].resume).toEqual({ token: "T1", last_seq: 17 });
+  });
+
+  it("asks for nothing back when the saved copy is another tab's", () => {
+    storage.set("underspire.client.token", "T1");
+    const conn = new AzabanConnection();
+    conn.seedResume({ replay: false });
+    conn.init();
+    latest().accept();
+    expect(latest().sent[0].resume).toEqual({ token: "T1", last_seq: 0, replay: false });
+  });
+
+  it("keeps asking for it until the portal has answered once", () => {
+    const conn = new AzabanConnection();
+    conn.seedResume({ seq: 9, replay: false });
+    conn.init();
+    latest().accept();
+    latest().drop();
+    vi.advanceTimersByTime(3000);
+    latest().accept();
+    expect(latest().sent[0].resume).toMatchObject({ last_seq: 9, replay: false });
+  });
+
+  it("goes back to the plain resume once the portal has answered", () => {
+    const conn = new AzabanConnection();
+    conn.seedResume({ seq: 9, replay: false });
+    conn.init();
+    latest().accept();
+    latest().receive({ t: "hello", s: 30, resumed: true, token: "T2" });
+    latest().receive({ t: "text", s: 31, html: "x" });
+    latest().drop();
+    vi.advanceTimersByTime(3000);
+    latest().accept();
+    expect(latest().sent[0].resume).toEqual({ token: "T2", last_seq: 31 });
+  });
+
+  it("ignores a seq that is not a number", () => {
+    const conn = new AzabanConnection();
+    conn.seedResume({ seq: -4 });
+    conn.seedResume({ seq: Number.NaN });
+    conn.init();
+    latest().accept();
+    expect(latest().sent[0].resume.last_seq).toBe(0);
+  });
+
+  it("reports how far it has applied, and whether the portal has answered", () => {
+    const conn = new AzabanConnection();
+    conn.init();
+    latest().accept();
+    expect(conn.helloed).toBe(false);
+    expect(conn.cursor).toBe(0);
+    latest().receive({ t: "text", s: 3, html: "x" });
+    expect(conn.cursor).toBe(3);
+    latest().receive({ t: "hello", s: 4, resumed: false, token: "T" });
+    expect(conn.helloed).toBe(true);
+    expect(conn.cursor).toBe(4);
+  });
+});
+
+describe("the time of a frame", () => {
+  beforeEach(() => vi.setSystemTime(1_700_000_000_000));
+
+  /** What the connection says about the time of each `text` frame it is sent. */
+  function times(conn: AzabanConnection): number[] {
+    const seen: number[] = [];
+    conn.on("text", (env) => void seen.push(conn.frameTime(env)));
+    return seen;
+  }
+
+  /** A page whose last hello found the portal's clock `ahead` ms ahead of its own. */
+  function aheadBy(ahead: number): void {
+    const first = new AzabanConnection();
+    first.init();
+    latest().accept(); // hello sent at 1_700_000_000_000
+    vi.setSystemTime(1_700_000_000_200); // the reply takes 200 ms
+    latest().receive({ t: "hello", s: 1, resumed: false, token: "T", ts: 1_700_000_000_100 + ahead });
+    vi.setSystemTime(1_700_000_100_000);
+  }
+
+  it("is now for a frame that arrives live", () => {
+    const conn = new AzabanConnection();
+    const seen = times(conn);
+    conn.init();
+    latest().accept();
+    latest().receive({ t: "hello", s: 1, resumed: false, token: "T", ts: 1_700_000_000_000 });
+    vi.setSystemTime(1_700_000_050_000);
+    latest().receive({ t: "text", s: 2, html: "x", ts: 1_700_000_049_900 });
+    expect(seen).toEqual([1_700_000_050_000]);
+  });
+
+  it("is the portal's time on the browser's clock for a frame the portal replays", () => {
+    aheadBy(60_000);
+    // The reload's replay arrives before its hello reply.
+    const conn = new AzabanConnection();
+    const seen = times(conn);
+    conn.init();
+    latest().accept();
+    latest().receive({ t: "text", s: 2, html: "x", ts: 1_700_000_090_000 });
+    expect(seen).toEqual([1_700_000_030_000]);
+  });
+
+  it("is taken at the middle of the round trip, so a slow reply does not skew it", () => {
+    const first = new AzabanConnection();
+    first.init();
+    latest().accept();
+    vi.setSystemTime(1_700_000_002_000);
+    latest().receive({ t: "hello", s: 1, resumed: false, token: "T", ts: 1_700_000_001_000 });
+    vi.setSystemTime(1_700_000_010_000);
+    const conn = new AzabanConnection();
+    const seen = times(conn);
+    conn.init();
+    latest().accept();
+    latest().receive({ t: "text", s: 2, html: "x", ts: 1_700_000_005_000 });
+    expect(seen).toEqual([1_700_000_005_000]);
+  });
+
+  it("is never in the future", () => {
+    aheadBy(0);
+    const conn = new AzabanConnection();
+    const seen = times(conn);
+    conn.init();
+    latest().accept();
+    latest().receive({ t: "text", s: 2, html: "x", ts: 1_700_000_900_000 });
+    expect(seen).toEqual([1_700_000_100_000]);
+  });
+
+  it("is now for a frame without a time", () => {
+    aheadBy(60_000);
+    const conn = new AzabanConnection();
+    const seen = times(conn);
+    conn.init();
+    latest().accept();
+    latest().receive({ t: "text", s: 2, html: "x" });
+    latest().receive({ t: "text", s: 3, html: "x", ts: "soon" });
+    latest().receive({ t: "text", s: 4, html: "x", ts: Number.NaN });
+    expect(seen).toEqual([1_700_000_100_000, 1_700_000_100_000, 1_700_000_100_000]);
+  });
+
+  it("is the browser's own clock again once the hello has answered", () => {
+    aheadBy(60_000);
+    const conn = new AzabanConnection();
+    const seen = times(conn);
+    conn.init();
+    latest().accept();
+    latest().receive({ t: "text", s: 2, html: "replayed", ts: 1_700_000_050_000 });
+    latest().receive({ t: "hello", s: 3, resumed: true, token: "T2", ts: 1_700_000_160_000 });
+    latest().receive({ t: "text", s: 4, html: "live", ts: 1_700_000_160_000 });
+    expect(seen).toEqual([1_699_999_990_000, 1_700_000_100_000]);
+  });
+
+  it("is given to the members of a batch, unless a member has its own", () => {
+    const conn = new AzabanConnection();
+    const seen: unknown[] = [];
+    conn.on("text", (env) => seen.push(env.ts));
+    conn.init();
+    latest().accept();
+    latest().receive({
+      t: "batch",
+      s: 5,
+      ts: 1_699_999_999_000,
+      frames: [{ t: "text", html: "a" }, { t: "text", html: "b", ts: 1_699_999_998_000 }],
+    });
+    expect(seen).toEqual([1_699_999_999_000, 1_699_999_998_000]);
+  });
+});
+
+describe("being logged out", () => {
+  it("tells whoever listens, however it came about", () => {
+    const conn = new AzabanConnection();
+    const heard = vi.fn();
+    conn.onLoggedOut(heard);
+    conn.init();
+    latest().accept();
+    conn.markLoggedOut("quit");
+    expect(heard).toHaveBeenCalledTimes(1);
+    expect(conn.loggedOut).toBe(true);
+  });
+
+  it("tells them when another window takes the session", () => {
+    const conn = new AzabanConnection();
+    const heard = vi.fn();
+    conn.onLoggedOut(heard);
+    conn.init();
+    latest().accept();
+    latest().drop(4001);
+    expect(heard).toHaveBeenCalledTimes(1);
+    expect(conn.logoutReason).toBe("superseded");
+  });
+
+  it("is not stopped by a listener that throws", () => {
+    const conn = new AzabanConnection();
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const after = vi.fn();
+    conn.onLoggedOut(() => {
+      throw new Error("boom");
+    });
+    conn.onLoggedOut(after);
+    conn.init();
+    latest().accept();
+    conn.markLoggedOut("quit");
+    expect(after).toHaveBeenCalled();
+  });
+});

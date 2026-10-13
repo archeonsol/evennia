@@ -79,6 +79,30 @@ function saveClientToken(token: string): void {
   }
 }
 
+// How far the Portal's clock runs ahead of this browser's, in ms, measured at
+// the last hello. A frame carries the Portal's time; a line is shown at that
+// time less this, so a line that arrives late in a replay still reads as when
+// it happened, whatever this computer's clock says. Kept per tab so a reload,
+// whose replay comes before its first hello reply, already knows it.
+const SKEW_KEY = "underspire.client.skew";
+
+function loadSkew(): number {
+  try {
+    const skew = Number(sessionStorage.getItem(SKEW_KEY));
+    return Number.isFinite(skew) ? skew : 0;
+  } catch {
+    return 0;
+  }
+}
+
+function saveSkew(skew: number): void {
+  try {
+    sessionStorage.setItem(SKEW_KEY, String(Math.round(skew)));
+  } catch {
+    // Storage refused: the next hello measures it again.
+  }
+}
+
 export type RpcErrorCode = "offline" | "timeout" | "error";
 export class RpcError extends Error {
   constructor(public code: RpcErrorCode, message: string) {
@@ -107,6 +131,17 @@ export class AzabanConnection {
   // replayed what it missed.
   private clientToken: string | null = loadClientToken();
   private lastSeq = 0;
+  // Ask the portal to take the session over but send nothing back, until its
+  // first hello reply: this page holds a saved copy it did not write the cursor
+  // for (see seedResume).
+  private noReplay = false;
+  private skew = loadSkew();
+  private helloSentAt = 0;
+  // True between sending a hello and its reply: whatever arrives then is the
+  // portal catching this page up, and happened some time ago.
+  private catchingUp = false;
+  private applied = false;
+  private loggedOutListeners: (() => void)[] = [];
   // Liveness: when the last frame arrived, and the pending `pong` deadline.
   private lastRx = 0;
   private probeSeq = 0;
@@ -118,6 +153,55 @@ export class AzabanConnection {
     this.manualClose = false;
     this.watchLifecycle();
     this.open();
+  }
+
+  /**
+   * Start the first connection from a place the page saved, rather than from
+   * nothing. A reloaded page has no memory of what it applied, so it asks to be
+   * sent the whole replay window; a page that kept its scrollback and the seq
+   * it had reached together asks only for what came after.
+   *
+   * Args:
+   *   from.seq: the last seq the saved scrollback includes.
+   *   from.replay: false to take the session over and be sent nothing, for a
+   *     page whose saved copy was written by another tab.
+   */
+  seedResume(from: { seq?: number; replay?: boolean }): void {
+    if (typeof from.seq === "number" && Number.isFinite(from.seq) && from.seq >= 0) {
+      this.lastSeq = from.seq;
+    }
+    if (from.replay === false) this.noReplay = true;
+  }
+
+  /** The last server seq this page has applied: how far its scrollback is complete. */
+  get cursor(): number {
+    return this.lastSeq;
+  }
+
+  /** Whether a hello reply has been applied since the page loaded. */
+  get helloed(): boolean {
+    return this.applied;
+  }
+
+  /** Hear the shell being logged out: a quit, a boot, or a window that lost the session to another. */
+  onLoggedOut(fn: () => void): void {
+    this.loggedOutListeners.push(fn);
+  }
+
+  /**
+   * When a frame happened, by this browser's clock.
+   *
+   * A frame that arrives live happened now. One the portal replays while it
+   * catches this page up carries the portal's time, which is moved onto this
+   * browser's clock by the difference measured at the last hello. A frame with
+   * no time (or from a Portal that does not send one) is stamped with now, and
+   * no line is placed in the future.
+   */
+  frameTime(env: { ts?: unknown }): number {
+    const now = Date.now();
+    const ts = env.ts;
+    if (!this.catchingUp || typeof ts !== "number" || !Number.isFinite(ts)) return now;
+    return Math.min(Math.round(ts - this.skew), now);
   }
 
   /** Subscribe to a server message type ("text", "prompt", "render", "oob"…). */
@@ -208,6 +292,13 @@ export class AzabanConnection {
   markLoggedOut(reason = ""): void {
     this.loggedOut = true;
     this.logoutReason = reason;
+    for (const fn of this.loggedOutListeners) {
+      try {
+        fn();
+      } catch (e) {
+        console.error("azaban: logout listener failed", e);
+      }
+    }
     this.manualClose = true; // suppress the auto-reconnect on the close that follows
     this.stopLiveness();
     // Set before the close event: a panel that reloads while "open" would
@@ -251,11 +342,15 @@ export class AzabanConnection {
       this.state = "open";
       this.lastRx = Date.now();
       // Announce our capabilities (replaces the CLIENT_NARRATIVE flag).
+      const resume: Record<string, unknown> = { token: this.clientToken, last_seq: this.lastSeq };
+      if (this.noReplay) resume.replay = false;
+      this.helloSentAt = Date.now();
+      this.catchingUp = true;
       this.sendEnvelope({
         t: "hello",
         client: "azaban-shell",
         caps: CLIENT_CAPS,
-        resume: { token: this.clientToken, last_seq: this.lastSeq },
+        resume,
       });
       this.startLiveness();
       this.handlers.get("connection_open")?.({ t: "connection_open" });
@@ -263,6 +358,7 @@ export class AzabanConnection {
     ws.onclose = (ev: CloseEvent) => {
       if (this.ws !== ws) return; // a socket we already gave up on
       this.stopLiveness();
+      this.catchingUp = false;
       this.state = "closed";
       if (!this.manualClose && this.everOpen) {
         console.warn("azaban: websocket closed", ev.code, ev.reason || "(no reason)");
@@ -314,10 +410,18 @@ export class AzabanConnection {
     if (env.t === "hello") {
       this.lastSeq = typeof env.s === "number" ? env.s : 0;
       this.resumed = env.resumed === true;
+      this.noReplay = false;
+      this.applied = true;
+      this.catchingUp = false;
       // The token for our next reconnect; the one we presented is spent.
       if (typeof env.token === "string" && env.token) {
         this.clientToken = env.token;
         saveClientToken(env.token);
+      }
+      // The portal's clock against ours, taken at the middle of the round trip.
+      if (typeof env.ts === "number" && Number.isFinite(env.ts) && this.helloSentAt) {
+        this.skew = env.ts - (this.helloSentAt + Date.now()) / 2;
+        saveSkew(this.skew);
       }
     } else if (typeof env.s === "number" && env.s > this.lastSeq) {
       // Track the highest server seq we've applied, for resume-on-reconnect.
@@ -328,7 +432,10 @@ export class AzabanConnection {
     if (env.t === "batch") {
       const frames = Array.isArray(env.frames) ? env.frames : [];
       for (const frame of frames) {
-        if (frame && typeof frame === "object") this.dispatch(frame);
+        if (!frame || typeof frame !== "object") continue;
+        // The members were made in the same moment the batch was.
+        if (typeof frame.ts !== "number" && typeof env.ts === "number") frame.ts = env.ts;
+        this.dispatch(frame);
       }
       return;
     }

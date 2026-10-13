@@ -5,6 +5,7 @@
   import { routing, newRouteId, type Route } from "../lib/routing.svelte";
   import { parsePattern, matches } from "../lib/pattern";
   import { session } from "../lib/session.svelte";
+  import { savedLog } from "../lib/savedlog.svelte";
   import { macros } from "../lib/macros.svelte";
   import { keybinds, comboFromEvent, displayCombo } from "../lib/keybinds.svelte";
   import { dock } from "../lib/dock.svelte";
@@ -59,6 +60,10 @@
       keybinds.set(id, c);
       capKey = null;
     }
+  }
+
+  function deleteSaved() {
+    if (confirm("Delete the scrollback saved on this device?")) void savedLog.forgetAll();
   }
 
   let fileInput = $state<HTMLInputElement | null>(null);
@@ -405,6 +410,8 @@
         <div class="row"><span>Scroll output from the command line</span><span class="r-fixed">Page Up / Page Down</span></div>
       </div>
     {:else if view === "data"}
+      {@render toggle("Save scrollback on this device", "rememberLog", (on) => void savedLog.setEnabled(on))}
+      <button class="sh-cmd add-rule" onclick={deleteSaved}>Delete saved scrollback</button>
       <button class="sh-cmd add-rule" onclick={exportConfig}>Export config</button>
       <button class="sh-cmd add-rule" onclick={() => fileInput?.click()}>Import config</button>
       <input bind:this={fileInput} type="file" accept="application/json" style="display:none" onchange={onImport} />

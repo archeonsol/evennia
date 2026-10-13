@@ -5,14 +5,19 @@
 import { ASSIST_ADDED_KEY, LEGACY_SEEN_KEYS, QUEUE_SEEN_KEY, SEEN_KEY } from "./chat.svelte";
 import { HISTORY_KEY } from "./commands.svelte";
 import { DRAFT_KEY } from "./compose.svelte";
+import { POINTER_KEY, TOLD_KEY } from "./savedlog.svelte";
 
 /** Per-account records of what a player typed or read. A shared config file must not carry them. */
 const ACCOUNT_RECORDS = [HISTORY_KEY, DRAFT_KEY, SEEN_KEY, QUEUE_SEEN_KEY, ASSIST_ADDED_KEY].map((base) => `${base}:`);
+
+/** Keys that say something about this device and who used it, not about the player's choices. */
+const DEVICE_KEYS = [POINTER_KEY, TOLD_KEY];
 
 function isConfigKey(k: string): boolean {
   return (
     k.startsWith("underspire.") &&
     !LEGACY_SEEN_KEYS.includes(k) &&
+    !DEVICE_KEYS.includes(k) &&
     !ACCOUNT_RECORDS.some((prefix) => k.startsWith(prefix))
   );
 }

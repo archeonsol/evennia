@@ -36,8 +36,17 @@ import { help } from "./lib/help.svelte";
 import { lore } from "./lib/lore.svelte";
 import { activity } from "./lib/activity.svelte";
 import { handshake, loggedIn, loggedOut, roleArrived } from "./lib/accountSession";
+import { savedLog } from "./lib/savedlog.svelte";
 
 const OOB_TRACE_KEY = "underspire.trace.oob";
+
+// The account the Portal says the browser is signed in as: an id, null for a
+// browser that is not signed in, and undefined from a Portal that does not say.
+function accountOf(env: Record<string, any>): number | null | undefined {
+  if (!("account" in env)) return undefined;
+  const id = env.account;
+  return typeof id === "number" && Number.isInteger(id) && id > 0 ? id : null;
+}
 
 function oobTrace(event: string, detail?: unknown): void {
   try {
@@ -121,7 +130,7 @@ const TELL_KINDS = new Set(["tell", "whisper", "page", "say_to"]);
 
 connection.on("text", (env) => {
   const kind = env.kind ?? "text";
-  session.append(String(env.html ?? ""), kind);
+  session.append(String(env.html ?? ""), kind, connection.frameTime(env));
   if (TELL_KINDS.has(String(kind).toLowerCase())) {
     notify.ping("New message", session.lines[session.lines.length - 1]?.text ?? "");
   }
@@ -134,8 +143,9 @@ connection.on("prompt", (env) => {
 connection.on("render", (env) => {
   // Be tolerant of the payload shape: a list of nodes, or a single node.
   const nodes = Array.isArray(env.nodes) ? env.nodes : env.nodes ? [env.nodes] : [];
+  const at = connection.frameTime(env);
   for (const node of nodes) {
-    if (node) session.append(renderNodeHtml(node), node.msg_type ?? "text");
+    if (node) session.append(renderNodeHtml(node), node.msg_type ?? "text", at);
   }
 });
 
@@ -178,7 +188,7 @@ screenSize.connect((grid) =>
 // window had already moved past some of it, say so rather than leave a silent
 // hole in the log.
 connection.on("hello", (env) => {
-  handshake(env.resumed === true);
+  handshake(env.resumed === true, accountOf(env));
   if (env.gap === true) {
     session.append(
       `<span class="conn-note">Some output was lost while you were disconnected.</span>`,
@@ -335,7 +345,11 @@ connection.on("oob", (env) => {
   }
 });
 
-connection.init();
+// The saved log is read first, so the connection can ask the Portal for the gap
+// in it and nothing more. `boot` never rejects and never waits long, and the
+// connection starts either way.
+savedLog.init();
+void savedLog.boot().finally(() => connection.init());
 
 const target = document.getElementById("evennia-shell") ?? document.body;
 mount(App, { target });

@@ -12,6 +12,7 @@ import { help } from "./help.svelte";
 import { lore } from "./lore.svelte";
 import { puppets } from "./puppets.svelte";
 import { routing } from "./routing.svelte";
+import { NOTES, noteHtml, savedLog } from "./savedlog.svelte";
 import { scene } from "./scene.svelte";
 import { session } from "./session.svelte";
 import { settings } from "./settings.svelte";
@@ -132,6 +133,144 @@ describe("the end of a signed-in session", () => {
   it("forgets the last account when a second login arrives without its end", () => {
     signInAndFill();
     loggedIn();
+    expect(residue()).toEqual(EMPTY);
+  });
+});
+
+describe("the same person coming back", () => {
+  beforeEach(() => {
+    storage();
+    settings.echoCommands = true;
+    vi.spyOn(connection, "sendCommand").mockImplementation(() => {});
+    vi.spyOn(connection, "request").mockResolvedValue({ tickets: [] } as any);
+    vi.spyOn(connection, "dropReplayBuffer").mockImplementation(() => {});
+    vi.spyOn(connection, "markLoggedOut").mockImplementation(() => {});
+    vi.spyOn(savedLog, "hello").mockResolvedValue();
+    vi.spyOn(savedLog, "signedIn").mockResolvedValue();
+    vi.spyOn(savedLog, "erase").mockResolvedValue();
+    vi.spyOn(savedLog, "signedOut").mockImplementation(() => {});
+    vi.spyOn(savedLog, "discardUnbound").mockImplementation(() => {});
+    handshake(false);
+    // Earlier tests leave their lines in the shared session.
+    session.lines = [];
+    session.archive = [];
+    routing.buffers = {};
+    vi.mocked(savedLog.hello).mockClear();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
+
+  it("keeps the log when the session could not be resumed but account 7 is back, and says the connection broke", () => {
+    signInAndFill();
+    handshake(false, 7);
+    const shown = session.lines.map((l) => l.text);
+    expect(shown).toContain("Mira tells you: the code is 4471");
+    expect(shown.at(-1)).toBe(NOTES.away);
+    expect(session.lines.at(-1)?.html).toBe(noteHtml(NOTES.away));
+    expect(session.lines.at(-1)?.type).toBe("system");
+    expect(routing.buffers).toEqual({ Tells: [expect.objectContaining({ id: 1 })] });
+    expect(savedLog.hello).toHaveBeenCalledWith({ resumed: false, account: 7, kept: true });
+  });
+
+  it("still empties everything else the game will send again", () => {
+    signInAndFill();
+    handshake(false, 7);
+    const rest = residue().filter((_, i) => ![10, 11].includes(i));
+    const empty = EMPTY.filter((_, i) => ![10, 11].includes(i));
+    expect(rest).toEqual(empty);
+  });
+
+  it("leaves the signed-in state alone for the login that follows", () => {
+    signInAndFill();
+    handshake(false, 7);
+    loggedIn();
+    expect(session.lines.map((l) => l.text)).toContain("Mira tells you: the code is 4471");
+    expect(chat.channels).toEqual([]);
+  });
+
+  it("empties the screen when another account is the one that came back", () => {
+    signInAndFill();
+    handshake(false, 9);
+    expect(residue()).toEqual(EMPTY);
+    expect(savedLog.hello).toHaveBeenCalledWith({ resumed: false, account: 9, kept: false });
+  });
+
+  it("empties the screen when no one is signed in any more", () => {
+    signInAndFill();
+    handshake(false, null);
+    expect(residue()).toEqual(EMPTY);
+    expect(savedLog.hello).toHaveBeenCalledWith({ resumed: false, account: null, kept: false });
+  });
+
+  it("empties it the old way when the portal does not say who came back", () => {
+    signInAndFill();
+    handshake(false);
+    expect(residue()).toEqual(EMPTY);
+    expect(savedLog.hello).not.toHaveBeenCalled();
+  });
+
+  it("lets go of the account's log, leaving the copy on the device, when it empties the screen", () => {
+    signInAndFill();
+    handshake(false, 9);
+    expect(savedLog.signedOut).toHaveBeenCalled();
+    expect(savedLog.erase).not.toHaveBeenCalled();
+  });
+
+  it("does not let go of it when the same person is back", () => {
+    signInAndFill();
+    handshake(false, 7);
+    expect(savedLog.signedOut).not.toHaveBeenCalled();
+  });
+
+  it("tells the saved log who is signed in on a resumed handshake", () => {
+    signInAndFill();
+    handshake(true, 7);
+    expect(savedLog.hello).toHaveBeenCalledWith({ resumed: true, account: 7, kept: false });
+    const shown = session.lines.map((l) => l.text);
+    expect(shown).toContain("Mira tells you: the code is 4471");
+    expect(shown).not.toContain(NOTES.away);
+  });
+
+  it("tells the saved log who is signed in on a page that has not shown anyone yet", () => {
+    handshake(false, 7);
+    expect(savedLog.hello).toHaveBeenCalledWith({ resumed: false, account: 7, kept: false });
+  });
+
+  it("then recognises that account as the one that came back", () => {
+    handshake(false, 7);
+    loggedIn();
+    session.append("something to keep", "text");
+    handshake(false, 7);
+    expect(session.lines.map((l) => l.text)).toEqual(["something to keep", NOTES.away]);
+  });
+
+  it("tells the saved log when the game names the account", () => {
+    chat.handleOob("ticket_role", [], { staff: false, account: 7 });
+    roleArrived();
+    expect(savedLog.signedIn).toHaveBeenCalledWith(7);
+  });
+
+  it("drops what the sign-in screen printed when the login comes", () => {
+    loggedIn();
+    expect(savedLog.discardUnbound).toHaveBeenCalled();
+  });
+
+  it("deletes the saved copy when the player quits or is removed", () => {
+    for (const reason of ["quit", "booted"]) {
+      vi.mocked(savedLog.erase).mockClear();
+      signInAndFill();
+      loggedOut(reason);
+      expect(savedLog.erase).toHaveBeenCalledTimes(1);
+    }
+  });
+
+  it("leaves the saved copy when the session only moved to another window", () => {
+    signInAndFill();
+    loggedOut("logged in from elsewhere");
+    expect(savedLog.erase).not.toHaveBeenCalled();
     expect(residue()).toEqual(EMPTY);
   });
 });

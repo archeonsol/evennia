@@ -1,5 +1,6 @@
 <script lang="ts">
   import { session } from "../lib/session.svelte";
+  import { savedLog } from "../lib/savedlog.svelte";
   import { logview, CATS } from "../lib/logview.svelte";
   import { keybinds } from "../lib/keybinds.svelte";
   import { typewriter, markBacklog } from "../lib/typewriter";
@@ -29,6 +30,8 @@
   let cellRun = $state<HTMLSpanElement | null>(null);
   //: Characters in the measuring run; more of them average out sub-pixel advances.
   const PROBE_CELLS = 50;
+  //: Scrolled this close to the top of the held lines, the next page of older ones is read.
+  const TOP_PX = 240;
   // The scrollback can hold thousands of lines; only the rows around the
   // viewport exist as DOM (see lib/logvirtual.ts). `virtualizer` is a class
   // instance, so it is not deep-proxied; assigning it is the reactive part.
@@ -237,12 +240,16 @@
   // virtualizer follows appends on its own (followOnAppend); this effect only
   // owns the counter and the reveal policy.
   let unseen = $state(0);
-  let seenCount = 0;
+  // The id of the newest line the last pass saw. News is whatever has an id past
+  // it, counted from the end: older lines read back from the saved log arrive at
+  // the front, and the cap trims the front, and neither is a new line.
+  let seenLast = Number.NEGATIVE_INFINITY;
   $effect(() => {
     const lines = session.lines;
     const n = lines.length;
-    const grew = n - seenCount;
-    seenCount = n;
+    let grew = 0;
+    while (grew < n && lines[n - 1 - grew].id > seenLast) grew++;
+    if (n) seenLast = Math.max(seenLast, lines[n - 1].id);
     if (pinned && !logview.searchOpen) {
       unseen = 0;
     } else if (grew > 0) {
@@ -258,6 +265,11 @@
   });
   $effect(() => {
     if (pinned) unseen = 0;
+  });
+  // The record keeps older lines the reader asked for while they are away from
+  // the bottom, and lets them go once they are back.
+  $effect(() => {
+    session.follow(pinned);
   });
   function jumpToLatest() {
     pinned = true;
@@ -312,6 +324,10 @@
     savedTop = el.scrollTop;
     const gap = el.scrollHeight - el.scrollTop - el.clientHeight;
     pinned = pinAfterScroll(pinned, gap, el.scrollTop, lastTop);
+    // The top of what is held, with more saved above it: read the next page.
+    // The virtualizer keeps the reader on the line they were on, so a page
+    // arriving puts the top out of reach again.
+    if (el.scrollTop < TOP_PX && savedLog.hasOlder) void savedLog.loadOlder();
   }
 
   // Restore the reading position when the panel comes back.
@@ -514,7 +530,7 @@
     }
   }
   function clearBuffer() {
-    if (session.lines.length && confirm("Clear the scrollback buffer?")) session.clear();
+    if (session.lines.length && confirm("Clear the scrollback buffer?")) session.clear({ saved: true });
   }
   function downloadLog(format: TranscriptFormat) {
     saveOpen = false;
@@ -553,6 +569,10 @@
     </div>
     <button class="sh-cmd tool" onclick={() => (logview.timestamps = !logview.timestamps)}
       title="timestamps" aria-label="timestamps" aria-pressed={logview.timestamps}>Times</button>
+    {#if savedLog.hasOlder}
+      <button class="sh-cmd tool" onclick={() => void savedLog.loadOlder()} disabled={savedLog.loadingOlder}
+        title="read older lines saved on this device" aria-label="load earlier lines">{savedLog.loadingOlder ? "Loading" : "Earlier"}</button>
+    {/if}
     <button class="sh-cmd tool" onclick={() => (logview.searchOpen = !logview.searchOpen)}
       title="search (Ctrl-F)" aria-label="search scrollback" aria-pressed={logview.searchOpen}>Search</button>
     <div class="save" bind:this={saveEl}>

@@ -138,7 +138,7 @@
     if (keybinds.match(e, "clear")) {
       e.preventDefault();
       // Same question the clear button asks: one stray chord wiped the log.
-      if (session.lines.length && confirm("Clear the scrollback buffer?")) session.clear();
+      if (session.lines.length && confirm("Clear the scrollback buffer?")) session.clear({ saved: true });
       return;
     }
     const combo = comboOf(e);

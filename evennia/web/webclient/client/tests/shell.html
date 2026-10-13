@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="en" data-theme="default">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:,">
+<title>Shell</title>
+<!-- The whole shell as the game serves it (see webclient.html), pointed at an
+     address no one answers. run-e2e.mjs answers it with a fake portal. -->
+<body>
+<div id="evennia-shell"></div>
+<script>
+  var csessid = "e2e";
+  var wsurl = "ws://portal.test/ws";
+</script>
+<script type="module" src="/src/main.ts"></script>
+</body>
+</html>

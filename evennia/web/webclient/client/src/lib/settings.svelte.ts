@@ -112,6 +112,8 @@ interface Persisted {
   helpPanel: boolean;
   /** Underline the game's lore words in the log, and show a note on a hover or a tap. */
   loreTips: boolean;
+  /** Keep the log on this device, so a reload or a restart does not take it (lib/savedlog.svelte.ts). */
+  rememberLog: boolean;
   customColors: Record<string, string>;
 }
 
@@ -152,6 +154,7 @@ const DEFAULTS: Persisted = {
   spellcheck: true,
   helpPanel: true,
   loreTips: true,
+  rememberLog: true,
   customColors: { ...CUSTOM_DEFAULTS },
 };
 
@@ -214,6 +217,7 @@ class Settings {
   spellcheck = $state(DEFAULTS.spellcheck);
   helpPanel = $state(DEFAULTS.helpPanel);
   loreTips = $state(DEFAULTS.loreTips);
+  rememberLog = $state(DEFAULTS.rememberLog);
   customColors = $state<Record<string, string>>({ ...CUSTOM_DEFAULTS });
   private _lastSR: boolean | null = null;
   private _lastHelp: boolean | null = null;
