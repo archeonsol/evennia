@@ -78,9 +78,11 @@ _CLIENT_SESSIONS = mod_import(settings.SESSION_ENGINE).SessionStore
 # two tabs apart. The token lives in the tab's sessionStorage and is replaced
 # on every takeover, so a copied tab cannot bounce a session between windows.
 #
-# Every outbound JSON frame is stamped with a monotonic ``s`` (seq) and kept in
-# a bounded per-session buffer; the client presents the last seq it applied and
-# is sent what came after.
+# Every outbound JSON frame is stamped with a monotonic ``s`` (seq) and ``ts``
+# (the Portal's clock, in epoch milliseconds, when the frame was made) and kept
+# in a bounded per-session buffer; the client presents the last seq it applied
+# and is sent what came after. A replayed frame keeps its original ``ts``, so a
+# line the client receives late still carries the time it happened.
 RESUME_BUFFER_MAX = 400  # frames kept per connection
 #: Default seconds a dropped session is held (``settings.WEBCLIENT_RESUME_GRACE``).
 RESUME_GRACE_SECONDS = 90
@@ -155,6 +157,11 @@ def _setting_bytes(name, default):
     if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
         raise ValueError(f"settings.{name} must be a positive integer")
     return value
+
+
+def _now_ms():
+    """Return the Portal's wall clock in epoch milliseconds, for a frame's ``ts``."""
+    return int(time.time() * 1000)
 
 
 def _frame_bytes(frame):
@@ -978,7 +985,10 @@ class WebSocketClient(WSProtocolBase, _BASE_SESSION_CLASS):
         client that reconnects after its hold expired keeps asking to resume
         from a seq the server's fresh counter will never reach again, and
         replay silently stops working for that browser forever. It also carries
-        the resume token for the client's next reconnect.
+        the resume token for the client's next reconnect, and the account the
+        browser is signed in as. The account is how a client that could not
+        resume (the Portal restarted, or the hold ran out) knows whether the
+        same person is back, and so whether the log it saved is theirs to see.
 
         Args:
             raw (dict): the decoded client ``hello`` envelope.
@@ -993,12 +1003,31 @@ class WebSocketClient(WSProtocolBase, _BASE_SESSION_CLASS):
             "protocol": "azaban.v1",
             "resumed": resumed is not None,
             "token": self._issue_resume_token(),
+            "account": self._account_id(),
         }
         if resumed and resumed["gap"]:
             reply["gap"] = True
         # Stamped last, so its seq is above every frame replayed above it and
         # the client can assign (not max) its cursor from it.
         self.sendLine(reply)
+
+    def _account_id(self):
+        """Return the id of the account this browser is signed in as.
+
+        Returns:
+            int or None: The account id, or None for a browser that is not signed
+                in. It is the same id the browser's Django session names, which is
+                what a takeover is checked against.
+
+        """
+        uid = getattr(self, "uid", None)
+        if isinstance(uid, bool) or not uid:
+            return None
+        try:
+            account = int(uid)
+        except (TypeError, ValueError):
+            return None
+        return account if account > 0 else None
 
     def _issue_resume_token(self):
         """Give this connection a fresh resume token and retire its old one.
@@ -1036,7 +1065,11 @@ class WebSocketClient(WSProtocolBase, _BASE_SESSION_CLASS):
         Args:
             resume (dict): the ``resume`` block of the client's hello: the
                 ``token`` its last connection was issued and the ``last_seq`` it
-                applied.
+                applied. ``replay: false`` takes the session over and sends
+                nothing back: the client keeps its own copy of the output, and
+                one that has no cursor for it (it is a second tab of the same
+                account, and the copy was written by the first) would only be
+                sent lines it already has.
 
         Returns:
             dict or None: ``{"replayed": int, "gap": bool}`` when this socket now
@@ -1068,7 +1101,10 @@ class WebSocketClient(WSProtocolBase, _BASE_SESSION_CLASS):
             return None
         offline = time.monotonic() - old._lost_at if old._lost_at else 0.0
         self._adopt(old)
-        replayed, gap = self._replay_since(resume.get("last_seq"))
+        if resume.get("replay") is False:
+            replayed, gap = 0, False
+        else:
+            replayed, gap = self._replay_since(resume.get("last_seq"))
         logger.log_info(
             "webclient: session %s (uid %s) resumed on a new connection after %.1fs;"
             " replayed %d frame(s)%s"
@@ -1261,6 +1297,7 @@ class WebSocketClient(WSProtocolBase, _BASE_SESSION_CLASS):
         next_seq = getattr(self, "out_seq", 0) + 1
         obj = dict(obj)
         obj["s"] = next_seq
+        obj.setdefault("ts", _now_ms())
         # ASCII escaping makes replay string length equal its encoded byte size.
         line = json.dumps(obj, ensure_ascii=True)
         _check_outgoing_size(line)
@@ -1367,6 +1404,7 @@ class WebSocketClient(WSProtocolBase, _BASE_SESSION_CLASS):
         payload = candidate[0] if len(candidate) == 1 else {"t": "batch", "frames": candidate}
         stamped = dict(payload)
         stamped["s"] = current_seq + 1
+        stamped.setdefault("ts", _now_ms())
         if len(candidate) <= BATCH_MAX_FRAMES and _frame_bytes(stamped) <= target:
             self._serialize_stamped(payload, current_seq + 1)
             buf.append(member)
@@ -1419,6 +1457,7 @@ class WebSocketClient(WSProtocolBase, _BASE_SESSION_CLASS):
                 )
                 stamped = dict(payload)
                 stamped["s"] = getattr(self, "out_seq", 0) + len(payloads) + 1
+                stamped.setdefault("ts", _now_ms())
                 size = _frame_bytes(stamped)
                 if group and size > target:
                     payloads.append(
@@ -1448,6 +1487,7 @@ class WebSocketClient(WSProtocolBase, _BASE_SESSION_CLASS):
                 return frame
         obj = dict(obj)
         obj["s"] = seq
+        obj.setdefault("ts", _now_ms())
         line = json.dumps(obj)
         _check_outgoing_size(line)
         return line

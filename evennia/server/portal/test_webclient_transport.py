@@ -18,6 +18,10 @@ from django.db import connections
 from evennia.server.portal import webclient as webclient_mod
 from evennia.server.portal.webclient import BATCH_MAX_FRAMES, WebSocketClient
 
+#: A fixed Portal clock (epoch milliseconds, always 13 digits), so a test that
+#: counts the bytes of a stamped frame counts the same bytes every run.
+TS = 1_700_000_000_000
+
 
 class _Transport(WebSocketClient):
     """A protocol instance with I/O stubbed out.
@@ -114,6 +118,41 @@ class TestResumeStamping(TestCase):
         t.sendEncoded({"t": "render"})
         self.assertEqual(_frames(t)[0], {"t": "render"})
 
+    def test_a_frame_carries_the_time_it_was_made(self):
+        t = _Transport()
+        with patch.object(webclient_mod, "_now_ms", side_effect=[TS, TS + 40]):
+            t.sendEncoded({"t": "render"})
+            t.sendEncoded(json.dumps({"t": "prompt"}).encode("utf-8"))
+        self.assertEqual([f["ts"] for f in _frames(t)], [TS, TS + 40])
+
+    def test_a_frame_that_names_its_own_time_keeps_it(self):
+        t = _Transport()
+        t.sendEncoded({"t": "render", "ts": 5})
+        self.assertEqual(_frames(t)[0]["ts"], 5)
+
+    def test_a_batch_carries_one_time(self):
+        with patch.object(webclient_mod.asyncio, "get_running_loop", return_value=Mock()):
+            t = _Transport(caps={"batching": True})
+            with patch.object(webclient_mod, "_now_ms", return_value=TS):
+                t.sendEncoded({"t": "render", "n": 1})
+                t.sendEncoded({"t": "render", "n": 2})
+                t._flush_batch()
+        env = _frames(t)[0]
+        self.assertEqual(env["t"], "batch")
+        self.assertEqual(env["ts"], TS)
+        self.assertNotIn("ts", env["frames"][0])
+
+    def test_a_replayed_frame_keeps_the_time_it_was_made(self):
+        # A reconnect replays what it missed a minute later. The line still
+        # happened when it happened, and the client shows that time.
+        t = _Transport(uid=7)
+        with patch.object(webclient_mod, "_now_ms", return_value=TS):
+            t.sendEncoded({"t": "render", "n": 0})
+        t.sent.clear()
+        with patch.object(webclient_mod, "_now_ms", return_value=TS + 60_000):
+            t._replay_since(0)
+        self.assertEqual([f["ts"] for f in _frames(t)], [TS])
+
     @patch.object(webclient_mod.settings, "WEBSOCKET_MAX_OUTGOING_BYTES", 24, create=True)
     def test_oversized_resume_frame_does_not_advance_state(self):
         t = _Transport()
@@ -139,8 +178,9 @@ class TestResumeStamping(TestCase):
             t.sendLine({"t": "x", "body": 'é"\\'})
         self.assertFalse(hasattr(t, "out_seq"))
 
-    def test_exact_outgoing_byte_limit_is_accepted(self):
-        payload = {"t": "render", "body": 'é"\\', "s": 1}
+    @patch.object(webclient_mod, "_now_ms", return_value=TS)
+    def test_exact_outgoing_byte_limit_is_accepted(self, _now):
+        payload = {"t": "render", "body": 'é"\\', "s": 1, "ts": TS}
         limit = len(json.dumps(payload).encode("utf-8"))
         with patch.object(
             webclient_mod.settings, "WEBSOCKET_MAX_OUTGOING_BYTES", limit, create=True
@@ -193,10 +233,42 @@ class TestResumeHandshake(TestCase):
         t._handle_client_hello({"t": "hello"})
         self.assertNotIn(token, webclient_mod._RESUMABLE)
 
-    def test_live_replay_budget_counts_escaped_unicode(self):
+    def test_hello_names_the_account_the_browser_is_signed_in_as(self):
+        t = _Transport(uid=7)
+        t._handle_client_hello({"t": "hello"})
+        self.assertEqual(_frames(t)[-1]["account"], 7)
+
+    def test_hello_names_no_account_for_a_browser_that_is_not_signed_in(self):
+        for uid in (None, 0, "", False):
+            with self.subTest(uid=uid):
+                t = _Transport(uid=uid)
+                t._handle_client_hello({"t": "hello"})
+                self.assertIsNone(_frames(t)[-1]["account"])
+
+    def test_hello_reads_an_account_id_that_arrived_as_text(self):
+        # The Django session stores the id as whatever the login wrote.
+        t = _Transport(uid="12")
+        t._handle_client_hello({"t": "hello"})
+        self.assertEqual(_frames(t)[-1]["account"], 12)
+
+    def test_hello_ignores_an_id_that_is_not_a_number(self):
+        t = _Transport(uid="someone")
+        t._handle_client_hello({"t": "hello"})
+        self.assertIsNone(_frames(t)[-1]["account"])
+
+    def test_hello_carries_the_portal_clock(self):
+        # The client sets its clock against this to show replayed lines at the
+        # time they happened.
+        t = _Transport()
+        with patch.object(webclient_mod, "_now_ms", return_value=TS):
+            t._handle_client_hello({"t": "hello"})
+        self.assertEqual(_frames(t)[-1]["ts"], TS)
+
+    @patch.object(webclient_mod, "_now_ms", return_value=TS)
+    def test_live_replay_budget_counts_escaped_unicode(self, _now):
         """Replay accounting measures escaped JSON, including Unicode expansion."""
         content = {"t": "render", "body": "🙂漢"}
-        size = len(json.dumps({**content, "s": 1}).encode("utf-8"))
+        size = len(json.dumps({**content, "s": 1, "ts": TS}).encode("utf-8"))
         with patch.object(webclient_mod.settings, "WEBSOCKET_RESUME_BYTES", size, create=True):
             transport = _Transport(uid=7)
             transport.sendEncoded(content)
@@ -411,12 +483,13 @@ class TestBatching(TestCase):
         t._flush_batch()
         self.assertEqual(_frames(t)[0]["t"], "render")
 
-    def test_direct_send_preserves_pending_order_at_sequence_rollover(self):
+    @patch.object(webclient_mod, "_now_ms", return_value=TS)
+    def test_direct_send_preserves_pending_order_at_sequence_rollover(self, _now):
         """Direct protocol replies cannot invalidate an admitted batch stamp."""
         transport = _Transport(caps={"batching": True})
         transport.out_seq = 8
         pending = {"t": "render", "body": "x"}
-        limit = len(json.dumps({**pending, "s": 9}).encode("utf-8"))
+        limit = len(json.dumps({**pending, "s": 9, "ts": TS}).encode("utf-8"))
         with patch.object(
             webclient_mod.settings, "WEBSOCKET_MAX_OUTGOING_BYTES", limit, create=True
         ):
@@ -438,8 +511,10 @@ class TestBatching(TestCase):
         self.assertEqual(len(t.sent), 1)
         self.assertEqual(len(_frames(t)[0]["frames"]), BATCH_MAX_FRAMES)
 
-    @patch.object(webclient_mod.settings, "WEBSOCKET_BATCH_BYTES", 100, create=True)
-    def test_batch_target_splits_at_whole_envelope_boundaries(self):
+    # One of these members is 112 bytes once stamped (seq and clock), two do not fit.
+    @patch.object(webclient_mod.settings, "WEBSOCKET_BATCH_BYTES", 120, create=True)
+    @patch.object(webclient_mod, "_now_ms", return_value=TS)
+    def test_batch_target_splits_at_whole_envelope_boundaries(self, _now):
         t = _Transport(caps={"batching": True})
         for n in range(3):
             t.sendEncoded({"t": "render", "n": n, "body": "é" * 8})
@@ -451,10 +526,11 @@ class TestBatching(TestCase):
             members.extend(env["frames"] if env["t"] == "batch" else [env])
         self.assertEqual([member["n"] for member in members], [0, 1, 2])
         self.assertGreater(len(envs), 1)
-        self.assertTrue(all(len(raw) <= 100 for raw in t.sent))
+        self.assertTrue(all(len(raw) <= 120 for raw in t.sent))
 
-    @patch.object(webclient_mod.settings, "WEBSOCKET_BATCH_BYTES", 100, create=True)
-    def test_pending_batch_is_byte_bounded_before_scheduled_flush(self):
+    @patch.object(webclient_mod.settings, "WEBSOCKET_BATCH_BYTES", 120, create=True)
+    @patch.object(webclient_mod, "_now_ms", return_value=TS)
+    def test_pending_batch_is_byte_bounded_before_scheduled_flush(self, _now):
         t = _Transport(caps={"batching": True})
         for n in range(3):
             t.sendEncoded({"t": "render", "n": n, "body": "x" * 20})
@@ -464,8 +540,9 @@ class TestBatching(TestCase):
                     "t": "batch",
                     "frames": pending,
                     "s": getattr(t, "out_seq", 0) + 1,
+                    "ts": TS,
                 }
-                self.assertLessEqual(len(json.dumps(wrapper).encode("utf-8")), 100)
+                self.assertLessEqual(len(json.dumps(wrapper).encode("utf-8")), 120)
         self.assertGreaterEqual(len(t.sent), 1)
 
     @patch.object(webclient_mod.settings, "WEBSOCKET_BATCH_BYTES", 20, create=True)
@@ -491,12 +568,13 @@ class TestBatching(TestCase):
         self.assertEqual(getattr(t, "_batch_pending", []), [])
         self.assertFalse(hasattr(t, "out_seq"))
 
-    def test_seq_width_rollover_rejects_incoming_without_flushing_pending(self):
+    @patch.object(webclient_mod, "_now_ms", return_value=TS)
+    def test_seq_width_rollover_rejects_incoming_without_flushing_pending(self, _now):
         t = _Transport(caps={"batching": True})
         t.out_seq = 9
         t._batch_pending = [{"t": "render", "body": "kept"}]
         incoming = {"t": "render", "body": "x"}
-        stamped = {**incoming, "s": 11}
+        stamped = {**incoming, "s": 11, "ts": TS}
         limit = len(json.dumps(stamped).encode("utf-8")) - 1
         with (
             patch.object(webclient_mod.settings, "WEBSOCKET_BATCH_BYTES", 20, create=True),

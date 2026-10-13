@@ -124,10 +124,14 @@ class _ContinuityBase(TestCase):
         sock.get_client_session = client_session
         return sock
 
-    def _hello(self, sock, token=None, last_seq=0):
+    def _hello(self, sock, token=None, last_seq=0, **resume):
         sock.onMessage(
             json.dumps(
-                {"t": "hello", "caps": {}, "resume": {"token": token, "last_seq": last_seq}}
+                {
+                    "t": "hello",
+                    "caps": {},
+                    "resume": {"token": token, "last_seq": last_seq, **resume},
+                }
             ).encode(),
             False,
         )
@@ -324,7 +328,7 @@ class TestHold(_ContinuityBase):
 class TestTakeover(_ContinuityBase):
     """A reconnect that proves ownership takes the session over in place."""
 
-    def _drop_and_return(self, browser=None, last_seq=None, live=False):
+    def _drop_and_return(self, browser=None, last_seq=None, live=False, **resume):
         browser = browser if browser is not None else _signed_in()
         old = self._connected(browser)
         self._say(old, "before the drop")
@@ -336,7 +340,10 @@ class TestTakeover(_ContinuityBase):
         new = self._socket(browser, host="198.51.100.9")
         new.onOpen()
         reply = self._hello(
-            new, token=old.resume_token, last_seq=seq_seen if last_seq is None else last_seq
+            new,
+            token=old.resume_token,
+            last_seq=seq_seen if last_seq is None else last_seq,
+            **resume,
         )
         return old, new, reply, self._ops()[ops:]
 
@@ -371,6 +378,57 @@ class TestTakeover(_ContinuityBase):
         _old, new, reply, _ops = self._drop_and_return(last_seq=0)
         self.assertEqual(self._texts(new), ["before the drop", "while you were away"])
         self.assertNotIn("gap", reply)
+
+    def test_a_page_that_kept_its_place_is_sent_only_the_gap(self):
+        # A page that saved its scrollback and the last seq in one step asks for
+        # exactly what it is missing: nothing it already holds comes back.
+        browser = _signed_in()
+        old = self._connected(browser)
+        self._say(old, "before the reload")
+        seen = old.out_seq
+        old.onClose(True, 1001, "")
+        self._say(old, "during the reload")
+        browser["webclient_authenticated_nonce"] += 1
+        new = self._socket(browser)
+        new.onOpen()
+        reply = self._hello(new, token=old.resume_token, last_seq=seen)
+        self.assertTrue(reply["resumed"])
+        self.assertEqual(self._texts(new), ["during the reload"])
+
+    def test_a_client_that_keeps_its_own_copy_is_sent_nothing_back(self):
+        # A second tab of the account: the lines its saved copy holds were
+        # written by the first tab, and it has no cursor into this window.
+        old, new, reply, ops = self._drop_and_return(last_seq=0, replay=False)
+        self.assertTrue(reply["resumed"])
+        self.assertEqual(self._texts(new), [])
+        self.assertNotIn("gap", reply)
+        self.assertNotIn(amp.PDISCONN, ops)
+        # It still has the session: what the game says next reaches it.
+        self._say(new, "welcome back")
+        self.assertEqual(self._texts(new), ["welcome back"])
+
+    def test_the_hello_names_the_account_that_holds_the_session(self):
+        _old, _new, reply, _ops = self._drop_and_return()
+        self.assertEqual(reply["account"], 7)
+
+    def test_a_hello_for_a_signed_out_browser_names_no_account(self):
+        sock = self._socket(_Browser())
+        sock.onOpen()
+        self.assertIsNone(self._hello(sock)["account"])
+
+    def test_a_replayed_line_carries_the_time_it_was_said(self):
+        browser = _signed_in()
+        old = self._connected(browser)
+        old.connectionLost("gone")
+        with patch.object(webclient_mod, "_now_ms", return_value=1_700_000_000_000):
+            self._say(old, "while you were away")
+        new = self._socket(browser, host="198.51.100.9")
+        new.onOpen()
+        with patch.object(webclient_mod, "_now_ms", return_value=1_700_000_090_000):
+            reply = self._hello(new, token=old.resume_token, last_seq=old.out_seq - 1)
+        replayed = [f for f in new.frames if f.get("t") == "render"]
+        self.assertEqual([f["ts"] for f in replayed], [1_700_000_000_000])
+        self.assertEqual(reply["ts"], 1_700_000_090_000)
 
     def test_a_reloaded_page_takes_its_session_back_with_its_scrollback(self):
         browser = _signed_in()
