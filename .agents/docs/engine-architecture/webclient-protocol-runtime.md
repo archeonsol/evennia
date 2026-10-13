@@ -19,9 +19,12 @@ The client opens with `hello` carrying `caps` and a `resume` block (`token`,
 a session must never reach the Server as a new connection. Other wire formats
 connect on open.
 
-The server replies with its own `hello` (`{protocol, resumed, token, gap?}`)
-**after** any replayed frames and stamped last, so its `s` is above everything
-it replayed. `token` is the resume token for the client's next reconnect.
+The server replies with its own `hello` (`{protocol, resumed, token, account,
+gap?}`) **after** any replayed frames and stamped last, so its `s` is above
+everything it replayed. `token` is the resume token for the client's next
+reconnect. `account` is the account the browser is signed in as (null when it is
+not): it tells a client that could not resume the same person coming back from the
+next one to sit down. A Portal that sends none is treated as "someone else".
 
 The client **assigns** its resume cursor from that `s` rather than taking a
 maximum. This is the whole point of the reply: when the server could not resume
@@ -34,7 +37,17 @@ looks like working code.
 
 A dropped socket does not end the game session. Holding it, the takeover by a
 reconnecting tab, the replay buffer, keepalive, and close logging are in
-[`webclient-session-continuity.md`](webclient-session-continuity.md).
+[`webclient-session-continuity.md`](webclient-session-continuity.md). The log the
+client keeps for itself is in [`webclient-saved-log.md`](webclient-saved-log.md).
+
+## Frame stamps
+
+Every frame the Portal sends carries `s`, a per-session sequence number, and `ts`,
+the Portal's clock in epoch milliseconds when the frame was made (a batch has one
+`ts`). A replayed frame keeps its original `ts`, so a line that arrives late still
+shows when it happened. Only frames that arrive between the client's `hello` and
+the reply are catch-up frames; the rest are shown at the client's own clock.
+`resume.replay: false` takes a session over and replays nothing.
 
 ## Frame encoding
 

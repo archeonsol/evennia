@@ -41,6 +41,9 @@ which drifted stale as the work shipped (a roadmap rots; a decisions log doesn't
   web session survives its socket: holding a dropped session, takeover by the
   reconnecting tab (account + Portal-issued token), replay, keepalive in both
   directions, and close logging.
+- **[webclient-saved-log.md](webclient-saved-log.md)**: the log the shell keeps in
+  the browser between visits: saved with the place it reaches, shown only to its
+  account, one saving tab, and the limits.
 
 If an item moves from speculative to scoped, it graduates from `horizon.md` up to
 `committed.md`, and to `decisions.md` once shipped.

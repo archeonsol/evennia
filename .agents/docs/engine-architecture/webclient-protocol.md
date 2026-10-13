@@ -41,8 +41,8 @@ if that encoding is negotiated in `hello`.
 ## Message types
 
 **Server → client**
-- `hello`: `{ protocol, resumed, token, gap? }`. Reply to the client's `hello`,
-  stamped after any replay; the cursor rules, `token`, and `gap` are in the runtime doc.
+- `hello`: `{ protocol, resumed, token, account, gap? }`. Reply to the client's
+  `hello`, stamped after any replay; its fields and the cursor rules are in the runtime doc.
 - `pong`: `{ n? }`. The Portal's answer to a client `ping`; never replayed.
 - `text`: `{ html, kind? }`. HTML log line for anything not yet a structured node.
 - `prompt`: `{ html }`.
@@ -57,7 +57,7 @@ if that encoding is negotiated in `hello`.
 
 **Client → server**
 - `hello`: `{ client, caps: { rendersNodes, images, patches, assets, encoding },
-  resume: { token, last_seq } }`.
+  resume: { token, last_seq, replay? } }`.
 - `ping`: `{ n }`. Liveness probe, answered at the Portal with `pong`.
 - `resume_reset`: `{}`. Drop the Portal's replay buffer (the log was cleared).
 - `cmd`: `{ line }`. A command line. It may hold line breaks: Shift+Enter in the

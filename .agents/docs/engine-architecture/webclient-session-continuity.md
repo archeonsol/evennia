@@ -46,10 +46,12 @@ Properties, each wrong under the obvious implementation:
 - **A replaced socket changes nothing.** Its late close, frames, and timers are
   ignored, and the session handler refuses to disconnect a sessid on behalf of
   anything but its current holder.
-- **A reload is not a logout.** The reloaded page presents its token with no
-  cursor and is sent the whole replay window, so its scrollback comes back, and
-  the character never leaves the game. A 1001 hold that nobody claims was a
-  closed tab: its end clears the auto-login stamp. The nonce check in `_end_session` keeps the stamp when another page of the
+- **A reload is not a logout.** The reloaded page presents its token and takes
+  its session back, and the character never leaves the game. With no cursor it is
+  sent the whole replay window; a page that saved its log presents the place that
+  log reaches and is sent only the gap ([`webclient-saved-log.md`](webclient-saved-log.md)).
+  A 1001 hold that nobody claims was a closed tab: its end clears the auto-login
+  stamp. The nonce check in `_end_session` keeps the stamp when another page of the
   same browser has loaded since.
 - **Losing the link is not a logout.** A session held after any other loss keeps
   the browser's auto-login stamp. An expired hold keeps it too: the browser
@@ -74,6 +76,14 @@ the frames above it. State events are idempotent, so re-pushes are safe.
   carries `gap: true` and the shell says output was lost.
 - **`resume_reset` clears the buffer** (the shell's "clear log"), so a reload
   does not replay what the player cleared. The counter runs on.
+- **Frames keep the time they were made.** `ts` is stamped beside `s`, once, so a
+  replayed frame carries its original time. The client sets its clock against the
+  `hello` reply's `ts` (middle of the round trip, kept in the tab's
+  `sessionStorage` so a reload's replay already has it).
+- **`resume.replay: false` replays nothing**, for a second tab of the account that
+  holds a saved log it did not write the cursor for. No `gap` either.
+- **The `hello` reply names the account** (`account`, an id or null). It is how a
+  client that could not resume tells the same person from the next one.
 
 ## Keepalive
 
