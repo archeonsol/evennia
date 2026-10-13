@@ -25,6 +25,50 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.328: The webclient keeps its log between visits
+
+### Portal
+
+- **The hello reply names the account** ([`webclient.py`](evennia/server/portal/webclient.py)). The
+  reply carries `account`, the id the browser is signed in as, or null when it is not. A client that
+  could not resume a session used to empty its screen whoever came back. It can now tell the same
+  person from the next one to sit down.
+- **Every frame carries `ts`**, the Portal's clock when the frame was made, and the hello reply
+  carries it too so the client can set its clock against the Portal's. A replayed frame is the
+  buffered string, so it keeps its original time. `e6cd7eeb9`.
+- **`resume.replay: false`** takes a session over and sends nothing back. It is for a second tab of
+  an account that holds a saved log it did not write the cursor for.
+
+### Webclient
+
+- **The log is kept in IndexedDB** (`logstore.ts`, `savedlog.svelte.ts`, `5a7980855`). Lines are saved
+  under `[account, k]` and the place the connection had reached is saved in the same transaction as
+  the lines it covers. A reloaded page presents that place as its resume cursor, so the Portal sends
+  exactly the gap: no line twice and none missing.
+- A log is shown to its account only, after the hello reply names it. A same-account reconnect that
+  could not resume now keeps the log the page held, with a line saying the connection broke.
+- One tab saves at a time per account (a Web Lock). A second tab takes its session over with
+  `replay: false`.
+- Quit and being booted delete the saved copy. Sign-out, a closed tab and an idle timeout keep it.
+  Limits: 20,000 lines, 24 MB, 3 accounts, 7 idle days.
+- **Settings, Backup:** "Save scrollback on this device" (on by default) and "Delete saved
+  scrollback". Reading older lines: an "Earlier" button, or scrolling to the top.
+- The shell is rebuilt (`ebd860fe1`).
+
+### Docs
+
+- New: [`webclient-saved-log.md`](.agents/docs/engine-architecture/webclient-saved-log.md). The
+  protocol and continuity docs name the `account` and `ts` fields and `resume.replay`.
+
+### Migration
+
+- A game that budgets the size of a frame has to reserve the new `ts` field, as it already does for
+  `s`. The game's `world/activity/hub.py` `wire_size` does, from the game commit that comes with
+  this pin.
+- The Portal code changed, so a deploy that picks this release restarts the Portal.
+- Tests: vitest 1,153, Portal 310, the browser suites, and `npm run test:e2e` (new: the whole shell
+  against a fake Portal). `fake-indexeddb` is a new dev dependency.
+
 ## 6.0.0+underspire.327: Speech that opens with a slash, and a reload keeps the session
 
 ### Actions
