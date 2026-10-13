@@ -25,6 +25,23 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.329: Nous hails and staff PMs in Activity
+
+### Webclient
+
+- **A Nous category in the Activity tab** ([`activity.svelte.ts`](evennia/web/webclient/client/src/lib/activity.svelte.ts),
+  [`ActivityPanel.svelte`](evennia/web/webclient/client/src/components/ActivityPanel.svelte)). The event
+  kinds `nous.hail` and `nous.pm` are labelled "Nous" and filtered under it. Before, any kind the client
+  did not know was labelled "NPC".
+- **A row with no actor names its `meta.sender`**, and the text filter searches it. A staff PM is sent
+  by an account, which is not a reference the feed can watch, so the game sends the account name in
+  `sender` and no actor. The row read "Unknown" before.
+- The empty feed reads "New activity will appear here.", since staff PMs are not player activity.
+
+### Migration
+
+None for the engine. A game that sends `nous.*` events or `sender` meta needs this client to label them.
+
 ## 6.0.0+underspire.328: The webclient keeps its log between visits
 
 ### Portal
