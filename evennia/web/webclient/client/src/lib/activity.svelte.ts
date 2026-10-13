@@ -1,7 +1,7 @@
 /** Ephemeral Activity state. No feed or watch data is written to browser storage. */
 export interface Reference { kind: "character" | "npc" | "location" | "handset" | "object"; id: number; name: string }
 export interface ActivityEvent {
-  id: string; seq: number; ts_ms: number; kind: "handset.direct" | "handset.group" | "looc" | "npc.action";
+  id: string; seq: number; ts_ms: number; kind: "handset.direct" | "handset.group" | "looc" | "npc.action" | "nous.hail" | "nous.pm";
   actor: Reference | null; targets: Reference[]; npc_targets: Reference[]; target_count: number;
   location: Reference | null; body: string; meta: Record<string, string | number>;
 }
@@ -11,7 +11,7 @@ export interface Role { allowed: boolean; can_puppet: boolean }
 export interface Snapshot { stream_id: string; last_seq: number; events: ActivityEvent[]; watches: Watches; role: Role }
 export interface Batch { stream_id: string; first_seq: number; last_seq: number; events: ActivityEvent[] }
 export type Requester = (ns: string, action: string, data?: unknown) => Promise<any>;
-export type Category = "all" | "text" | "looc" | "npc";
+export type Category = "all" | "text" | "looc" | "npc" | "nous";
 
 export class ActivityFeed {
   allowed = $state(false);
@@ -188,8 +188,9 @@ export class ActivityFeed {
     if (category === "text" && !event.kind.startsWith("handset.")) return false;
     if (category === "looc" && event.kind !== "looc") return false;
     if (category === "npc" && event.kind !== "npc.action") return false;
+    if (category === "nous" && !event.kind.startsWith("nous.")) return false;
     if (watched && !this.watched(event)) return false;
-    return !needle || [event.body, event.actor?.name, event.location?.name, ...event.targets.map((ref) => ref.name), ...event.npc_targets.map((ref) => ref.name), event.meta.group_name].some((value) => String(value ?? "").toLocaleLowerCase().includes(needle));
+    return !needle || [event.body, event.actor?.name, event.location?.name, ...event.targets.map((ref) => ref.name), ...event.npc_targets.map((ref) => ref.name), event.meta.group_name, event.meta.sender].some((value) => String(value ?? "").toLocaleLowerCase().includes(needle));
   }
 
   async search(query: string): Promise<void> {

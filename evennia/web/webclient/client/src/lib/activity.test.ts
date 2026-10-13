@@ -177,6 +177,19 @@ describe("Activity stream", () => {
     expect(feed.filtered("npc", true, "Toma")).toHaveLength(1);
   });
 
+  it("files Nous hails and staff PMs under Nous and finds a PM by its sender", async () => {
+    const hail = { ...event(1), kind: "nous.hail" as const };
+    const pm = { ...event(2), kind: "nous.pm" as const, actor: null, targets: [{ kind: "character" as const, id: 1, name: "Mara" }], meta: { sender: "Wren" } };
+    const feed = new ActivityFeed(async () => snapshot([hail, pm, event(3)]));
+    feed.setRole({ allowed: true, can_puppet: true });
+    feed.open();
+    await feed.ensureSubscribed();
+    expect(feed.filtered("nous", false, "")).toHaveLength(2);
+    expect(feed.filtered("nous", false, "wren").map((row) => row.id)).toEqual(["a:2"]);
+    feed.watches.characters = [{ id: 1, label: "Mara" }];
+    expect(feed.filtered("nous", true, "")).toHaveLength(2);
+  });
+
   it("marks a reconnect gap when the snapshot byte budget fits no new event", async () => {
     let reply = snapshot([event(100)]);
     const feed = new ActivityFeed(async () => reply);

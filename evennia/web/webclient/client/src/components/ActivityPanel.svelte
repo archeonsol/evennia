@@ -25,7 +25,7 @@
   const watchCount = $derived(activity.watches.characters.length + activity.watches.locations.length);
   const visible = $derived(settings.screenreader ? rows.map((row, index) => ({ index, start: 0, key: row.seq })) : virtualItems);
   const unseen = $derived(activity.countAfter(seenSeq, category, watched, filter));
-  const categories: { id: Category; label: string }[] = [{ id: "all", label: "All" }, { id: "text", label: "Text" }, { id: "looc", label: "LOOC" }, { id: "npc", label: "NPC" }];
+  const categories: { id: Category; label: string }[] = [{ id: "all", label: "All" }, { id: "text", label: "Text" }, { id: "looc", label: "LOOC" }, { id: "npc", label: "NPC" }, { id: "nous", label: "Nous" }];
 
   onMount(() => { activity.open(); return () => activity.close(); });
 
@@ -129,7 +129,7 @@
   function time(ms: number) {
     return new Date(ms).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
   }
-  function kind(kind: string) { return kind.startsWith("handset.") ? "Text" : kind === "looc" ? "LOOC" : "NPC"; }
+  function kind(kind: string) { return kind.startsWith("handset.") ? "Text" : kind === "looc" ? "LOOC" : kind.startsWith("nous.") ? "Nous" : "NPC"; }
 </script>
 
 <div class="activity" aria-label="Staff Activity">
@@ -174,7 +174,7 @@
   {#if activity.paused && activity.events[0]?.seq > activity.pauseCutoff}<div class="notice">Paused activity has rolled out of the feed.</div>{/if}
   <div class="feed" bind:this={scroll} onscroll={onScroll} onwheel={(event) => { if (event.deltaY < 0) following = false; }}>
     {#if !rows.length}
-      <p class="empty">{activity.loading ? "Loading activity…" : activity.paused ? "Feed paused. Resume to see new activity." : watched && !watchCount ? "Add a watch to see activity for a character or location." : filter || watched || category !== "all" ? "No activity matches these filters." : "New player activity will appear here."}</p>
+      <p class="empty">{activity.loading ? "Loading activity…" : activity.paused ? "Feed paused. Resume to see new activity." : watched && !watchCount ? "Add a watch to see activity for a character or location." : filter || watched || category !== "all" ? "No activity matches these filters." : "New activity will appear here."}</p>
     {/if}
     <div class="feed-space" style:height={settings.screenreader ? "auto" : `${totalSize}px`}>
       {#each visible as item (item.key)}
@@ -182,7 +182,7 @@
         {#if event}
           <div class:selected={selected === event.id} class="event" class:reader={settings.screenreader} data-index={item.index} style:transform={settings.screenreader ? "none" : `translateY(${item.start}px)`} use:measure>
             <button class="event-trigger" aria-expanded={selected === event.id} onclick={() => selected = selected === event.id ? null : event.id}>
-              <span class="event-top"><time datetime={new Date(event.ts_ms).toISOString()}>{time(event.ts_ms)}</time><span class="kind">{kind(event.kind)}</span><span class="summary"><strong>{event.actor?.name ?? "Unknown"}</strong>{#if event.kind === "handset.group"} → {event.meta.group_name}{:else if event.targets.length} → {event.targets.map((ref) => ref.name).join(", ")}{/if}</span></span>
+              <span class="event-top"><time datetime={new Date(event.ts_ms).toISOString()}>{time(event.ts_ms)}</time><span class="kind">{kind(event.kind)}</span><span class="summary"><strong>{event.actor?.name ?? event.meta.sender ?? "Unknown"}</strong>{#if event.kind === "handset.group"} → {event.meta.group_name}{:else if event.targets.length} → {event.targets.map((ref) => ref.name).join(", ")}{/if}</span></span>
               <span class="body" class:expanded={selected === event.id}>{event.body}</span>
               {#if event.location}<span class="location">{event.location.name}</span>{/if}
             </button>
