@@ -25,6 +25,22 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.330: Toasts stay long enough to read
+
+### Webclient
+
+- **A toast stays 20 seconds** ([`toasts.svelte.ts`](evennia/web/webclient/client/src/lib/toasts.svelte.ts)).
+  Before, kudos, milestone and mention toasts left after 7 seconds and ticket toasts after 12, and
+  players reported missing kudos. Every kind now shares one duration.
+- **The countdown pauses while the tab is hidden.** A toast that arrives in a background tab, or is
+  counting when the player switches away, waits until the tab is visible again. Hover and focus still
+  pause it as before.
+- `toasts.push()` no longer takes a duration: `push(kind, title, body, speak = true, open?)`.
+
+### Migration
+
+None for the engine. Shell code that passed a duration to `toasts.push()` must drop that argument.
+
 ## 6.0.0+underspire.329: Nous hails and staff PMs in Activity
 
 ### Webclient
