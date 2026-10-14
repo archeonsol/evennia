@@ -66,7 +66,7 @@ beforeEach(() => {
   vi.spyOn(connection, "sendCommand").mockImplementation((line: string) => {
     commands.push(line);
   });
-  vi.spyOn(toasts, "push").mockImplementation((kind, title, body, _ttl, _speak, open) => {
+  vi.spyOn(toasts, "push").mockImplementation((kind, title, body, _speak, open) => {
     pushed.push({ kind, title, body, open });
   });
   vi.spyOn(notify, "ping").mockImplementation(() => {});

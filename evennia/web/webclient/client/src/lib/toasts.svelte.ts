@@ -15,24 +15,36 @@ export interface Toast {
 }
 
 let seq = 0;
-const TTL = 7000;
+const TTL = 20000;
 
 class Toasts {
   list = $state<Toast[]>([]);
   private timers = new Map<number, { left: number; started: number; handle: ReturnType<typeof setTimeout> | null }>();
-  private held = false;
+  private pointerHeld = false;
+  private tabHidden = typeof document !== "undefined" && document.hidden;
+
+  constructor() {
+    // A toast that counts down in a background tab is never seen.
+    if (typeof document !== "undefined") {
+      document.addEventListener("visibilitychange", () => this.update(() => (this.tabHidden = document.hidden)));
+    }
+  }
+
+  private get paused(): boolean {
+    return this.pointerHeld || this.tabHidden;
+  }
 
   /**
    * Show a toast. `speak` false is for a toast whose news a screen reader
    * already heard another way (a mention echoed into the terminal); the stack
    * itself is not a live region, so nothing is said twice.
    */
-  push(kind: string, title: string, body: string, ttl = TTL, speak = true, open?: () => void): void {
+  push(kind: string, title: string, body: string, speak = true, open?: () => void): void {
     const id = ++seq;
     if (speak) announcer.now(body ? `${title}: ${body}` : title);
     this.list = [...this.list, { id, kind, title, body, open }];
-    this.timers.set(id, { left: ttl, started: Date.now(), handle: null });
-    if (!this.held) this.arm(id);
+    this.timers.set(id, { left: TTL, started: Date.now(), handle: null });
+    if (!this.paused) this.arm(id);
   }
 
   dismiss(id: number): void {
@@ -44,19 +56,26 @@ class Toasts {
 
   /** Stop every countdown while the player is looking at the toasts. */
   hold(): void {
-    if (this.held) return;
-    this.held = true;
+    this.update(() => (this.pointerHeld = true));
+  }
+
+  release(): void {
+    this.update(() => (this.pointerHeld = false));
+  }
+
+  private update(change: () => void): void {
+    const was = this.paused;
+    change();
+    if (!was && this.paused) this.stopAll();
+    else if (was && !this.paused) for (const id of this.timers.keys()) this.arm(id);
+  }
+
+  private stopAll(): void {
     for (const t of this.timers.values()) {
       if (t.handle) clearTimeout(t.handle);
       t.handle = null;
       t.left = Math.max(1500, t.left - (Date.now() - t.started));
     }
-  }
-
-  release(): void {
-    if (!this.held) return;
-    this.held = false;
-    for (const id of this.timers.keys()) this.arm(id);
   }
 
   private arm(id: number): void {

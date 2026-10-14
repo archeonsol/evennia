@@ -440,7 +440,7 @@ class Tickets {
       why === "reopened"
         ? `${whoIs(row)} wrote back`
         : `${row.title || row.label} (${presenceText(row, nowSeconds)})`;
-    toasts.push("ticket", title, body, 12000, true, () => {
+    toasts.push("ticket", title, body, true, () => {
       void this.openStaff(row.id);
       this.showTab("queue");
     });
@@ -454,7 +454,7 @@ class Tickets {
     const body = `${k.title || k.label || ""}${k.who ? ` (${k.who})` : ""}, ${mins} minutes, ${
       k.held ? "someone has it" : "nobody has it"
     }`;
-    toasts.push("ticket", title, body, 12000, true, () => {
+    toasts.push("ticket", title, body, true, () => {
       if (k.id) void this.openStaff(String(k.id));
       this.showTab("queue");
     });
@@ -465,7 +465,7 @@ class Tickets {
     const mine = Number(k.mine ?? 0);
     if (mine > 0) {
       const title = `${mine} ${mine === 1 ? "request has" : "requests have"} a reply you have not read`;
-      toasts.push("ticket", title, "Open My requests to read it.", 12000, true, () => this.showTab("mine"));
+      toasts.push("ticket", title, "Open My requests to read it.", true, () => this.showTab("mine"));
     }
     const open = Number(k.unanswered ?? 0);
     if (open > 0 && this.staff) {
@@ -474,7 +474,6 @@ class Tickets {
         "ticket",
         `${open} ${open === 1 ? "ticket is" : "tickets are"} unanswered`,
         nobody ? `${nobody} nobody has picked up.` : "",
-        12000,
         true,
         () => this.showTab("queue"),
       );
@@ -545,14 +544,14 @@ class Tickets {
     if (k.audience === "owner" && k.origin && k.origin !== "player" && k.news !== false && !openMine) {
       const title = k.origin === "system" ? `Update on ${about}` : `Staff replied: ${about}`;
       const body = k.origin === "system" ? preview : `${k.sender ?? "Staff"}: ${preview}`;
-      toasts.push("ticket", title, body, 12000, true, () => {
+      toasts.push("ticket", title, body, true, () => {
         void this.openMine(String(k.id));
         this.showTab("mine");
       });
       notify.ping(title, body, false);
     } else if (k.audience === "assignee" && k.origin === "player" && !openStaff) {
       const title = `${whoIs({ requester_name: k.sender, account_name: "" })} replied: ${about}`;
-      toasts.push("ticket", title, preview, 12000, true, () => {
+      toasts.push("ticket", title, preview, true, () => {
         void this.openStaff(String(k.id));
         this.showTab("queue");
       });
