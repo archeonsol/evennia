@@ -16,6 +16,8 @@ export interface Toast {
 
 let seq = 0;
 const TTL = 20000;
+// Toasts held in a hidden tab would otherwise stack up the whole screen.
+const MAX_SHOWN = 5;
 
 class Toasts {
   list = $state<Toast[]>([]);
@@ -45,6 +47,7 @@ class Toasts {
     this.list = [...this.list, { id, kind, title, body, open }];
     this.timers.set(id, { left: TTL, started: Date.now(), handle: null });
     if (!this.paused) this.arm(id);
+    while (this.list.length > MAX_SHOWN) this.dismiss(this.list[0].id);
   }
 
   dismiss(id: number): void {

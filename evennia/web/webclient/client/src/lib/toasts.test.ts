@@ -66,4 +66,10 @@ describe("how long a toast stays", () => {
     vi.advanceTimersByTime(60_000);
     expect(toasts.list).toHaveLength(1);
   });
+
+  it("keeps only the newest five", () => {
+    doc.setHidden(true);
+    for (let i = 1; i <= 7; i++) toasts.push("kudos", `Kudos ${i}`, "", false);
+    expect(toasts.list.map((t) => t.title)).toEqual(["Kudos 3", "Kudos 4", "Kudos 5", "Kudos 6", "Kudos 7"]);
+  });
 });
