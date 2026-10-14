@@ -30,11 +30,14 @@ matching release procedure.
 ### Webclient
 
 - **A toast stays 20 seconds** ([`toasts.svelte.ts`](evennia/web/webclient/client/src/lib/toasts.svelte.ts)).
-  Before, kudos, milestone and mention toasts left after 7 seconds and ticket toasts after 12, and
-  players reported missing kudos. Every kind now shares one duration.
+  Before, ticket toasts left after 12 seconds and every other toast (kudos, milestone, mention,
+  popup blocked, channel error) after 7, and players reported missing kudos. Every kind now shares one
+  duration.
 - **The countdown pauses while the tab is hidden.** A toast that arrives in a background tab, or is
   counting when the player switches away, waits until the tab is visible again. Hover and focus still
   pause it as before.
+- **At most five toasts show.** A sixth drops the oldest, so a tab left hidden for hours does not come
+  back to a stack up the whole screen.
 - `toasts.push()` no longer takes a duration: `push(kind, title, body, speak = true, open?)`.
 
 ### Migration
