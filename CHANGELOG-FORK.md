@@ -25,6 +25,35 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.331: Put and give refuse what does not hold or receive
+
+### Actions
+
+- **`put` asks the container for `put_in`** ([`objects.py`](evennia/actions/default/objects.py)).
+  `CharacterObjectRules.check_put_character` refuses with "You can't put anything there." unless
+  `container.access(caller, "put_in")`. The rule runs on the actor, so a character, an exit or any
+  object with no put rules answers too. Before, the only gate was `get` access on the container
+  (`ContainerPutRules.check_put_container`), and every object grants `get`, so anything you could
+  pick up took anything you carried: a knife went into a pistol.
+- **`give` asks the target for `receive`.** `check_give` refuses with "You can't give anything to
+  <target>." unless `target.access(caller, "receive")`. It also searches only what stands in the
+  room (`_give_candidates`): exits, the room itself ("here") and what the giver carries are no
+  longer targets. Before, any object in reach took the gift, and one given to an exit landed in the
+  exit's contents.
+- **Neither operation has a default on `DefaultObject`**, so both fail closed.
+  `DefaultCharacter.authorization_policies` grants `"receive": Always()`.
+- `ContainerPutRules.check_put_container` no longer reads `get` access, `db.allow_put_while_get_false`
+  or `fixture_allows_put_without_get`. A fixture that cannot be picked up holds things when it
+  grants `put_in`.
+
+### Migration
+
+A game must grant `put_in` on every typeclass that holds things, or `put` refuses all of them. A
+class-level `authorization_policies` entry works, or a policy template bound to the object kind
+(the containers contrib's `get_from` pattern). A non-character that takes gifts needs `receive`.
+Drop any `allow_put_while_get_false` and `fixture_allows_put_without_get` flags; nothing reads
+them.
+
 ## 6.0.0+underspire.330: Toasts stay long enough to read
 
 ### Webclient
