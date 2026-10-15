@@ -137,11 +137,10 @@ class Give(Action):
     """Give carried object(s) to a character in the current room.
 
     |wgive <object> = <target>|n / |wgive <object> to <target>|n /
-    |wgive <count> <object> = <target>|n. The target is looked for among what
-    stands in the room (never the giver, the room or an exit) and must grant the
-    giver ``receive`` access; characters do by default and other objects do not.
-    The target must accept each item; successful transfers move it from the
-    caller's inventory to the target.
+    |wgive <count> <object> = <target>|n. The target must be someone standing in
+    the room; an object, the room or an exit takes nothing. The target must
+    accept each item; successful transfers move it from the caller's inventory
+    to the target.
     """
 
     __primary_handler__ = DefaultCharacter
@@ -195,10 +194,9 @@ class Put(Action):
     """Put an item into a container you carry or one in the current room.
 
     |wput <item> in <container>|n / |wput <item> into <container>|n. The item
-    normally must be carried. The container must grant the actor ``put_in``
-    access, which no object has by default: a typeclass that holds things opts
-    in through its authorization policies. The container's rules then decide
-    whether it accepts the item and perform the transfer.
+    normally must be carried, and the container must be something that holds
+    things. The container's rules then decide whether it accepts the item and
+    perform the transfer.
     """
 
     __primary_handler__ = DefaultObject
