@@ -25,7 +25,12 @@ class DefaultCharacter(DefaultObject):
     # Tuple of types used for indexing inventory contents. Characters generally wouldn't be in
     # anyone's inventory, but this also governs displays in room contents.
     _content_types = ("character",)
-    from evennia.authorization.policy import Never, PredicateRequirement, RequiresCapability
+    from evennia.authorization.policy import (
+        Always,
+        Never,
+        PredicateRequirement,
+        RequiresCapability,
+    )
 
     authorization_policies = {
         **DefaultObject.authorization_policies,
@@ -34,6 +39,7 @@ class DefaultCharacter(DefaultObject):
         "edit": RequiresCapability("engine.object.edit"),
         "get": Never(),
         "call": Never(),
+        "receive": Always(),
         "teleport": RequiresCapability("engine.object.teleport"),
         "teleport_here": RequiresCapability("engine.object.teleport_here"),
     }

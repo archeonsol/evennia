@@ -259,3 +259,83 @@ class TestCheckStopsAfterItsOwnMessage(unittest.TestCase):
 
         self.assertEqual(char.messages, ["The chest is locked."])
         self.assertEqual(self._carry_out_fired(trace), [])
+
+
+class TestOnlyWhatHoldsThingsTakesThem(unittest.TestCase):
+    """``put`` needs ``put_in`` on the container and ``give`` needs ``receive`` on the target."""
+
+    def _char(self):
+        room = FakeObj(key="room")
+        char = _MessagingChar()
+        char.location = room
+        return char, make_actor(char), room
+
+    def test_a_container_without_put_in_refuses(self):
+        char, actor, _room = self._char()
+        pistol = _Container(key="pistol", access={"put_in": False})
+        coin = _coin(char, char)
+        trace = _dispatch(Put(target=coin, container=pistol), actor, [char, pistol])
+        self.assertEqual(char.messages, ["You can't put anything there."])
+        self.assertEqual(trace.outcome, "blocked")
+        coin.move_to_async.assert_not_awaited()
+
+    def test_a_person_refuses_without_container_rules(self):
+        """The gate runs on the actor, so a target with no put rules still answers."""
+        char, actor, _room = self._char()
+        bob = FakeChar(key="bob", access={"put_in": False})
+        coin = _coin(char, char)
+        _dispatch(Put(target=coin, container=bob), actor, [char, bob])
+        self.assertEqual(char.messages, ["You can't put anything there."])
+        coin.move_to_async.assert_not_awaited()
+
+    def test_a_container_that_cannot_be_picked_up_still_holds(self):
+        char, actor, _room = self._char()
+        chest = _Container(key="chest", access={"get": False})
+        coin = _coin(char, char)
+        _dispatch(Put(target=coin, container=chest), actor, [char, chest])
+        coin.move_to_async.assert_awaited_once_with(chest, quiet=True)
+
+    def test_a_target_without_receive_refuses(self):
+        char, actor, room = self._char()
+        coin = _coin(char, char)
+        chair = FakeObj(key="chair", location=room, access={"receive": False})
+        room.contents = [char, chair]
+        char.search_map["chair"] = chair
+        trace = _dispatch(Give(mode="plain", item_spec="coin", target_spec="chair"), actor, [char])
+        self.assertEqual(char.messages, ["You can't give anything to chair."])
+        self.assertEqual(trace.outcome, "blocked")
+        coin.move_to_async.assert_not_awaited()
+
+
+class TestGiveLooksOnlyInTheRoom(unittest.TestCase):
+    """``give`` searches what stands in the room: not exits, not the room, not your bag."""
+
+    def test_candidates_leave_out_exits_and_carried_things(self):
+        from evennia.actions.default.objects import _give_candidates
+
+        room = FakeObj(key="room")
+        char = FakeChar(location=room)
+        bob = FakeChar(key="bob", location=room)
+        north = FakeObj(key="north", location=room)
+        north.destination = FakeObj(key="elsewhere")
+        bag = FakeObj(key="bag", location=char)
+        char.contents = [bag]
+        room.contents = [char, bob, north]
+        self.assertEqual(_give_candidates(char), [char, bob])
+
+
+class TestDefaultPolicies(unittest.TestCase):
+    """Objects neither hold nor receive by default; characters receive."""
+
+    def test_objects_opt_in(self):
+        from evennia.objects.object import DefaultObject
+
+        self.assertNotIn("put_in", DefaultObject.authorization_policies)
+        self.assertNotIn("receive", DefaultObject.authorization_policies)
+
+    def test_characters_receive(self):
+        from evennia.authorization.policy import Always
+        from evennia.objects.character import DefaultCharacter
+
+        self.assertIsInstance(DefaultCharacter.authorization_policies["receive"], Always)
+        self.assertNotIn("put_in", DefaultCharacter.authorization_policies)

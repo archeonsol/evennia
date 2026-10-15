@@ -137,8 +137,11 @@ class Give(Action):
     """Give carried object(s) to a character in the current room.
 
     |wgive <object> = <target>|n / |wgive <object> to <target>|n /
-    |wgive <count> <object> = <target>|n. The target must accept each item;
-    successful transfers move it from the caller's inventory to the target.
+    |wgive <count> <object> = <target>|n. The target is looked for among what
+    stands in the room (never the giver, the room or an exit) and must grant the
+    giver ``receive`` access; characters do by default and other objects do not.
+    The target must accept each item; successful transfers move it from the
+    caller's inventory to the target.
     """
 
     __primary_handler__ = DefaultCharacter
@@ -163,6 +166,16 @@ class Give(Action):
         return cls(mode="plain", count=count, item_spec=item_spec, target_spec=target_spec)
 
 
+def _give_candidates(caller):
+    """Where ``give`` looks for its receiver: what stands in the room, exits left out.
+
+    The giver stays in, so naming yourself is answered rather than not found.
+    """
+    location = caller.location
+    nearby = (getattr(location, "contents", None) or ()) if location is not None else ()
+    return [obj for obj in nearby if not getattr(obj, "destination", None)]
+
+
 def _reachable_containers(actor):
     """Where ``put`` looks for its container: what the body carries, then the room.
 
@@ -182,8 +195,10 @@ class Put(Action):
     """Put an item into a container you carry or one in the current room.
 
     |wput <item> in <container>|n / |wput <item> into <container>|n. The item
-    normally must be carried; the container's rules decide whether it accepts
-    the item and perform the transfer.
+    normally must be carried. The container must grant the actor ``put_in``
+    access, which no object has by default: a typeclass that holds things opts
+    in through its authorization policies. The container's rules then decide
+    whether it accepts the item and perform the transfer.
     """
 
     __primary_handler__ = DefaultObject
@@ -418,7 +433,7 @@ class CharacterObjectRules:
         )
         if not to_give:
             return SILENT_FAIL
-        target = caller.search(action.target_spec)
+        target = caller.search(action.target_spec, candidates=_give_candidates(caller))
         if not target:
             return SILENT_FAIL
         to_give = utils.make_iter(to_give)
@@ -427,6 +442,8 @@ class CharacterObjectRules:
             return action.block(
                 0, f"You keep {plural if len(to_give) > 1 else singular} to yourself."
             )
+        if not target.access(caller, "receive"):
+            return action.block(0, f"You can't give anything to {target.get_display_name(caller)}.")
         from evennia.utils.utils import is_veto
 
         for obj in to_give:
@@ -478,6 +495,8 @@ class CharacterObjectRules:
             return action.block(0, "You can't put something into yourself.")
         if obj == container:
             return action.block(0, "You can't put something into itself.")
+        if not container.access(caller, "put_in"):
+            return action.block(0, "You can't put anything there.")
         accepts_room_target = bool(getattr(type(container), "accepts_room_character_put", False))
         if obj.location != caller and not accepts_room_target:
             return action.block(0, "You're not holding that.")
@@ -519,12 +538,6 @@ class ContainerPutRules:
         caller = getattr(actor, "character", None)
         if caller is None:
             return SKIP
-        if not self.access(caller, "get"):
-            allow_put = getattr(self.db, "allow_put_while_get_false", False) or getattr(
-                type(self), "fixture_allows_put_without_get", False
-            )
-            if not allow_put:
-                return action.block(0, "You can't put anything in that.")
         obj = action.target
         from evennia.utils.utils import is_veto
 
