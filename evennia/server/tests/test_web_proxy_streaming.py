@@ -14,6 +14,11 @@ class _Writer:
     def __init__(self):
         self.writes = []
 
+    def is_closing(self):
+        """Model a client socket that is still open."""
+
+        return False
+
     def write(self, data):
         """Keep one wire fragment."""
 
