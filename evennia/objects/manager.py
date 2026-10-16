@@ -363,10 +363,9 @@ class ObjectDBManager(TypedObjectManager):
         Answer a dbref lookup from the idmapper when the object is already loaded.
 
         A dbref lookup used to cost a query even for an object that is sitting in
-        memory, and one that is gone from the database cost two, because the miss
-        fell through to a name search. Game code asks by dbref constantly, so a
-        tick that resolves a few hundred stored ids paid for it on the reactor.
-        The idmapper already answers ``.get(pk=...)`` this way.
+        memory. Game code asks by dbref constantly, so a tick that resolves a few
+        hundred stored ids paid for it on the reactor. The idmapper already answers
+        ``.get(pk=...)`` this way.
 
         Args:
             dbref (int): The primary key to look up.
@@ -499,8 +498,11 @@ class ObjectDBManager(TypedObjectManager):
                 dmatch = dbref_match[0]
                 if not candidates or dmatch in candidates:
                     return dbref_match
-                else:
-                    return self.none()
+            # A dbref names exactly one object. If that object is gone, or is not among
+            # the candidates, there is nothing else to find. Searching for the text
+            # "#123" as a name would scan every object and every alias tag (about 40 ms
+            # on the live game) and always come back empty.
+            return self.none()
 
         if typeclass:
             # typeclass may be a string, a typeclass, or a list

@@ -354,6 +354,29 @@ class TestDbrefSearchUsesTheCache(BaseEvenniaTest):
     def test_a_missing_dbref_finds_nothing(self):
         self.assertEqual(list(ObjectDB.objects.search_object("#99999999")), [])
 
+    def test_a_missing_dbref_costs_one_query_and_runs_no_name_search(self):
+        with patch.object(ObjectDB.objects, "get_objs_with_key_or_alias") as by_name:
+            with self.assertNumQueries(1):
+                self.assertEqual(list(ObjectDB.objects.search_object("#99999999")), [])
+
+        by_name.assert_not_called()
+
+    def test_a_dbref_outside_the_candidates_runs_no_name_search(self):
+        with patch.object(ObjectDB.objects, "get_objs_with_key_or_alias") as by_name:
+            found = ObjectDB.objects.search_object(f"#{self.obj1.id}", candidates=[self.obj2])
+
+        self.assertEqual(list(found), [])
+        by_name.assert_not_called()
+
+    def test_an_object_keyed_like_a_dbref_is_only_found_with_dbref_lookup_off(self):
+        odd = create.create_object(DefaultObject, key="#99999998")
+
+        self.assertEqual(list(ObjectDB.objects.search_object("#99999998")), [])
+        self.assertEqual(
+            [obj.id for obj in ObjectDB.objects.search_object("#99999998", use_dbref=False)],
+            [odd.id],
+        )
+
     def test_candidates_still_restrict_a_cached_match(self):
         dbref = f"#{self.obj1.id}"
 
