@@ -327,13 +327,12 @@ describe("alerts and the login line", () => {
   it("says a ticket has gone unanswered in plain words", () => {
     tickets.handleOob("ticket_alert", [], { id: "a", ref: "#1042", label: "Player Request", title: "The door", who: "Kade", age_mins: 95, level: "first", held: false });
     expect(pushed[0].title).toBe("#1042 is still unanswered");
-    expect(pushed[0].body).toBe("The door (Kade), 95 minutes, nobody has it");
+    expect(pushed[0].body).toBe("The door (Kade), 95 minutes");
   });
 
   it("says a ticket has waited too long once it is well past its time", () => {
     tickets.handleOob("ticket_alert", [], { id: "a", ref: "#1042", label: "Player Request", title: "The door", who: "Kade", age_mins: 400, level: "warn", held: true });
     expect(pushed[0].title).toBe("#1042 has waited too long");
-    expect(pushed[0].body).toContain("someone has it");
   });
 
   it("tells a player how many requests hold a reply they have not read", () => {
@@ -344,11 +343,11 @@ describe("alerts and the login line", () => {
     expect(pushed[0].title).toBe("1 request has a reply you have not read");
   });
 
-  it("tells staff what is unanswered and what nobody has", () => {
+  it("tells staff how many tickets are unanswered", () => {
     tickets.staff = true;
     tickets.handleOob("ticket_unread", [], { mine: 0, unanswered: 4, unclaimed: 3 });
     expect(pushed[0].title).toBe("4 tickets are unanswered");
-    expect(pushed[0].body).toBe("3 nobody has picked up.");
+    expect(pushed[0].body).toBe("");
   });
 
   it("says nothing when there is nothing to say", () => {

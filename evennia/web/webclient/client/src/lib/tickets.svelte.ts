@@ -451,9 +451,7 @@ class Tickets {
     const mins = Number(k.age_mins ?? 0);
     const ref = String(k.ref || "A ticket");
     const title = k.level === "warn" ? `${ref} has waited too long` : `${ref} is still unanswered`;
-    const body = `${k.title || k.label || ""}${k.who ? ` (${k.who})` : ""}, ${mins} minutes, ${
-      k.held ? "someone has it" : "nobody has it"
-    }`;
+    const body = `${k.title || k.label || ""}${k.who ? ` (${k.who})` : ""}, ${mins} minutes`;
     toasts.push("ticket", title, body, true, () => {
       if (k.id) void this.openStaff(String(k.id));
       this.showTab("queue");
@@ -469,11 +467,10 @@ class Tickets {
     }
     const open = Number(k.unanswered ?? 0);
     if (open > 0 && this.staff) {
-      const nobody = Number(k.unclaimed ?? 0);
       toasts.push(
         "ticket",
         `${open} ${open === 1 ? "ticket is" : "tickets are"} unanswered`,
-        nobody ? `${nobody} nobody has picked up.` : "",
+        "",
         true,
         () => this.showTab("queue"),
       );
