@@ -215,7 +215,12 @@ class Actor:
                 # Every candidate is hidden: fall through to the sugar so the
                 # game emits its standard not-found handling, not a prompt
                 # listing objects the searcher cannot perceive.
-        result = eff.search(name, *args, **kwargs)
+        search = getattr(eff, "search", None)
+        if search is None:
+            # A session with no body or account yet (the connect screen) has nothing to
+            # search from, so nothing is found.
+            return None
+        result = search(name, *args, **kwargs)
         if isinstance(result, (list, tuple)):
             return perception.filter_visible(eff, result)
         return result if perception.is_visible(eff, result) else None

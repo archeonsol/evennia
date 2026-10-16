@@ -356,6 +356,56 @@ class EnsureAuthorizationTest(InvalidationTestBase):
         ):
             self.assertFalse(asyncio.run(storage.ensure_authorization((object(),), (object(),))))
 
+    @staticmethod
+    def _run_under_twisted(call):
+        """Start ``call()`` with ``ensureDeferred`` inside an asyncio task, as a nested dispatch is.
+
+        Twisted drives that coroutine while asyncio's current task is still the outer one.
+        Returns what the coroutine produced (a value, or a ``Failure``).
+        """
+        from twisted.internet.defer import ensureDeferred
+
+        async def outer():
+            outcome = []
+            ensureDeferred(call()).addBoth(outcome.append)
+            await asyncio.sleep(0.05)
+            return outcome
+
+        return asyncio.run(outer())
+
+    @override_settings(AUTHORIZATION_OFFLOOP_SNAPSHOTS=True)
+    def test_cold_fact_under_a_twisted_driven_coroutine_returns_false(self):
+        async def flush(_state):
+            await asyncio.sleep(0.01)
+            return True
+
+        with (
+            patch.object(invalidation, "start", return_value=True),
+            patch.object(storage, "_prewarm_request", return_value=(False, {})),
+            patch.object(storage, "_flush_authorization_prewarm", side_effect=flush),
+        ):
+            outcome = self._run_under_twisted(
+                lambda: storage.ensure_authorization((object(),), (object(),))
+            )
+
+        self.assertEqual(outcome, [False])
+
+    @override_settings(AUTHORIZATION_OFFLOOP_SNAPSHOTS=True)
+    def test_prewarm_under_a_twisted_driven_coroutine_returns_false(self):
+        async def flush(_state):
+            await asyncio.sleep(0.01)
+            return True
+
+        with (
+            patch.object(storage, "_prewarm_request", return_value=(False, {})),
+            patch.object(storage, "_flush_authorization_prewarm", side_effect=flush),
+        ):
+            outcome = self._run_under_twisted(
+                lambda: storage.prewarm_authorization((object(),), (object(),))
+            )
+
+        self.assertEqual(outcome, [False])
+
     @override_settings(AUTHORIZATION_PUSH_INVALIDATION=False)
     def test_without_push_delegates_to_prewarm(self):
         with patch.object(storage, "prewarm_authorization", return_value=True) as prewarm:
