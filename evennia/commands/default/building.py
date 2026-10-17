@@ -1715,7 +1715,15 @@ class CmdSetAttribute(ObjManipCommand):
     def view_attr(self, obj, attr, category):
         """
         Look up the value of an attribute and return a string displaying it.
+        Markup in the value is escaped, so it reads as it was set.
         """
+        global _FUNCPARSER
+        if not _FUNCPARSER:
+            _FUNCPARSER = funcparser.FuncParser(settings.FUNCPARSER_OUTGOING_MESSAGES_MODULES)
+
+        def as_set(val):
+            return _FUNCPARSER.parse(ansi_raw(utils.to_str(val)), escape=True)
+
         nested = False
         for key, nested_keys in self.split_nested_attr(attr):
             nested = True
@@ -1728,11 +1736,11 @@ class CmdSetAttribute(ObjManipCommand):
                             val = deep[nested_keys[-1]]
                         except (IndexError, KeyError, TypeError):
                             continue
-                        return f"\nAttribute {obj.name}/|w{attr}|n [category:{category}] = {val}"
+                        return f"\nAttribute {obj.name}/|w{attr}|n [category:{category}] = {as_set(val)}"
                 else:
                     val = obj.attributes.get(key, category=category)
                     if val:
-                        return f"\nAttribute {obj.name}/|w{attr}|n [category:{category}] = {val}"
+                        return f"\nAttribute {obj.name}/|w{attr}|n [category:{category}] = {as_set(val)}"
         error = f"\nAttribute {obj.name}/|w{attr}|n [category:{category}] does not exist."
         if nested:
             error += " (Nested lookups attempted)"

@@ -949,6 +949,12 @@ class TestBuilding(BaseEvenniaCommandTest):
             "Obj2/test2",
             "Attribute Obj2/test2 [category:None] = value2",
         )
+        self.obj2.db.colored = "|rred|n $you()"
+        self.call(
+            building.CmdSetAttribute(),
+            "Obj2/colored",
+            r"Attribute Obj2/colored [category:None] = |rred|n \$you()",
+        )
         self.call(
             building.CmdSetAttribute(),
             "Obj2/NotFound",
