@@ -5,14 +5,13 @@ from __future__ import annotations
 from django.conf import settings
 
 from evennia.authorization.storage import load_grants
-from evennia.utils import funcparser, search, utils
-from evennia.utils.ansi import raw as ansi_raw
+from evennia.utils import search, utils
 from evennia.utils.dbserialize import deserialize
 from evennia.utils.utils import crop, display_len, format_grid, inherits_from
 
-__all__ = ["ExamineFormatter", "search_examine_target"]
+from .attributes import as_typed
 
-_FUNCPARSER = None
+__all__ = ["ExamineFormatter", "search_examine_target"]
 
 
 def search_examine_target(caller, query, object_type, switches=()):
@@ -72,9 +71,6 @@ class ExamineFormatter:
 
     def format_single_attribute(self, attr, detail=False, obj=None):
         """Format one persistent/non-persistent attribute."""
-        global _FUNCPARSER
-        if _FUNCPARSER is None:
-            _FUNCPARSER = funcparser.FuncParser(settings.FUNCPARSER_OUTGOING_MESSAGES_MODULES)
         key, category, value = attr.db_key, attr.db_category, attr.value
         strvalue = getattr(attr, "strvalue", None)
         value_suffix = ""
@@ -82,7 +78,7 @@ class ExamineFormatter:
             value, value_suffix = strvalue, " |B[strvalue]|n"
         value_type = self.attribute_value_type(value)
         type_suffix = f" |B[type:{value_type}]|n{value_suffix}" if value_type else value_suffix
-        rendered = _FUNCPARSER.parse(ansi_raw(utils.to_str(value)), escape=True)
+        rendered = as_typed(value)
         if detail:
             return (
                 f"Attribute {obj.name}/{self.header_color}{key}|n "

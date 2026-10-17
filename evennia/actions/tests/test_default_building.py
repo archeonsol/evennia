@@ -7,6 +7,8 @@ import unittest
 from types import SimpleNamespace
 from unittest import mock
 
+from django.test import override_settings
+
 from twisted.internet.defer import Deferred
 
 from evennia.actions.default import python_console, roleplay, script_paging, system
@@ -67,8 +69,11 @@ class CategoryAttributes:
     def remove(self, key, category=None):
         self.values.pop((key, category), None)
 
-    def clear(self):
-        self.values.clear()
+    def clear(self, category=None):
+        if category is None:
+            self.values.clear()
+        else:
+            self.values = {k: v for k, v in self.values.items() if k[1] != category}
 
     def all(self):
         return []
@@ -204,12 +209,81 @@ class TestSetAndAlias(unittest.TestCase):
         self._set("box/data['items'][+] : meta = 2")
         self.assertEqual(self.obj.attributes.get("data", category="meta"), {"items": [1, 2]})
 
-    def test_view_shows_whole_value_with_markup_escaped(self):
+    def _view_desc(self):
         desc = "|rA red coat|n " + "with long seams " * 10 + "fits $you()."
         self.obj.attributes.values[("desc", None)] = desc
         self._set("box/desc")
-        shown = "\n".join(map(str, self.char.messages))
-        self.assertIn("||rA red coat||n " + "with long seams " * 10 + r"fits \$you().", shown)
+        return "\n".join(map(str, self.char.messages))
+
+    @override_settings(FUNCPARSER_PARSE_OUTGOING_MESSAGES_ENABLED=False)
+    def test_view_shows_whole_value_with_color_escaped(self):
+        shown = self._view_desc()
+        self.assertIn("||rA red coat||n " + "with long seams " * 10 + "fits $you().", shown)
+
+    @override_settings(FUNCPARSER_PARSE_OUTGOING_MESSAGES_ENABLED=True)
+    def test_view_escapes_func_calls_when_outgoing_text_is_parsed(self):
+        self.assertIn(r"fits \$you().", self._view_desc())
+
+    @override_settings(FUNCPARSER_PARSE_OUTGOING_MESSAGES_ENABLED=False)
+    def test_set_confirmation_shows_markup_as_typed(self):
+        self._set('box/desc = "A |rred|n coat"')
+        self.assertIn("= A ||rred||n coat", "\n".join(map(str, self.char.messages)))
+
+    def test_unparseable_literal_is_stored_as_text_not_an_error(self):
+        self._set("box/x = {[1]: 2}")
+        self.assertEqual(self.obj.attributes.get("x"), "{[1]: 2}")
+
+    def test_list_index_out_of_range_is_reported(self):
+        self.obj.attributes.add("items", [1, 2])
+        self._set("box/items[5] = 3")
+        self.assertEqual(self.obj.attributes.get("items"), [1, 2])
+        self.assertIn("Could not set box/", "\n".join(map(str, self.char.messages)))
+
+    def test_wipe_with_category_wipes_only_that_category(self):
+        self.obj.attributes.add("hp", 5)
+        self.obj.attributes.add("hp", 9, category="stats")
+        self.obj.attributes.add("str", 3, category="stats")
+        dispatch(Wipe.parse("box:stats", self.actor, verb="@wipe"), self.actor, [self.char])
+        self.assertEqual(self.obj.attributes.get("hp"), 5)
+        self.assertFalse(self.obj.attributes.has("str", category="stats"))
+
+    def test_wipe_named_attribute_in_category(self):
+        self.obj.attributes.add("hp", 5)
+        self.obj.attributes.add("hp", 9, category="stats")
+        dispatch(Wipe.parse("box/hp:stats", self.actor, verb="@wipe"), self.actor, [self.char])
+        self.assertEqual(self.obj.attributes.get("hp"), 5)
+        self.assertFalse(self.obj.attributes.has("hp", category="stats"))
+
+    def test_wipe_reports_a_missing_attribute(self):
+        dispatch(Wipe.parse("box/nothing", self.actor, verb="@wipe"), self.actor, [self.char])
+        self.assertIn("has no attribute nothing", "\n".join(map(str, self.char.messages)))
+
+    def test_cpattr_move_swap_keeps_both_values(self):
+        self.obj.attributes.add("x", "X")
+        self.obj.attributes.add("y", "Y")
+        action = CpAttr.parse("box/x/y = box/y/x", self.actor, switches=("move",), verb="@cpattr")
+        dispatch(action, self.actor, [self.char])
+        self.assertEqual(self.obj.attributes.get("x"), "Y")
+        self.assertEqual(self.obj.attributes.get("y"), "X")
+
+    def test_alias_delete_without_name_is_refused(self):
+        self.obj.aliases.add(["crate", "chest"])
+        dispatch(
+            SetObjAlias.parse("box", self.actor, switches=("delete",), verb="@alias"),
+            self.actor,
+            [self.char],
+        )
+        self.assertEqual(self.obj.aliases.all(), ["crate", "chest"])
+        self.assertIn("Usage: alias/delete", "\n".join(map(str, self.char.messages)))
+
+    def test_alias_delete_ignores_case(self):
+        self.obj.aliases.add(["crate"])
+        dispatch(
+            SetObjAlias.parse("box = Crate", self.actor, switches=("delete",), verb="@alias"),
+            self.actor,
+            [self.char],
+        )
+        self.assertEqual(self.obj.aliases.all(), [])
 
     def test_dbref_search_value_requires_control(self):
         target = FakeObj("target", access={"control": False, "edit": False})
@@ -262,6 +336,17 @@ class TestSetAndAlias(unittest.TestCase):
         save = editor.call_args.kwargs["savefunc"]
         save(self.char, "changed")
         self.assertEqual(self.obj.attributes.get("count"), "changed")
+
+    def test_non_string_edit_enter_takes_the_default_yes(self):
+        self.obj.attributes.add("count", 3)
+        answer = Deferred()
+        answer.callback("")
+        with (
+            mock.patch.object(engine_module, "_get_input_future", return_value=answer),
+            mock.patch.object(rules_module, "EvEditor") as editor,
+        ):
+            self._set("box/count", switches=("edit",))
+        editor.assert_called_once()
 
     def test_editor_save_rechecks_account_and_object_authority(self):
         self.obj.attributes.add("note", "old")

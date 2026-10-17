@@ -11,7 +11,7 @@ from evennia.utils import funcparser, search, utils
 from evennia.utils.ansi import raw as ansi_raw
 from evennia.utils.utils import variable_from_module
 
-__all__ = ["AttributeOperations", "convert_from_string", "search_typed"]
+__all__ = ["AttributeOperations", "as_typed", "convert_from_string", "search_typed"]
 
 LIST_APPEND_CHAR = "+"
 _NESTED_RE = re.compile(r"\[.*?\]")
@@ -20,18 +20,31 @@ _ATTRFUNCPARSER = None
 _OUTGOING_FUNCPARSER = None
 
 
+def as_typed(value):
+    """``value`` as text that shows its markup instead of rendering it.
+
+    Color codes are escaped. ``$func()`` calls are escaped only when outgoing
+    messages are parsed for them; otherwise the escape would show as a ``\\``.
+    """
+    global _OUTGOING_FUNCPARSER
+    text = ansi_raw(utils.to_str(value))
+    if not settings.FUNCPARSER_PARSE_OUTGOING_MESSAGES_ENABLED:
+        return text
+    if _OUTGOING_FUNCPARSER is None:
+        _OUTGOING_FUNCPARSER = funcparser.FuncParser(settings.FUNCPARSER_OUTGOING_MESSAGES_MODULES)
+    return _OUTGOING_FUNCPARSER.parse(text, escape=True)
+
+
 def convert_from_string(caller, value):
     """Convert a wire string to a Python literal, falling back to text."""
     try:
         return ast.literal_eval(value)
-    except (SyntaxError, ValueError):
+    except (SyntaxError, ValueError, TypeError, MemoryError, RecursionError):
         value = utils.to_str(value)
         caller.msg(
-            f'|RNote: name "|r{value}|R" was converted to a string. Make sure this is acceptable.'
+            f'|RNote: "|n{as_typed(value)}|R" was stored as a string. Make sure this is acceptable.|n'
         )
         return value
-    except Exception as err:  # noqa: BLE001 - preserve mature command feedback
-        return f"|RUnknown error in evaluating Attribute: {err}"
 
 
 def parse_attribute_value(caller, value):
@@ -113,11 +126,6 @@ class AttributeOperations:
 
         Markup in the value is escaped, so it reads as it was set.
         """
-        global _OUTGOING_FUNCPARSER
-        if _OUTGOING_FUNCPARSER is None:
-            _OUTGOING_FUNCPARSER = funcparser.FuncParser(
-                settings.FUNCPARSER_OUTGOING_MESSAGES_MODULES
-            )
         nested = False
         for key, nested_keys in self.split_nested_attr(attr):
             nested = nested or bool(nested_keys)
@@ -132,8 +140,7 @@ class AttributeOperations:
                     value = deep[nested_keys[-1]]
                 except (IndexError, KeyError, TypeError):
                     continue
-            value = _OUTGOING_FUNCPARSER.parse(ansi_raw(utils.to_str(value)), escape=True)
-            return f"\nAttribute {obj.name}/|w{attr}|n [category:{category}] = {value}"
+            return f"\nAttribute {obj.name}/|w{attr}|n [category:{category}] = {as_typed(value)}"
         suffix = " (Nested lookups attempted)" if nested else ""
         return f"\nAttribute {obj.name}/|w{attr}|n [category:{category}] does not exist.{suffix}"
 
@@ -187,8 +194,8 @@ class AttributeOperations:
                     break
             try:
                 deep[access_key] = value
-            except TypeError as err:
-                return f"\n{err} - {deep}"
+            except (TypeError, IndexError) as err:
+                return f"\nCould not set {obj.name}/|w{original_attr}|n: {err}."
             value, attr, done = stored, key, True
             break
         verb = "Modified" if obj.attributes.has(attr, category) else "Created"
@@ -196,5 +203,5 @@ class AttributeOperations:
             obj.attributes.add(attr, value, category=category)
         return (
             f"\n{verb} attribute {obj.name}/|w{original_attr if done else attr}|n "
-            f"[category:{category}] = {value}"
+            f"[category:{category}] = {as_typed(value)}"
         )

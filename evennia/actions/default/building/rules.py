@@ -9,7 +9,7 @@ from ...predicate import HasCapability
 from ...result import CLAIM, SKIP
 from ...rule import rule
 from .actions import Copy, CpAttr, Examine, Link, SetAttribute, SetHome, SetObjAlias, Unlink, Wipe
-from .attributes import AttributeOperations, parse_attribute_value, search_typed
+from .attributes import AttributeOperations, as_typed, parse_attribute_value, search_typed
 from .examine import ExamineFormatter, search_examine_target
 
 __all__ = ["CharacterBuildingRules"]
@@ -67,6 +67,9 @@ class CharacterBuildingRules(AttributeOperations):
         if not _can_edit(caller, obj):
             caller.msg("You don't have permission to do that.")
             return CLAIM
+        if not action.rhs and "delete" in action.switches:
+            caller.msg("Usage: alias/delete <obj> = <alias>")
+            return CLAIM
         if not action.rhs:
             old_aliases = obj.aliases.all()
             if old_aliases:
@@ -80,9 +83,10 @@ class CharacterBuildingRules(AttributeOperations):
             return CLAIM
         if "delete" in action.switches:
             existed = False
+            wanted = action.rhs.strip().lower()
             for key, category in obj.aliases.all(return_key_and_category=True):
-                if key == action.rhs:
-                    obj.aliases.remove(key=action.rhs, category=category)
+                if key.lower() == wanted:
+                    obj.aliases.remove(key=key, category=category)
                     existed = True
             caller.msg(
                 f"Alias '{action.rhs}' deleted from {obj.get_display_name(caller)}."
@@ -185,7 +189,10 @@ class CharacterBuildingRules(AttributeOperations):
         moving = "move" in action.switches
         source_access = "edit" if moving else "examine"
         if not (source.access(caller, source_access) or source.access(caller, "control")):
-            caller.msg(f"You don't have permission to read {source.key}.")
+            caller.msg(
+                f"You don't have permission to {'move attributes off' if moving else 'read'} "
+                f"{source.key}."
+            )
             return CLAIM
         if moving and len(source_attrs) != len(set(source_attrs)):
             caller.msg("|RCannot have duplicate source names when moving!")
@@ -201,6 +208,7 @@ class CharacterBuildingRules(AttributeOperations):
             attr: source.attributes.get(attr, category=source_category) for attr in source_attrs
         }
         remove_sources = set()
+        written = set()
         output = []
         for target_def in action.rhs_objattr:
             target = caller.search(target_def["name"])
@@ -216,6 +224,7 @@ class CharacterBuildingRules(AttributeOperations):
                 target_attr = target_attrs[index] if index < len(target_attrs) else source_attr
                 value = source_values[source_attr]
                 target.attributes.add(target_attr, value, category=target_category)
+                written.add((target, target_attr, target_category))
                 source_suffix = f"[{source_category}]" if source_category else ""
                 target_suffix = f"[{target_category}]" if target_category else ""
                 same_slot = (
@@ -230,9 +239,14 @@ class CharacterBuildingRules(AttributeOperations):
                     verb = "Copied"
                 output.append(
                     f"\n{verb} {source.name}.{source_attr}{source_suffix} -> "
-                    f"{target.name}.{target_attr}{target_suffix}. (value: {value!r})"
+                    f"{target.name}.{target_attr}{target_suffix}. (value: {as_typed(repr(value))})"
                 )
-        for source_attr in remove_sources:
+        # A swap writes a source slot before its removal runs; keep what was written.
+        for source_attr in remove_sources - {
+            attr
+            for target, attr, category in written
+            if target is source and category == source_category
+        }:
             source.attributes.remove(source_attr, category=source_category)
         caller.msg("".join(output))
         return CLAIM
@@ -270,7 +284,7 @@ class CharacterBuildingRules(AttributeOperations):
                     f"|w{type(old_value).__name__}|r.\nTo continue editing, it must be "
                     "converted to (and saved as) a string. Continue? [Y]/N?"
                 )
-                if (answer or "").lower() not in ("y", "yes"):
+                if answer is None or answer.strip().lower() in ("n", "no"):
                     caller.msg("Aborted edit.")
                     return CLAIM
 
@@ -488,13 +502,20 @@ class CharacterBuildingRules(AttributeOperations):
             caller.msg("You are not allowed to do that.")
             return CLAIM
         attrs = objdef["attrs"]
+        category = objdef["category"]
+        in_category = f" in category {category}" if category else ""
         if not attrs:
-            obj.attributes.clear()
-            caller.msg(f"Wiped all attributes on {obj.name}.")
-        else:
-            for attr in attrs:
-                obj.attributes.remove(attr)
-            caller.msg(f"Wiped attributes {','.join(attrs)} on {obj.name}.")
+            obj.attributes.clear(category=category)
+            caller.msg(f"Wiped all attributes{in_category} on {obj.name}.")
+            return CLAIM
+        missing = [attr for attr in attrs if not obj.attributes.has(attr, category=category)]
+        wiped = [attr for attr in attrs if attr not in missing]
+        for attr in wiped:
+            obj.attributes.remove(attr, category=category)
+        if wiped:
+            caller.msg(f"Wiped attributes {','.join(wiped)}{in_category} on {obj.name}.")
+        if missing:
+            caller.msg(f"{obj.name} has no attribute {','.join(missing)}{in_category}.")
         return CLAIM
 
     @rule(Examine, phase="carry_out", requires=_EXAMINE)
