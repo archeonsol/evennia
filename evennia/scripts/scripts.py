@@ -250,6 +250,7 @@ class DefaultScript(ScriptBase):
 
     authorization_policies = {
         "control": RequiresCapability("engine.script.control"),
+        "examine": RequiresCapability("engine.object.examine"),
         "edit": RequiresCapability("engine.script.control"),
         "delete": RequiresCapability("engine.script.control"),
     }

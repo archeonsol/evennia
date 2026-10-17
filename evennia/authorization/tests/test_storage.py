@@ -1099,3 +1099,35 @@ class CapabilitiesBeyondTest(TestCase):
         clear_authorization_caches()
 
         self.assertEqual(capabilities_beyond(operator, builder), {"engine.runtime.manage"})
+
+
+class ExamineScriptsAndChannelsTest(TestCase):
+    """`@examine/script` and `@examine/channel` need an examine policy to pass."""
+
+    def tearDown(self):
+        clear_authorization_caches()
+        super().tearDown()
+
+    def _account(self, username, *capabilities):
+        from django.contrib.auth import get_user_model
+
+        account = get_user_model().objects.create_user(
+            username=username, email="", password="q" * 16
+        )
+        for capability in capabilities:
+            grant_capability(f"account:{account.pk}", capability, scope_kind="world", scope_key="*")
+        clear_authorization_caches()
+        return account
+
+    def test_examine_capability_reads_scripts_and_channels(self):
+        from evennia.utils import create
+
+        script = create.create_script(key="examined-script", persistent=True)
+        channel = create.create_channel("examined-channel")
+        examiner = self._account("examiner", "engine.object.examine")
+        player = self._account("player")
+
+        self.assertTrue(script.access(examiner, "examine"))
+        self.assertTrue(channel.access(examiner, "examine"))
+        self.assertFalse(script.access(player, "examine"))
+        self.assertFalse(channel.access(player, "examine"))

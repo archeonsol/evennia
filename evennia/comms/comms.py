@@ -1023,5 +1023,6 @@ class DefaultChannel(ChannelDB, metaclass=TypeclassBase):
     authorization_policies = {
         "send": Always(),
         "listen": Always(),
+        "examine": RequiresCapability("engine.object.examine"),
         "control": RequiresCapability("engine.channel.control"),
     }
