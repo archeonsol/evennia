@@ -348,12 +348,21 @@ class JsonbRowState:
         self.dirty = True
         _STRONG_ROW_STATES[self.key] = self
 
-    def mark_clean(self):
-        """Clear volatile dirtiness while retaining durable pending rows."""
+    def mark_clean(self, pending=None):
+        """Clear volatile dirtiness while retaining durable pending rows.
+
+        Args:
+            pending (bool, optional): Whether the row has durable intents queued.
+                A caller that holds the row's lock and has just listed its queue
+                knows, and says so; a caller with a listing of the whole spool
+                reads the answer from that. Without one the spool is listed here.
+        """
         self.dirty = False
         self.dirty_since = None
         self.flush_failures = 0
-        if not _row_has_pending_entries(self.key, strict=False):
+        if pending is None:
+            pending = _row_has_pending_entries(self.key, strict=False)
+        if not pending:
             _STRONG_ROW_STATES.pop(self.key, None)
 
     def mark_head_rewrite(self):
@@ -628,7 +637,11 @@ def _ensure_pending_checked(state):
 
 
 def _reconcile_pending_remote(state, remote):
-    """Apply one locked remote document using normal deferred-read semantics."""
+    """Apply one locked remote document using normal deferred-read semantics.
+
+    Called with the row's lock held and its queue found empty, so a row made clean
+    here has nothing queued.
+    """
     if remote is _MISSING_REMOTE_ROW:
         state.pending_checked = True
         _mark_row_missing(state)
@@ -653,14 +666,14 @@ def _reconcile_pending_remote(state, remote):
         state.volatile_baseline = deepcopy(remote)
         state.mark_head_rewrite()
         if visible == remote:
-            state.mark_clean()
+            state.mark_clean(pending=False)
     else:
         state.committed_document = deepcopy(remote)
         state.durable_document = deepcopy(remote)
         state.visible_document = deepcopy(remote)
         state.volatile_baseline = deepcopy(remote)
         state.mark_head_rewrite()
-        state.mark_clean()
+        state.mark_clean(pending=False)
     state.pending_checked = True
     try:
         _sync_live_backends(state, invalidate=True)
@@ -1103,13 +1116,19 @@ def _lock_byte_blocking(lockfile):
 @contextmanager
 def _spool_row_lock(key):
     """Acquire the stable cross-process filesystem lock for one row."""
-    spool = _spool_dir()
-    os.makedirs(spool, exist_ok=True)
-    lock_dir = os.path.join(spool, ".locks")
-    os.makedirs(lock_dir, exist_ok=True)
+    lock_dir = os.path.join(_spool_dir(), ".locks")
     digest = hashlib.sha256(repr(key).encode()).hexdigest()
     path = os.path.join(lock_dir, f"{digest}.lock")
-    with open(path, "a+b") as lockfile:
+    try:
+        lockfile = open(path, "a+b")
+    except FileNotFoundError:
+        # The first lock in this spool, or the directory was cleared out while the
+        # game ran. Every other lock finds its directories and asks nothing about them:
+        # this ran for every flushed row and every object loaded, and probing two
+        # directories first cost four calls a time.
+        os.makedirs(lock_dir, exist_ok=True)
+        lockfile = open(path, "a+b")
+    with lockfile:
         if os.name == "nt":
             import msvcrt
 
@@ -1186,20 +1205,44 @@ def _payload_key(payload):
     )
 
 
+def _row_name_matcher(key):
+    """Return a test for whether a spool file name may belong to a row's queue."""
+    prefix = _spool_prefix(key)
+    legacy_candidates = _legacy_spool_candidates(key)
+
+    def matches(name):
+        return name.startswith(prefix) or any(
+            name == candidate or name.startswith(candidate) for candidate in legacy_candidates
+        )
+
+    return matches
+
+
+def _spool_json_names(spool):
+    """Names of the queued intents in ``spool``; none when there is no spool to list."""
+    try:
+        names = os.listdir(spool)
+    except OSError:
+        # No spool, or not a directory: nothing is queued. Anything else (a spool
+        # that cannot be read) is raised, as it always was.
+        if not os.path.isdir(spool):
+            return []
+        raise
+    return [name for name in names if name.endswith(".json")]
+
+
 def _list_row_entries(key, *, strict=True):
     try:
         spool = _spool_dir()
-        if not os.path.isdir(spool):
+        names = _spool_json_names(spool)
+        if not names:
+            # The spool is empty unless the database has been failing: say so without
+            # working out which names would be the row's.
             return []
-        prefix = _spool_prefix(key)
-        legacy_candidates = _legacy_spool_candidates(key)
+        matches = _row_name_matcher(key)
         entries = []
-        for name in os.listdir(spool):
-            if not name.endswith(".json"):
-                continue
-            if not name.startswith(prefix) and not any(
-                name == candidate or name.startswith(candidate) for candidate in legacy_candidates
-            ):
+        for name in names:
+            if not matches(name):
                 continue
             path = os.path.join(spool, name)
             payload = _read_spool_payload(path)
@@ -1215,6 +1258,32 @@ def _list_row_entries(key, *, strict=True):
 
 def _row_has_pending_entries(key, *, strict=True):
     return bool(_list_row_entries(key, strict=strict))
+
+
+class _SpoolListing:
+    """One listing of the spool, taken when first asked, for a pass over many rows.
+
+    It answers what ``mark_clean`` asks of the spool: does this row have intents
+    queued? The per-row listing it replaces ran without the row's lock too, so what
+    it saw was a moment in time either way. It reads file names and no payloads: a
+    name that may belong to the row counts as queued, and the worst a wrong yes does
+    is keep a row in memory a little longer.
+    """
+
+    def __init__(self):
+        self._names = None
+
+    def holds(self, key):
+        """Whether any queued intent may belong to the row ``key``."""
+        if self._names is None:
+            try:
+                self._names = _spool_json_names(_spool_dir())
+            except Exception:
+                self._names = []
+        if not self._names:
+            return False
+        matches = _row_name_matcher(key)
+        return any(matches(name) for name in self._names)
 
 
 def _next_spool_sequence(key):
@@ -2195,7 +2264,8 @@ class JsonbAttributeBackend(IAttributeBackend):
             state.visible_document = deepcopy(document)
             state.volatile_baseline = deepcopy(document)
             state.mark_head_rewrite()
-            state.mark_clean()
+            # Listed empty above, under the same lock.
+            state.mark_clean(pending=False)
             try:
                 _sync_live_backends(state, invalidate=True)
             except Exception as err:
@@ -2414,7 +2484,9 @@ def _persist_row_state_locked(state, *, allow_spool):
         state.visible_document = deepcopy(final)
         state.volatile_baseline = deepcopy(final)
         state.mark_head_rewrite()
-        state.mark_clean()
+        # The row's queue was empty when the lock was taken and the lock is still
+        # held, so nothing can have been queued since: no need to list it again.
+        state.mark_clean(pending=False)
         try:
             _sync_live_backends(state, invalidate=final != local)
         except Exception as err:
@@ -2662,7 +2734,7 @@ def _persist_row_snapshots_worker(snapshots, claims=None):
     return tuple(outcomes)
 
 
-def _set_async_durable_head(state, snapshot, durable, *, spooled):
+def _set_async_durable_head(state, snapshot, durable, *, spooled, listing=None):
     """Adopt a worker-confirmed durable head while preserving later live edits.
 
     A worker outcome can be stale by the time it is adopted: the owner thread
@@ -2672,6 +2744,9 @@ def _set_async_durable_head(state, snapshot, durable, *, spooled):
     a belt-and-braces guard. When the head moved, the older worker result is
     never adopted over it: the live document is rebased on the newer head and
     left dirty so the next flush reconciles.
+
+    ``listing`` is the :class:`_SpoolListing` shared by the rows of one adoption
+    pass; without it each clean row lists the spool for itself.
     """
     visible_before = deepcopy(state.visible_document)
     changed_during_flush = state.mutation_serial != snapshot.mutation_serial
@@ -2706,7 +2781,7 @@ def _set_async_durable_head(state, snapshot, durable, *, spooled):
     elif spooled:
         _STRONG_ROW_STATES[state.key] = state
     else:
-        state.mark_clean()
+        state.mark_clean(pending=None if listing is None else listing.holds(state.key))
     state.mark_head_rewrite()
 
     if state.visible_document != visible_before:
@@ -2724,6 +2799,8 @@ def _adopt_async_row_flushes(snapshots, outcomes, preparation_failures=0):
     by_key = {snapshot.key: snapshot for snapshot in snapshots}
     flushed = spooled = 0
     failed = int(preparation_failures)
+    # One listing of the spool for every row this pass lets go of, not one for each.
+    listing = _SpoolListing()
     for outcome in outcomes:
         snapshot = by_key[outcome.key]
         state = _existing_row_state(outcome.key)
@@ -2736,10 +2813,14 @@ def _adopt_async_row_flushes(snapshots, outcomes, preparation_failures=0):
                 failed += 1
             continue
         if outcome.status == "ok":
-            _set_async_durable_head(state, snapshot, outcome.final or {}, spooled=False)
+            _set_async_durable_head(
+                state, snapshot, outcome.final or {}, spooled=False, listing=listing
+            )
             flushed += 1
         elif outcome.status == "spooled":
-            _set_async_durable_head(state, snapshot, outcome.final or {}, spooled=True)
+            _set_async_durable_head(
+                state, snapshot, outcome.final or {}, spooled=True, listing=listing
+            )
             spooled += 1
         elif outcome.status == "row_missing":
             _mark_row_missing(state)

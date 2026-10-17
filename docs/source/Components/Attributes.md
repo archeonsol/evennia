@@ -292,6 +292,27 @@ a `SpoolReclaimReport`; `quarantine_conflicts=False` restores the legacy
 leave-in-place behavior. Protected-outcome witnesses (`PREPARED_BLOCKING`)
 keep their operator-resolution contract and are never quarantined here.
 
+### What a flush asks of the spool
+
+A flush checks each dirty row's queue under that row's lock, because another
+process may have queued an intent for it. That check is made once for every row,
+and nothing can share it between rows. Nothing else in a flush asks the spool
+anything. A row written under its lock is not listed again to decide whether to
+keep it in memory, because the lock is still held and the queue was found empty.
+The async flush lists the spool once when it adopts a batch of results, and not
+once for each row. A lock opens its file without first checking that the
+directories exist, and makes them only when the open fails.
+
+Counted on a spool with nothing queued, a flush of 40 rows made 360 calls into the
+spool directory and makes 80, and building the row state of a loaded object made 7
+and makes 2. Every one of those calls is a point where the loop gives up the GIL,
+so the count is what a busy worker thread turns into delay.
+
+A marker in the row's lock file, set by whoever queues an intent, could answer the
+check without listing. It is not done: a marker that fell out of step with the
+directory would let a write skip a queue, the lock files that exist would need a
+migration, and the saving is one call for each row.
+
 ### Using AttributeProperty
 
 The third way to set up an Attribute is to use an `AttributeProperty`. This is done on the _class level_ of your typeclass and allows you to treat Attributes a bit like Django database Fields. Unlike using `.db` and `.attributes`, an `AttributeProperty` can't be created on the fly, you must assign it in the class code. 
