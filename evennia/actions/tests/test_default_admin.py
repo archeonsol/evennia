@@ -338,6 +338,28 @@ class TestPolicy(unittest.TestCase):
         self.assertEqual(target.policies.get("view").to_data()["type"], "never")
         self.assertTrue(any("bob/view" in message for message in char.messages))
 
+    def test_bare_usage(self):
+        char, actor = _setup()
+        self._policy(char, actor, "")
+        self.assertEqual(
+            char.messages, ["Usage: @policy[/set|del] <object>/<operation> [= policy]"]
+        )
+
+    def test_reads_back_a_set_policy(self):
+        char, actor = _setup()
+        target = FakeObj(key="bob")
+        target.policies = FakePolicies()
+        char.search_map["bob"] = target
+        self._policy(char, actor, "bob/wave = public", switches=("set",))
+        self._policy(char, actor, "bob/wave")
+        self.assertEqual(
+            char.messages,
+            [
+                "Set bob/wave to {'schema': 'auth.policy.v1', 'type': 'always'}.",
+                "bob/wave: {'schema': 'auth.policy.v1', 'type': 'always'}",
+            ],
+        )
+
     def test_control_required(self):
         char, actor = _setup()
         target = FakeObj(key="bob", access={"control": False, "edit": False})
