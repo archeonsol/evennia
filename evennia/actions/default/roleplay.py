@@ -100,12 +100,12 @@ class Whisper(Action):
         return list(self.receivers)
 
 
-@action("pose", ".", ",")
+@action("pose", ":", ".", ",")
 @dataclass
 class Pose(Action):
     """Send a first-person roleplay pose to the current room.
 
-    |wpose <text>|n / |w. <text>|n / |w, <continuation>|n. A nonempty pose and
+    |wpose <text>|n / |w: <text>|n / |w. <text>|n / |w, <continuation>|n. A nonempty pose and
     location are required; normal emote delivery renders it for observers.
     """
 

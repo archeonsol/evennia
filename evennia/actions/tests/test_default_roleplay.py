@@ -67,6 +67,12 @@ class TestRoleplay(unittest.TestCase):
         dispatch(action, self.actor, [self.char])
         self.assertIsNone(self.char.said[0][1]["msg_self"])
 
+    def test_colon_is_a_glued_pose_verb(self):
+        from evennia.actions import action_registry
+
+        self.assertIs(action_registry.verbs()[":"], Pose)
+        self.assertIn(":", action_registry.no_space_prefix_verbs)
+
     def test_empty_pose_check_blocks_without_direct_message(self):
         action = Pose.parse("", self.actor, verb="pose")
         result = self.char.check_pose(action, self.actor)
