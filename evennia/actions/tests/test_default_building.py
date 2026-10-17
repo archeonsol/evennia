@@ -30,7 +30,9 @@ from evennia.actions.default.building import rules as rules_module
 from evennia.actions.tests.fakes import FakeAccount, FakeChar, FakeObj, dispatch, make_actor
 from evennia.authorization.storage import grant_capabilities, principal_refs
 from evennia.objects.character import DefaultCharacter
+from evennia.objects.exit import DefaultExit
 from evennia.objects.models import ObjectDB
+from evennia.utils import create
 from evennia.utils.ansi import strip_ansi
 from evennia.utils.test_resources import EvenniaTest
 
@@ -820,6 +822,32 @@ class TestSetOnTheDatabase(BuildingDBTest):
         )
 
 
+class TestCpAttrOnTheDatabase(BuildingDBTest):
+    """``@cpattr`` copies stored attributes between objects."""
+
+    def test_usage(self):
+        self.assertEqual(
+            self.run_action(CpAttr, ""),
+            "Usage: cpattr[/move] <obj>/<attr>[:category] = <obj>/<attr>",
+        )
+
+    def test_copy_keeps_the_source(self):
+        self.obj1.db.test1 = "value1"
+        self.assertEqual(
+            self.run_action(CpAttr, "Obj/test1 = Obj2/test3"),
+            "\nCopied Obj.test1 -> Obj2.test3. (value: 'value1')",
+        )
+        self.assertEqual(self.obj1.db.test1, "value1")
+        self.assertEqual(self.obj2.db.test3, "value1")
+
+    def test_unknown_switch_still_copies(self):
+        self.obj2.db.test2 = "value2"
+        shown = self.run_action(CpAttr, "Obj2/test2 = Obj2/test3", switches=("copy",))
+        self.assertIn("Copied Obj2.test2 -> Obj2.test3. (value: 'value2')", shown)
+        self.assertEqual(self.obj2.db.test2, "value2")
+        self.assertEqual(self.obj2.db.test3, "value2")
+
+
 class TestNestedAttributeHelpers(unittest.TestCase):
     """The split and lookup helpers behind nested ``@set`` paths."""
 
@@ -859,6 +887,100 @@ class TestNestedAttributeHelpers(unittest.TestCase):
         for value, keys, expected in cases:
             with self.subTest(value=value, keys=keys):
                 self.assertEqual(lookup(value, *keys), expected)
+
+
+class TestLinkOnTheDatabase(BuildingDBTest):
+    """``@link`` and ``@unlink`` against stored exits and rooms."""
+
+    def setUp(self):
+        super().setUp()
+        self.exit1 = create.create_object(
+            DefaultExit, key="TestExit1", location=self.room1, destination=self.room2
+        )
+
+    def test_one_way_link_show_and_unlink(self):
+        self.assertEqual(
+            self.run_action(Link, "TestExit1=Room"), "Link created TestExit1 -> Room (one way)."
+        )
+        self.assertEqual(self.exit1.destination, self.room1)
+        self.assertEqual(self.run_action(Link, "TestExit"), "TestExit1 is an exit to Room.")
+        self.assertEqual(
+            self.run_action(Link, "Obj"), "Obj is not an exit. Its home location is Room."
+        )
+        self.assertEqual(
+            self.run_action(Unlink, "TestExit1"), "Former exit TestExit1 no longer links anywhere."
+        )
+        self.assertIsNone(self.exit1.destination)
+
+    def test_usage_and_not_found(self):
+        usage = "Usage: link[/twoway] <object> = <target>"
+        self.assertEqual(self.run_action(Unlink, ""), usage)
+        self.assertEqual(self.run_action(Link, ""), usage)
+        self.assertEqual(self.run_action(Link, "NotFound"), "Could not find 'NotFound'.")
+
+    def test_twoway_self_link_and_global_match(self):
+        self.char1.location = self.room2
+        exit2 = create.create_object(
+            DefaultExit, key="TestExit2", location=self.room2, destination=self.room1
+        )
+        self.assertEqual(
+            self.run_action(Link, "TestExit=Room2"), "Link created TestExit2 -> Room2 (one way)."
+        )
+        self.assertEqual(exit2.destination, self.room2)
+        self.assertEqual(
+            self.run_action(Link, f"TestExit={self.exit.dbref}", switches=("twoway",)),
+            "Link created TestExit2 (in Room2) <-> out (in Room) (two-way).",
+        )
+        self.assertEqual(exit2.destination, self.room1)
+        self.assertEqual(self.exit.destination, self.room2)
+        self.assertEqual(
+            self.run_action(Link, f"TestExit={self.room1.dbref}", switches=("twoway",)),
+            "To create a two-way link, TestExit2 and Room must both have a location "
+            "(i.e. they cannot be rooms, but should be exits).",
+        )
+        self.assertEqual(
+            self.run_action(Link, f"{self.exit.dbref}={self.exit.dbref}", switches=("twoway",)),
+            "Cannot link an object to itself.",
+        )
+        self.exit1.destination = None
+        self.assertEqual(
+            self.run_action(Link, "TestExit1=Room2"),
+            f"Note: TestExit1({self.exit1.dbref}) did not have a destination set before. "
+            "Make sure you linked the right thing.\n"
+            "Link created TestExit1 -> Room2 (one way).",
+        )
+        self.assertEqual(self.exit1.destination, self.room2)
+        self.assertEqual(
+            self.run_action(Link, "TestExit1="), "Former exit TestExit1 no longer links anywhere."
+        )
+        self.assertIsNone(self.exit1.destination)
+
+
+class TestSetHomeOnTheDatabase(BuildingDBTest):
+    """``@sethome`` shows and changes stored homes."""
+
+    def test_usage(self):
+        self.assertEqual(self.run_action(SetHome, ""), "Usage: sethome <obj> [= <home_location>]")
+
+    def test_change_show_and_set(self):
+        self.assertEqual(
+            self.run_action(SetHome, "Obj = Room2"),
+            f"Home location of Obj was changed from Room({self.room1.dbref}) "
+            f"to Room2({self.room2.dbref}).",
+        )
+        self.assertEqual(self.obj1.home, self.room2)
+        self.assertEqual(
+            self.run_action(SetHome, "self"), f"Char's current home is Room({self.room1.dbref})."
+        )
+        self.assertEqual(
+            self.run_action(SetHome, "Obj"), f"Obj's current home is Room2({self.room2.dbref})."
+        )
+        self.obj1.home = None
+        self.assertEqual(
+            self.run_action(SetHome, "Obj = Room2"),
+            f"Home location of Obj was set to Room2({self.room2.dbref}).",
+        )
+        self.assertEqual(self.obj1.home, self.room2)
 
 
 if __name__ == "__main__":
