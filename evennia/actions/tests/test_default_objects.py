@@ -15,6 +15,10 @@ from evennia.actions.default.objects import (
 )
 from evennia.actions.engine import RuleEngine
 from evennia.actions.tests.fakes import FakeChar, FakeObj, make_actor
+from evennia.objects.objects import DefaultCharacter
+from evennia.utils import clock
+from evennia.utils.ansi import strip_ansi
+from evennia.utils.test_resources import EvenniaTest
 
 
 class _Actor(CharacterObjectRules, FakeChar):
@@ -339,3 +343,64 @@ class TestDefaultPolicies(unittest.TestCase):
 
         self.assertIsInstance(DefaultCharacter.authorization_policies["receive"], Always)
         self.assertNotIn("put_in", DefaultCharacter.authorization_policies)
+
+
+class ObjectCharacter(CharacterObjectRules, DefaultCharacter):
+    """A database character carrying the shipped get/drop/give rules."""
+
+
+class TestCountsAndForms(EvenniaTest):
+    """Counted targets and both give forms against database objects."""
+
+    character_typeclass = ObjectCharacter
+    evennia_fixtures = {"char1", "char2", "obj1", "obj2"}
+
+    def _run(self, action_cls, raw, char=None):
+        char = char or self.char1
+        actor = make_actor(char, account=char.account)
+        action = action_cls.parse(raw, actor, verb=action_cls.__name__.lower())
+        char.msg = mock.Mock()
+        context = ActionContext(providers=[char], actor=actor, raw_string="")
+        # Under asyncio.run the ORM opens a connection outside the test transaction.
+        clock.run_coroutine(RuleEngine().dispatch(action, actor, context)).result()
+        shown = []
+        for call in char.msg.call_args_list:
+            text = call.kwargs.get("text", call.args[0] if call.args else "")
+            shown.append(strip_ansi(str(text[0] if isinstance(text, tuple) else text)))
+        del char.msg
+        return shown
+
+    def test_get_and_drop_one(self):
+        self.assertIn("You pick up an Obj.", self._run(Get, "Obj"))
+        self.assertEqual(self.obj1.location, self.char1)
+        self.assertIn("You drop an Obj.", self._run(Drop, "Obj"))
+        self.assertEqual(self.obj1.location, self.room1)
+
+    def test_get_and_drop_a_count(self):
+        self.obj2.key = "Obj"
+        self.assertIn("You pick up two Objs.", self._run(Get, "2 Obj"))
+        self.assertEqual(self.obj1.location, self.char1)
+        self.assertEqual(self.obj2.location, self.char1)
+        self.assertIn("You drop two Objs.", self._run(Drop, "2 Obj"))
+        self.assertEqual(self.obj1.location, self.room1)
+        self.assertEqual(self.obj2.location, self.room1)
+
+    def test_give_what_you_do_not_carry(self):
+        self.assertIn("You aren't carrying Obj.", self._run(Give, "Obj to Char2"))
+        self.assertIn("You aren't carrying Obj.", self._run(Give, "Obj = Char2"))
+        self.assertEqual(self.obj1.location, self.room1)
+
+    def test_give_with_to_and_equals(self):
+        self.obj1.location = self.char1
+        self.assertIn("You give an Obj to Char2.", self._run(Give, "Obj to Char2"))
+        self.assertEqual(self.obj1.location, self.char2)
+        self.assertIn("You give an Obj to Char.", self._run(Give, "Obj = Char", char=self.char2))
+        self.assertEqual(self.obj1.location, self.char1)
+
+    def test_give_a_count(self):
+        self.obj1.location = self.char1
+        self.obj2.key = "Obj"
+        self.obj2.location = self.char1
+        self.assertIn("You give two Objs to Char2.", self._run(Give, "2 Obj = Char2"))
+        self.assertEqual(self.obj1.location, self.char2)
+        self.assertEqual(self.obj2.location, self.char2)
