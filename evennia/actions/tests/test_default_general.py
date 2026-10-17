@@ -106,6 +106,22 @@ class TestNick(unittest.TestCase):
         self.assertEqual(nick.repl, "say Hello")
         self.assertTrue(any("mapped to" in m for m in char.messages))
 
+    def test_account_and_object_switches_store_their_category_on_the_character(self):
+        char, actor = _setup()
+        char.account = FakeObj(key="acct")
+        char.account.nicks = FakeNicks()
+        self._nick(char, actor, "hi = say one")
+        self._nick(char, actor, "hi = say two", switches=("account",))
+        self._nick(char, actor, "hi = say three", switches=("object",))
+        self.assertEqual(char.nicks.get(key="hi", category="inputline").repl, "say one")
+        self.assertEqual(char.nicks.get(key="hi", category="account").repl, "say two")
+        self.assertEqual(char.nicks.get(key="hi", category="object").repl, "say three")
+        self.assertIsNone(char.account.nicks.get(key="hi", category="account"))
+        shown = [ansi.strip_ansi(message).strip() for message in char.messages]
+        self.assertIn("Inputline-nick 'hi' mapped to 'say one'.", shown)
+        self.assertIn("Account-nick 'hi' mapped to 'say two'.", shown)
+        self.assertIn("Object-nick 'hi' mapped to 'say three'.", shown)
+
     def test_update_nick(self):
         char, actor = _setup()
         char.nicks.add("hi", "say Hello")
