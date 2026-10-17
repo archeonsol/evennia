@@ -204,6 +204,13 @@ class TestSetAndAlias(unittest.TestCase):
         self._set("box/data['items'][+] : meta = 2")
         self.assertEqual(self.obj.attributes.get("data", category="meta"), {"items": [1, 2]})
 
+    def test_view_shows_whole_value_with_markup_escaped(self):
+        desc = "|rA red coat|n " + "with long seams " * 10 + "fits $you()."
+        self.obj.attributes.values[("desc", None)] = desc
+        self._set("box/desc")
+        shown = "\n".join(map(str, self.char.messages))
+        self.assertIn("||rA red coat||n " + "with long seams " * 10 + r"fits \$you().", shown)
+
     def test_dbref_search_value_requires_control(self):
         target = FakeObj("target", access={"control": False, "edit": False})
         with mock.patch.object(rules_module, "parse_attribute_value", return_value=target):

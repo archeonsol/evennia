@@ -8,6 +8,7 @@ import re
 from django.conf import settings
 
 from evennia.utils import funcparser, search, utils
+from evennia.utils.ansi import raw as ansi_raw
 from evennia.utils.utils import variable_from_module
 
 __all__ = ["AttributeOperations", "convert_from_string", "search_typed"]
@@ -16,6 +17,7 @@ LIST_APPEND_CHAR = "+"
 _NESTED_RE = re.compile(r"\[.*?\]")
 _NOT_FOUND = object()
 _ATTRFUNCPARSER = None
+_OUTGOING_FUNCPARSER = None
 
 
 def convert_from_string(caller, value):
@@ -107,7 +109,15 @@ class AttributeOperations:
         return result
 
     def view_attr(self, obj, attr, category):
-        """Return player-facing output for an attribute or nested value."""
+        """Return player-facing output for an attribute or nested value.
+
+        Markup in the value is escaped, so it reads as it was set.
+        """
+        global _OUTGOING_FUNCPARSER
+        if _OUTGOING_FUNCPARSER is None:
+            _OUTGOING_FUNCPARSER = funcparser.FuncParser(
+                settings.FUNCPARSER_OUTGOING_MESSAGES_MODULES
+            )
         nested = False
         for key, nested_keys in self.split_nested_attr(attr):
             nested = nested or bool(nested_keys)
@@ -122,6 +132,7 @@ class AttributeOperations:
                     value = deep[nested_keys[-1]]
                 except (IndexError, KeyError, TypeError):
                     continue
+            value = _OUTGOING_FUNCPARSER.parse(ansi_raw(utils.to_str(value)), escape=True)
             return f"\nAttribute {obj.name}/|w{attr}|n [category:{category}] = {value}"
         suffix = " (Nested lookups attempted)" if nested else ""
         return f"\nAttribute {obj.name}/|w{attr}|n [category:{category}] does not exist.{suffix}"
