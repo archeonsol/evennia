@@ -1,10 +1,48 @@
 """Tests for manual-topic behavior in the action help renderer."""
 
+import re
 from unittest import TestCase, mock
 
 from django.test import override_settings
+from parameterized import parameterized
 
 from evennia.help import catalog, formatters, renderer
+from evennia.utils import ansi, create
+from evennia.utils.test_resources import EvenniaTest
+
+_SEPARATOR_LINE = re.compile(r"^-+$", re.MULTILINE)
+
+_SUBTOPIC_ENTRY = (
+    "Main help text\n\n"
+    "# SUBTOPICS\n\n"
+    "## creating extra stuff\n\n"
+    "Help on creating extra stuff.\n\n"
+    "### subsubtopic\n\n"
+    "A subsubtopic text\n\n"
+    "## Something else\n\n"
+    "Something else\n\n"
+    "## More\n\n"
+    "Another text\n\n"
+    "### Second-More\n\n"
+    "The Second More text.\n\n"
+    "#### More again\n\n"
+    "Even more text.\n\n"
+    "#### Third more\n\n"
+    "Third more text\n"
+)
+_CREATING = (
+    "Help for test/creating extra stuff\n\n"
+    "Help on creating extra stuff.\n\n"
+    "Subtopics:\n"
+    "  test/creating extra stuff/subsubtopic"
+)
+_SUBSUB = "Help for test/creating extra stuff/subsubtopic\n\nA subsubtopic text"
+_SECOND_MORE = (
+    "Help for test/more/second-more\n\n"
+    "The Second More text.\n\n"
+    "Subtopics:\n"
+    "  test/more/second-more/more again  test/more/second-more/third more"
+)
 
 
 class _Entry:
@@ -66,3 +104,69 @@ class TestManualHelpRenderer(TestCase):
             file_same_key,
         )
         self.assertIs(renderer._exact_manual_topic("alias", db_topics, file_topics), file_alias)
+
+
+class TestRenderHelpEntries(EvenniaTest):
+    """Render DB help entries and walk their ``# SUBTOPICS`` markup."""
+
+    evennia_fixtures = {"char1"}
+    maxDiff = None
+
+    def _render(self, topic="", subtopics=None):
+        self.char1.msg = mock.Mock()
+        renderer.render_help(self.char1, topic=topic, subtopics=subtopics)
+        text = ansi.strip_mxp(ansi.strip_ansi(str(self.char1.msg.call_args.args[0])))
+        return _SEPARATOR_LINE.sub("", text).strip()
+
+    def test_bare_index_lists_db_topics(self):
+        create.create_help_entry("stabletopic", "Some help body.", category="General")
+        self.assertIn("stabletopic", self._render())
+
+    def test_entry_view(self):
+        create.create_help_entry("testhelp", "This is a test", category="General")
+        self.assertEqual(self._render("testhelp"), "Help for testhelp\n\nThis is a test")
+
+    @parameterized.expand(
+        [
+            (
+                "main entry",
+                [],
+                (
+                    "Help for test\n\n"
+                    "Main help text\n\n"
+                    "Subtopics:\n"
+                    "  test/creating extra stuff  test/something else  test/more"
+                ),
+            ),
+            ("full subtopic", ["creating extra stuff"], _CREATING),
+            ("startswith match", ["creating"], _CREATING),
+            ("partial match", ["extra"], _CREATING),
+            ("partial subsubtopic", ["extra", "subsubtopic"], _SUBSUB),
+            ("partial both levels", ["creating extra", "subsub"], _SUBSUB),
+            (
+                "heading case folds",
+                ["something else"],
+                "Help for test/something else\n\nSomething else",
+            ),
+            (
+                "subtopic with children",
+                ["more"],
+                "Help for test/more\n\nAnother text\n\nSubtopics:\n  test/more/second-more",
+            ),
+            ("nested heading case folds", ["more", "second-more"], _SECOND_MORE),
+            ("nested partial match", ["more", "-more"], _SECOND_MORE),
+            (
+                "third level",
+                ["more", "second", "more again"],
+                "Help for test/more/second-more/more again\n\nEven more text.",
+            ),
+            (
+                "third level partial",
+                ["more", "second", "third"],
+                "Help for test/more/second-more/third more\n\nThird more text",
+            ),
+        ]
+    )
+    def test_subtopic_fetch(self, _name, subtopics, expected):
+        create.create_help_entry("test", _SUBTOPIC_ENTRY, category="General")
+        self.assertEqual(self._render("test", subtopics), expected)
