@@ -219,6 +219,129 @@ class TestStallWorkInWarning(SimpleTestCase):
         mock_warn.assert_not_called()
 
 
+class TestStallNamesTheSystem(SimpleTestCase):
+    """A stall sampled inside a system body says which system, and how far into its turn it was."""
+
+    WORK = ("world/butcher/lair.py", 149, "residents")
+    PLACE = "world/butcher/lair.py:149 residents"
+
+    def _stall(self, running, *, probe=None, sampled=True, stall=0.30):
+        """Drive one stall and return its warning; ``running`` is what the scheduler reports."""
+        clock = _Clock()
+        wd = ReactorStallWatchdog(
+            threshold_ms=200,
+            interval=0.05,
+            _now=clock,
+            _gc_probe=probe or Mock(return_value=(0.0, None)),
+        )
+        wd._target_thread_id = 123
+        frames = {123: _frames(_game_site(*self.WORK))} if sampled else {}
+        with (
+            patch.object(reactor_watchdog.sys, "_current_frames", return_value=frames),
+            patch.object(reactor_watchdog.systems, "running_body", return_value=running),
+            patch.object(reactor_watchdog.logger, "log_warn") as warn,
+            patch.object(reactor_watchdog.prometheus_metrics, "record_reactor_stall"),
+        ):
+            wd._tick()
+            clock.advance(0.05)
+            if sampled:
+                wd._note_stalled_work(clock() + stall)
+            clock.advance(stall)
+            wd._tick()
+        return warn.call_args.args[0]
+
+    def test_the_line_names_the_system_and_how_far_into_its_turn_it_was(self):
+        message = self._stall(("butcher-rite", 0.148))
+
+        self.assertIn(
+            f"at {self.PLACE} (system 'butcher-rite', 148ms into its turn). Move blocking I/O",
+            message,
+        )
+
+    def test_no_system_leaves_the_line_as_it_was(self):
+        message = self._stall(None)
+
+        self.assertIn(f"at {self.PLACE}. Move blocking I/O", message)
+        self.assertNotIn("system", message)
+
+    def test_a_system_is_not_named_when_the_work_was_not_sampled(self):
+        message = self._stall(("butcher-rite", 0.148), sampled=False)
+
+        self.assertIn("at work not sampled. Move blocking I/O", message)
+        self.assertNotIn("butcher-rite", message)
+
+    def test_a_system_seen_in_an_earlier_stall_is_not_named_in_the_next(self):
+        clock = _Clock()
+        wd = ReactorStallWatchdog(threshold_ms=200, interval=0.05, _now=clock)
+        wd._target_thread_id = 123
+        frame = _frames(_game_site(*self.WORK))
+
+        with (
+            patch.object(reactor_watchdog.sys, "_current_frames", return_value={123: frame}),
+            patch.object(
+                reactor_watchdog.systems, "running_body", return_value=("butcher-rite", 0.2)
+            ),
+            patch.object(reactor_watchdog.logger, "log_warn") as warn,
+        ):
+            wd._tick()
+            clock.advance(0.30)
+            wd._note_stalled_work(clock())
+            clock.advance(0.05)
+            wd._tick()
+            clock.advance(0.35)  # a second stall that nobody sampled
+            wd._tick()
+
+        self.assertIn("at work not sampled", warn.call_args.args[0])
+        self.assertNotIn("butcher-rite", warn.call_args.args[0])
+
+    def test_a_later_sample_outside_any_system_replaces_the_earlier_one(self):
+        clock = _Clock()
+        wd = ReactorStallWatchdog(threshold_ms=200, interval=0.05, _now=clock)
+        wd._target_thread_id = 123
+        frame = _frames(_game_site(*self.WORK))
+        seen = iter([("butcher-rite", 0.1), None])
+
+        with (
+            patch.object(reactor_watchdog.sys, "_current_frames", return_value={123: frame}),
+            patch.object(reactor_watchdog.systems, "running_body", side_effect=lambda: next(seen)),
+            patch.object(reactor_watchdog.logger, "log_warn") as warn,
+        ):
+            wd._tick()
+            clock.advance(0.20)
+            wd._note_stalled_work(clock())  # inside the system
+            clock.advance(0.10)
+            wd._note_stalled_work(clock())  # the system is over; something else holds the loop
+            clock.advance(0.05)
+            wd._tick()
+
+        self.assertNotIn("butcher-rite", warn.call_args.args[0])
+
+    def test_the_collection_line_keeps_the_system_beside_the_work(self):
+        probe = Mock(return_value=(0.28, (1.0, 1.28, 2, 1234)))
+
+        message = self._stall(("butcher-rite", 0.148), probe=probe)
+
+        self.assertIn(
+            f"; running {self.PLACE}, system 'butcher-rite', 148ms into its turn)", message
+        )
+        self.assertIn("ENGINE_GC_POLICY", message)
+
+    def test_the_helper_leaves_nothing_when_no_system_runs(self):
+        self.assertEqual(reactor_watchdog._in_system(None), "")
+        self.assertEqual(reactor_watchdog._in_system(None, parens=False), "")
+
+    def test_the_helper_writes_a_clause_with_or_without_parentheses(self):
+        running = ("butcher-rite", 0.1484)
+
+        self.assertEqual(
+            reactor_watchdog._in_system(running), " (system 'butcher-rite', 148ms into its turn)"
+        )
+        self.assertEqual(
+            reactor_watchdog._in_system(running, parens=False),
+            ", system 'butcher-rite', 148ms into its turn",
+        )
+
+
 class TestLiveSampling(SimpleTestCase):
     """Live stacks are throttled within, never across, stall episodes."""
 
@@ -250,6 +373,38 @@ class TestLiveSampling(SimpleTestCase):
             self.assertTrue(wd._sample_stall(clock()))
 
         mock_warn.assert_called_once()
+
+    def test_the_live_sample_names_the_system_that_is_running(self):
+        clock = _Clock()
+        wd = self._make(clock)
+        clock.advance(2.0)
+
+        frames, formatted, warning = self._sampling_patches()
+        with (
+            frames,
+            formatted,
+            warning as mock_warn,
+            patch.object(
+                reactor_watchdog.systems, "running_body", return_value=("butcher-rite", 0.512)
+            ),
+        ):
+            self.assertTrue(wd._sample_stall(clock()))
+
+        self.assertIn(
+            "at unknown work (system 'butcher-rite', 512ms into its turn)! Live IO thread",
+            mock_warn.call_args.args[0],
+        )
+
+    def test_the_live_sample_is_as_it_was_when_no_system_runs(self):
+        clock = _Clock()
+        wd = self._make(clock)
+        clock.advance(2.0)
+
+        frames, formatted, warning = self._sampling_patches()
+        with frames, formatted, warning as mock_warn:
+            self.assertTrue(wd._sample_stall(clock()))
+
+        self.assertIn("at unknown work! Live IO thread", mock_warn.call_args.args[0])
 
     def test_recovery_allows_second_episode_inside_five_seconds(self):
         clock = _Clock()
@@ -545,6 +700,22 @@ class TestGilAttribution(SimpleTestCase):
         )
 
         self.assertIn("The loop was at world/rpg/courier.py:300 generate.", warn.call_args.args[0])
+        self.assertEqual(record.call_args.args[1], "gil")
+
+    def test_the_system_the_loop_was_in_is_kept_beside_the_work(self):
+        with patch.object(
+            reactor_watchdog.systems, "running_body", return_value=("courier-demand", 0.4)
+        ):
+            warn, record = self._stall(
+                self._readings(loop=0.02, scrape=0.52),
+                sampled_work=("world/rpg/courier.py", 300, "generate"),
+            )
+
+        self.assertIn(
+            "The loop was at world/rpg/courier.py:300 generate "
+            "(system 'courier-demand', 400ms into its turn).",
+            warn.call_args.args[0],
+        )
         self.assertEqual(record.call_args.args[1], "gil")
 
     def test_a_probe_that_raises_never_breaks_the_heartbeat(self):

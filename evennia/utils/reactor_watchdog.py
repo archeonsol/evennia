@@ -29,6 +29,13 @@ as a GIL wait and names that thread, and the live stack sample dumps the stacks 
 the threads that were burning CPU beside the loop's. (This found a metrics gauge
 that kept the loop waiting for half a second every few seconds, while the stack of
 every stall said `loop.run_forever()`.)
+
+The frame that was running is not always the system that caused the stall either.
+The scheduler (`evennia.utils.systems`) times every system body and says which one is
+on the reactor. When the loop is sampled inside a system body, the stall line names the
+system and how many milliseconds into its turn it was. A body that caused the stall had
+been running about as long as the stall is long; one that had run for a few
+milliseconds only began late in it, after something else held the loop.
 """
 
 import os
@@ -41,7 +48,7 @@ import traceback
 from django.conf import settings
 
 from evennia.server import prometheus_metrics
-from evennia.utils import clock, gc_policy, logger
+from evennia.utils import clock, gc_policy, logger, systems
 
 #: Default poll interval as a fraction of the threshold, floored, so the
 #: measured stall stays close to the true block duration without polling
@@ -123,6 +130,27 @@ def _thread_cpu_seconds():
 def _frame_label(frame):
     code = frame.f_code
     return f"{_short_path(code.co_filename)}:{frame.f_lineno} {code.co_name}"
+
+
+def _in_system(running, *, parens=True):
+    """
+    Say which system body was on the reactor, as a clause to follow a place.
+
+    Args:
+        running (tuple or None): ``(name, seconds)`` from `systems.running_body`.
+        parens (bool, optional): Wrap the clause in parentheses. A message that is
+            already inside parentheses asks for a comma instead.
+
+    Returns:
+        str: ``" (system 'name', 148ms into its turn)"``, or an empty string when no
+        system body was running. The milliseconds tell a body that caused the stall
+        (they come close to the stall's length) from one that only started late in it.
+    """
+    if not running:
+        return ""
+    name, seconds = running
+    clause = f"system '{name}', {seconds * 1000.0:.0f}ms into its turn"
+    return f" ({clause})" if parens else f", {clause}"
 
 
 def _work_label(frame):
@@ -217,6 +245,7 @@ class ReactorStallWatchdog:
         self._sample_episode = None
         self._last_sample_log_time = 0.0
         self._stall_work = None
+        self._stall_system = None
 
     @property
     def sample_interval(self) -> float:
@@ -416,9 +445,11 @@ class ReactorStallWatchdog:
         if frame is None:
             return None
         label = _work_label(frame)
+        running = systems.running_body()
         with self._state_lock:
             if episode == self._heartbeat_episode:
                 self._stall_work = (episode, label)
+                self._stall_system = (episode, running)
         return label
 
     def _stall_candidate(self, now):
@@ -455,9 +486,10 @@ class ReactorStallWatchdog:
         frame = self._loop_frame()
         if frame:
             stack_str = "".join(traceback.format_stack(frame))
+            owner = _in_system(systems.running_body())
             logger.log_warn(
                 f"Live reactor stall in progress (~{elapsed_s * 1000.0:.0f}ms blocked) "
-                f"at {_work_label(frame)}! Live IO thread execution stack:\n{stack_str}"
+                f"at {_work_label(frame)}{owner}! Live IO thread execution stack:\n{stack_str}"
                 f"{self._busy_stacks(now)}"
             )
             return True
@@ -472,17 +504,24 @@ class ReactorStallWatchdog:
             work = (
                 self._stall_work[1] if self._stall_work and self._stall_work[0] == ended else None
             )
+            running = (
+                self._stall_system[1]
+                if self._stall_system and self._stall_system[0] == ended
+                else None
+            )
             cpu_before, self._cpu_base = self._cpu_base, cpu
             self._last_heartbeat = now
             self._heartbeat_episode += 1
         if self._last is not None:
             stall_ms = (now - self._last - self.interval) * 1000.0
             if stall_ms > self.threshold_ms:
-                self._report_stall(stall_ms, self._last + self.interval, now, work, cpu_before, cpu)
+                self._report_stall(
+                    stall_ms, self._last + self.interval, now, work, cpu_before, cpu, running
+                )
         self._last = now
 
     def _report_stall(
-        self, stall_ms, window_start, window_end, work, cpu_before=None, cpu_now=None
+        self, stall_ms, window_start, window_end, work, cpu_before=None, cpu_now=None, system=None
     ) -> None:
         """Log one over-threshold stall, naming the collector or the GIL holder when one caused it.
 
@@ -493,9 +532,13 @@ class ReactorStallWatchdog:
             work (str): Where the loop was sampled during the stall, if it was.
             cpu_before (dict, optional): Per-thread CPU at the last heartbeat.
             cpu_now (dict, optional): Per-thread CPU at this one.
+            system (tuple, optional): ``(name, seconds)`` of the system body that was on
+                the reactor when the loop was sampled, if one was.
         """
         paused, longest = self._gc_probe(window_start, window_end)
         cause = "work" if work else "unknown"
+        # A system is named only with the place it was seen at: both come from one look.
+        owner = _in_system(system) if work else ""
         wall = window_end - window_start + self.interval
         try:
             loop_cpu, busy = self._busy_threads(cpu_before, cpu_now, wall)
@@ -505,7 +548,7 @@ class ReactorStallWatchdog:
         if longest is not None and paused * 1000.0 >= stall_ms * 0.5:
             cause = "gc"
             start, end, generation, collected = longest
-            running = f"; running {work}" if work else ""
+            running = f"; running {work}{_in_system(system, parens=False)}" if work else ""
             message = (
                 "Reactor stall: a single reactor turn blocked for ~%.0fms (threshold %.0fms) "
                 "at garbage collection (generation %s, %.0fms, %s objects collected%s). "
@@ -521,7 +564,7 @@ class ReactorStallWatchdog:
             )
         elif self._starved(loop_cpu, busy, wall):
             cause = "gil"
-            where = f" The loop was at {work}." if work else ""
+            where = f" The loop was at {work}{owner}." if work else ""
             message = (
                 "Reactor stall: a single reactor turn blocked for ~%.0fms (threshold %.0fms) "
                 "most likely waiting for the GIL: %s.%s Keep that work short, or move it out "
@@ -536,9 +579,9 @@ class ReactorStallWatchdog:
             )
             message = (
                 "Reactor stall: a single reactor turn blocked for ~%.0fms "
-                "(threshold %.0fms) at %s%s. Move blocking I/O off the reactor with "
+                "(threshold %.0fms) at %s%s%s. Move blocking I/O off the reactor with "
                 "evennia.utils.defer."
-                % (stall_ms, self.threshold_ms, work or "work not sampled", share)
+                % (stall_ms, self.threshold_ms, work or "work not sampled", owner, share)
             )
         logger.log_warn(message)
         prometheus_metrics.best_effort(
