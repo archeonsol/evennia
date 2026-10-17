@@ -840,12 +840,12 @@ class TestCpAttrOnTheDatabase(BuildingDBTest):
         self.assertEqual(self.obj1.db.test1, "value1")
         self.assertEqual(self.obj2.db.test3, "value1")
 
-    def test_unknown_switch_still_copies(self):
+    def test_unknown_switch_changes_nothing(self):
         self.obj2.db.test2 = "value2"
-        shown = self.run_action(CpAttr, "Obj2/test2 = Obj2/test3", switches=("copy",))
-        self.assertIn("Copied Obj2.test2 -> Obj2.test3. (value: 'value2')", shown)
+        shown = self.run_action(CpAttr, "Obj2/test2 = Obj2/test3", switches=("mvoe",))
+        self.assertEqual(shown, "Unknown switch /mvoe. The only switch is /move.")
         self.assertEqual(self.obj2.db.test2, "value2")
-        self.assertEqual(self.obj2.db.test3, "value2")
+        self.assertIsNone(self.obj2.db.test3)
 
 
 class TestNestedAttributeHelpers(unittest.TestCase):
@@ -913,9 +913,8 @@ class TestLinkOnTheDatabase(BuildingDBTest):
         self.assertIsNone(self.exit1.destination)
 
     def test_usage_and_not_found(self):
-        usage = "Usage: link[/twoway] <object> = <target>"
-        self.assertEqual(self.run_action(Unlink, ""), usage)
-        self.assertEqual(self.run_action(Link, ""), usage)
+        self.assertEqual(self.run_action(Unlink, ""), "Usage: unlink <object>")
+        self.assertEqual(self.run_action(Link, ""), "Usage: link[/twoway] <object> = <target>")
         self.assertEqual(self.run_action(Link, "NotFound"), "Could not find 'NotFound'.")
 
     def test_twoway_self_link_and_global_match(self):

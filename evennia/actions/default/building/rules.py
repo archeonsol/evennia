@@ -173,6 +173,10 @@ class CharacterBuildingRules(AttributeOperations):
         if not self._is_actor(actor):
             return SKIP
         caller = self
+        unknown = [switch for switch in action.switches if switch != "move"]
+        if unknown:
+            caller.msg(f"Unknown switch /{unknown[0]}. The only switch is /move.")
+            return CLAIM
         if not action.rhs:
             caller.msg("Usage: cpattr[/move] <obj>/<attr>[:category] = <obj>/<attr>")
             return CLAIM
@@ -372,7 +376,10 @@ class CharacterBuildingRules(AttributeOperations):
     def _link(self, action, clear=False):
         caller = self
         if not action.args:
-            caller.msg("Usage: link[/twoway] <object> = <target>")
+            if clear:
+                caller.msg("Usage: unlink <object>")
+            else:
+                caller.msg("Usage: link[/twoway] <object> = <target>")
             return CLAIM
         obj = self._find_link_object(caller, action.lhs)
         if not obj:
