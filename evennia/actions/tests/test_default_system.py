@@ -12,8 +12,11 @@ import unittest
 from types import SimpleNamespace
 from unittest import mock
 
+from twisted.internet import task as twisted_task
 from twisted.internet.defer import Deferred
 
+from evennia.actions.action import Action
+from evennia.actions.context import ActionContext
 from evennia.actions.default import python_console as python_console_module
 from evennia.actions.default import system as system_module
 from evennia.actions.default.system import (
@@ -26,11 +29,26 @@ from evennia.actions.default.system import (
     Tasks,
 )
 from evennia.actions.engine import RuleEngine
-from evennia.actions.tests.fakes import FakeChar, dispatch, make_actor
+from evennia.actions.menus import YesNoState
+from evennia.actions.state import get_states
+from evennia.actions.tests.fakes import (
+    ENGINE,
+    FakeChar,
+    FakeSession,
+    _sync,
+    dispatch,
+    make_actor,
+)
+from evennia.authorization.storage import grant_capabilities, principal_refs
 from evennia.objects import models as object_models
+from evennia.objects.objects import DefaultCharacter
 from evennia.scripts import models as script_models
 from evennia.scripts import taskhandler as taskhandler_module
+from evennia.scripts.models import ScriptDB
+from evennia.utils import create
 from evennia.utils import systems as systems_module
+from evennia.utils.ansi import strip_ansi
+from evennia.utils.test_resources import BaseEvenniaTestCase, EvenniaTest
 
 # the package re-exports shadow the engine submodule with the singleton; fetch
 # the real module for patching its generator-input seam.
@@ -262,6 +280,114 @@ class TestTasks(unittest.TestCase):
         self.assertGreaterEqual(trace.carry_out_gated, 1)
 
 
+def deferred_job():
+    """Module-level task callback, so a persistent task can pickle it."""
+    return "success"
+
+
+class TestTasksOnTheTaskHandler(BaseEvenniaTestCase):
+    """``@tasks`` against the real task handler, driven by a test clock."""
+
+    delay = 5
+
+    def setUp(self):
+        super().setUp()
+        self.handler = taskhandler_module.TASK_HANDLER
+        self.old_clock = self.handler.clock
+        self.handler.clock = twisted_task.Clock()
+        self.handler.clear()
+        self.task = self.handler.add(self.delay, deferred_job)
+        self.char, self.actor = _setup()
+
+    def tearDown(self):
+        self.handler.clear()
+        self.handler.clock = self.old_clock
+        super().tearDown()
+
+    def _tasks(self, raw="", switches=()):
+        self.char.messages.clear()
+        action = Tasks.parse(raw, self.actor, switches=switches, verb="@tasks")
+        dispatch(action, self.actor, [self.char])
+        return "\n".join(_texts(self.char))
+
+    def _answer(self, reply):
+        """Send one input line to the pending yes/no question."""
+        self.char.messages.clear()
+        (state,) = [s for s in get_states(self.char) if isinstance(s, YesNoState)]
+        line = Action()
+        line._raw_string = reply
+        context = ActionContext(providers=[state], actor=self.actor, raw_string=reply)
+        _sync(ENGINE.dispatch(line, self.actor, context, record_phases=False))
+        return "".join(_texts(self.char))
+
+    def _confirm_prompt(self, switch):
+        prompt = self._tasks(str(self.task.get_id()), switches=(switch,))
+        self.assertIn(f"{switch.capitalize()} task 1 with completion date", prompt)
+        self.assertIn(" (deferred_job) ", prompt)
+
+    def test_listing_shows_a_persistent_task(self):
+        self.handler.clear()
+        self.handler.add(self.delay, deferred_job, persistent=True)
+        self.assertIn("True", self._tasks())
+
+    def test_pause_then_unpause(self):
+        self._confirm_prompt("pause")
+        self._answer("y")
+        self.assertTrue(self.task.paused)
+        self.handler.clock.advance(self.delay + 1)
+        self.assertTrue(self.task.exists())
+        self._confirm_prompt("unpause")
+        self._answer("y")
+        self.handler.clock.advance(1)
+        self.assertFalse(self.task.exists())
+
+    def test_do_task(self):
+        self._confirm_prompt("do_task")
+        self._answer("y")
+        self.assertFalse(self.task.exists())
+
+    def test_remove(self):
+        self._confirm_prompt("remove")
+        self._answer("y")
+        self.assertFalse(self.task.exists())
+
+    def test_call_runs_the_callback_and_keeps_the_task(self):
+        self._confirm_prompt("call")
+        self._answer("y")
+        self.assertTrue(self.task.active())
+        self.handler.clock.advance(self.delay + 1)
+        self.assertFalse(self.task.exists())
+
+    def test_unanswered_cancel_lets_the_task_complete(self):
+        self._tasks(str(self.task.get_id()), switches=("cancel",))
+        self.handler.clock.advance(self.delay + 1)
+        self.assertFalse(self.task.exists())
+
+    def test_yes_reports_the_action_result(self):
+        self._tasks(str(self.task.get_id()), switches=("cancel",))
+        self.assertEqual(
+            self._answer("y"),
+            "cancel request completed.The task function cancel returned: True",
+        )
+        self.assertTrue(self.task.exists())
+        self.assertFalse(self.task.active())
+
+    def test_task_that_completes_while_waiting_is_left_alone(self):
+        self._tasks(str(self.task.get_id()), switches=("cancel",))
+        self.handler.clock.advance(self.delay + 1)
+        self.assertEqual(self._answer("y"), "Task completed while waiting for input.")
+        self.assertFalse(self.task.exists())
+
+    def test_new_task_under_the_same_id_is_not_touched(self):
+        self._tasks(str(self.task.get_id()), switches=("cancel",))
+        self.handler.clock.advance(self.delay + 1)
+        self.assertFalse(self.task.exists())
+        newer = self.handler.add(self.delay + 1, deferred_job)
+        self.assertEqual(newer.get_id(), self.task.get_id())
+        self.assertEqual(self._answer("y"), "Task completed while waiting for input.")
+        self.assertTrue(newer.active())
+
+
 # --- @py -------------------------------------------------------------------------
 class TestPy(unittest.TestCase):
     def _py(self, char, actor, raw, switches=()):
@@ -279,6 +405,18 @@ class TestPy(unittest.TestCase):
         char, actor = _setup()
         self._py(char, actor, "me.key")
         self.assertTrue(any("Staff" in m for m in _texts(char)))
+
+    def test_clientraw_sends_the_unstringified_result_raw(self):
+        char, actor = _setup()
+        char.msg = mock.Mock()
+        self._py(char, actor, "1+2", switches=("clientraw",))
+        shown = [
+            call.kwargs["text"][0] for call in char.msg.call_args_list if "text" in call.kwargs
+        ]
+        self.assertIn(">>> 1+2", shown)
+        result = char.msg.call_args_list[-1]
+        self.assertEqual(result.args[0], (3, {"type": "py_output"}))
+        self.assertTrue(result.kwargs["options"]["client_raw"])
 
     def test_time_switch_reports_runtime(self):
         char, actor = _setup()
@@ -569,6 +707,91 @@ class TestScripts(unittest.TestCase):
         self.assertTrue(any("permission" in text for text in _texts(char)))
         for script in scripts:
             script.delete.assert_not_called()
+
+
+class SystemCharacter(CharacterSystemRules, DefaultCharacter):
+    """A database character carrying the default system rules."""
+
+
+class TestScriptsOnTheDatabase(EvenniaTest):
+    """``@scripts`` against stored scripts and objects."""
+
+    character_typeclass = SystemCharacter
+    evennia_fixtures = {"char1", "obj1"}
+
+    def setUp(self):
+        super().setUp()
+        grant_capabilities(
+            principal_refs(self.char1)[0],
+            ["engine.object.edit"],
+            scope_kind="world",
+            scope_key="*",
+            provenance="test",
+        )
+
+    def _scripts(self, raw, switches=(), answer=None):
+        actor = make_actor(self.char1, account=self.account)
+        action = Scripts.parse(raw, actor, switches=switches, verb="@scripts")
+        self.char1.msg = mock.Mock()
+        reply = Deferred()
+        reply.callback(answer)
+        # The pager only pages to a connected session.
+        with (
+            mock.patch.object(engine_mod, "_get_input_future", return_value=reply) as asked,
+            mock.patch.object(self.char1.sessions, "get", return_value=[FakeSession()]),
+        ):
+            dispatch(action, actor, [self.char1])
+        shown = []
+        for call in self.char1.msg.call_args_list:
+            text = call.kwargs.get("text", call.args[0] if call.args else "")
+            shown.append(strip_ansi(str(text[0] if isinstance(text, tuple) else text)))
+        del self.char1.msg
+        return "\n".join(shown), asked.called
+
+    def _on_obj(self):
+        return ScriptDB.objects.filter(db_obj=self.obj1)
+
+    def test_attach_list_and_delete_on_an_object(self):
+        shown, _ = self._scripts("Obj =")
+        self.assertIn("No scripts defined on Obj", shown)
+        shown, _ = self._scripts("Obj = scripts.scripts.DefaultScript")
+        self.assertIn("Script scripts.scripts.DefaultScript successfully added to Obj.", shown)
+        self.assertEqual(self._on_obj().count(), 1)
+        shown, _ = self._scripts("Obj =")
+        self.assertIn("dbref", shown)
+        shown, asked = self._scripts(
+            "Obj = scripts.scripts.DefaultScript", switches=("delete",), answer="y"
+        )
+        self.assertFalse(asked)
+        self.assertIn("Script on Obj Deleted - ", shown)
+        self.assertFalse(self._on_obj().exists())
+
+    def test_invalid_typeclass_path_creates_nothing(self):
+        before = ScriptDB.objects.count()
+        shown, _ = self._scripts("evennia.Dummy")
+        self.assertIn("Global Script NOT Created (see log)", shown)
+        self.assertEqual(ScriptDB.objects.count(), before)
+
+    def test_create_and_delete_a_global_script(self):
+        shown, _ = self._scripts("evennia.scripts.scripts.DoNothing")
+        self.assertIn("Global Script Created - sys_do_nothing ", shown)
+        path = "evennia.scripts.scripts.DoNothing"
+        self.assertTrue(ScriptDB.objects.filter(db_typeclass_path=path).exists())
+        shown, _ = self._scripts(path, switches=("delete",))
+        self.assertIn("Global Script Deleted - sys_do_nothing", shown)
+        self.assertFalse(ScriptDB.objects.filter(db_typeclass_path=path).exists())
+
+    def test_confirmed_range_delete(self):
+        first = create.create_script(key="script1")
+        second = create.create_script(key="script2")
+        third = create.create_script(key="script3")
+        shown, asked = self._scripts(f"#{first.id}-#{third.id}", switches=("delete",), answer="y")
+        self.assertTrue(asked)
+        for key in ("script1", "script2", "script3"):
+            self.assertIn(
+                f"Global Script Deleted - {key} (evennia.scripts.scripts.DefaultScript)", shown
+            )
+        self.assertFalse(ScriptDB.objects.filter(id__in=(first.id, second.id, third.id)).exists())
 
 
 if __name__ == "__main__":
