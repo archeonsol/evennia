@@ -1,6 +1,7 @@
 """Focused tests for the native default roleplay actions."""
 
 import unittest
+from unittest import mock
 
 from evennia.actions.context import ActionContext
 from evennia.actions.default.roleplay import (
@@ -12,6 +13,9 @@ from evennia.actions.default.roleplay import (
 )
 from evennia.actions.engine import RuleEngine
 from evennia.actions.tests.fakes import FakeChar, FakeObj, _sync, dispatch, make_actor
+from evennia.objects.objects import DefaultCharacter
+from evennia.utils.ansi import strip_ansi
+from evennia.utils.test_resources import EvenniaTest
 
 
 class Roleplayer(DefaultRoleplayRules, FakeChar):
@@ -91,6 +95,37 @@ class TestRoleplay(unittest.TestCase):
         context = ActionContext(providers=[self.char], actor=self.actor)
         _sync(RuleEngine().explain(action, self.actor, context))
         self.assertFalse(self.char.messages)
+
+
+class RoleplayCharacter(DefaultRoleplayRules, DefaultCharacter):
+    """A database character carrying the default roleplay rules."""
+
+
+class TestPoseDelivery(EvenniaTest):
+    """A first-person pose reaches each observer as a rendered plan."""
+
+    character_typeclass = RoleplayCharacter
+    evennia_fixtures = {"char1", "char2"}
+
+    def _pose(self, text, verb="pose"):
+        actor = make_actor(self.char1, account=self.account)
+        dispatch(Pose.parse(text, actor, verb=verb), actor, [self.char1])
+
+    def test_observer_receives_flattened_pose_with_metadata(self):
+        self.char2.msg = mock.Mock()
+        self._pose("look around")
+        body, meta = self.char2.msg.call_args.args[0]
+        self.assertEqual(strip_ansi(body), "Char looks around.")
+        self.assertEqual(meta["type"], "pose")
+        self.assertIs(self.char2.msg.call_args.kwargs["from_obj"], self.char1)
+        self.assertTrue(self.char2.msg.call_args.kwargs["route"].rendered)
+
+    def test_colon_verb_delivers_the_same_pose(self):
+        self.char2.msg = mock.Mock()
+        self._pose("look around", verb=":")
+        body, meta = self.char2.msg.call_args.args[0]
+        self.assertEqual(strip_ansi(body), "Char looks around.")
+        self.assertEqual(meta["type"], "pose")
 
 
 if __name__ == "__main__":
