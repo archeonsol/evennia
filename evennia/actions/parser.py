@@ -27,6 +27,7 @@ up a disambiguation state. That is the whole point of the parser refusing to
 "print and return None" the way the legacy command system did.
 """
 
+import re
 from dataclasses import dataclass, field
 from typing import Optional, Protocol, runtime_checkable
 
@@ -203,6 +204,14 @@ class ActionParser:
             token_switches.append(switches)
         return match_tokens, token_switches
 
+    @staticmethod
+    def _args_after(stripped, word_count):
+        """The text after the first ``word_count`` words, with its spacing and newlines kept."""
+        words = list(re.finditer(r"\S+", stripped))
+        if word_count >= len(words):
+            return ""
+        return stripped[words[word_count - 1].end() :].lstrip()
+
     def _match_symbol_prefix(self, stripped):
         """Match an eligible no-space prefix verb glued to its arguments.
 
@@ -256,12 +265,12 @@ class ActionParser:
                 return ParseResult(
                     action=resolved,
                     raw_verb=verb,
-                    raw_args=" ".join(tokens[1:]),
+                    raw_args=self._args_after(stripped, 1),
                     confidence=1.0,
                 )
         if vm is not None:
             raw_verb = " ".join(tokens[: vm.span])
-            raw_args = " ".join(raw_tokens[vm.span :])
+            raw_args = self._args_after(stripped, vm.span)
             switches = [switch for switches in token_switches[: vm.span] for switch in switches]
             canonical = vm.canonical
             action_cls = vm.action_cls
@@ -281,7 +290,7 @@ class ActionParser:
                     return ParseResult(
                         action=resolved,
                         raw_verb=verb,
-                        raw_args=" ".join(tokens[1:]),
+                        raw_args=self._args_after(stripped, 1),
                         confidence=1.0,
                     )
                 return self._nomatch(raw_string, verb, actor)

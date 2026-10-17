@@ -795,3 +795,23 @@ class TestPrefixSuggestions(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestArgumentSpacing(unittest.TestCase):
+    """Arguments reach the action as typed: inner spacing and newlines are kept."""
+
+    def _p(self):
+        return ActionParser(registry=_symbol_registry())
+
+    def test_inner_spaces_are_kept(self):
+        res = self._p().parse("say hello    world", _actor())
+        self.assertEqual(res.action.message, "hello    world")
+
+    def test_newlines_and_indentation_are_kept(self):
+        res = self._p().parse("say for i in x:\n    print(i)", _actor())
+        self.assertEqual(res.action.message, "for i in x:\n    print(i)")
+
+    def test_space_after_the_verb_is_dropped(self):
+        res = self._p().parse("say/loud    hello  there", _actor())
+        self.assertEqual(res.action.message, "hello  there")
+        self.assertEqual(res.raw_args, "hello  there")
