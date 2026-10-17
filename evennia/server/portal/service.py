@@ -8,6 +8,7 @@ from django.core.exceptions import ImproperlyConfigured
 from django.db import connection
 
 import evennia
+from evennia.server.bus_result import TransportUnavailable
 from evennia.server.launcher_ipc import stop_launcher_servers
 from evennia.server.service_registry import MultiService
 from evennia.utils import clock, logger
@@ -535,6 +536,14 @@ class EvenniaPortalService(MultiService):
 
                 async with asyncio.timeout(5):
                     await clock.maybe_await(evennia.PORTAL_SESSION_HANDLER.disconnect_all())
+            except TransportUnavailable:
+                # The Server is already gone (a full stop takes it first), so there is
+                # nobody to tell. The sessions here were still closed by the handler's
+                # own callback; only the message to the Server was refused.
+                logger.log_info(
+                    "portal shutdown: the Server is not connected, so it was not told "
+                    "that the sessions are closing."
+                )
             except Exception:
                 logger.log_trace("portal session disconnect failed")
             try:

@@ -110,9 +110,37 @@ class TelnetProtocol(Telnet, protocol.Protocol, _BASE_SESSION_CLASS):
                 self.sessionhandler.sync(self.sessionhandler.get(self.sessid))
 
         except ValueError as err:
-            from evennia.utils import logger
+            self._note_malformed_input(err)
 
-            logger.log_err(f"Malformed telnet input: {err}")
+    #: Seconds between log lines about bad bytes from one client.
+    MALFORMED_LOG_EVERY = 60.0
+
+    def _note_malformed_input(self, err):
+        """
+        Log bytes the telnet parser could not read, at most once a minute per client.
+
+        A client that sends garbage (a port scanner, a MUD client with the wrong
+        encoding) is not an engine fault, and the bytes are dropped either way. The
+        first one is worth a line, to name the client; the rest are counted.
+
+        Args:
+            err (ValueError): What the parser raised.
+
+        """
+        from evennia.utils import logger
+
+        now = time.monotonic()
+        last = getattr(self, "_malformed_logged_at", None)
+        if last is not None and now - last < self.MALFORMED_LOG_EVERY:
+            self._malformed_skipped = getattr(self, "_malformed_skipped", 0) + 1
+            return
+        skipped = getattr(self, "_malformed_skipped", 0)
+        self._malformed_logged_at = now
+        self._malformed_skipped = 0
+        client = getattr(getattr(self, "transport", None), "client", None)
+        address = f" from {client[0]}" if client else ""
+        more = f" ({skipped} more from this client since the last line)" if skipped else ""
+        logger.log_info(f"Malformed telnet input ignored{address}: {err}{more}")
 
     def connectionMade(self):
         """

@@ -16,6 +16,7 @@ as the old ``HTTPChannelWithXForwardedFor`` did.
 """
 
 import asyncio
+import time
 
 import h11
 import httpx
@@ -29,6 +30,18 @@ _HOP_BY_HOP = frozenset(
 )
 
 _MAX_HEADER = 65536
+
+#: What httpx raises when the Server is not there to answer: refused, reset, hung up
+#: or timed out. Every restart makes all of these, so they are logged as one short
+#: line and not as faults.
+_UPSTREAM_GONE = (httpx.NetworkError, httpx.TimeoutException, httpx.RemoteProtocolError)
+
+#: Seconds a browser is told to wait before it tries again after a 502, 503 or 504.
+_RETRY_AFTER = 5
+
+#: At most one "the Server did not answer" line per this many seconds. A restart
+#: fails every request that arrives in it, so the others are counted, not logged.
+_UNAVAILABLE_LOG_EVERY = 10.0
 
 
 class _ClientGone(Exception):
@@ -50,6 +63,9 @@ class ReverseProxy:
         self._client = None
         self._server = None
         self._stop_lock = asyncio.Lock()
+        self._now = time.monotonic
+        self._unavailable_logged_at = None
+        self._unavailable_skipped = 0
 
     async def start(self, host, port):
         self._client = httpx.AsyncClient(
@@ -175,12 +191,67 @@ class ReverseProxy:
             # way -- the feed never closes itself -- so logging a traceback
             # here would turn every closed console tab into an error.
             return False
+        except _UPSTREAM_GONE as err:
+            # The Server is restarting or not answering. That is not a fault in the
+            # proxy, so there is no traceback: one short line, then a page that tells
+            # the browser to try again soon (when it has not been sent anything yet).
+            self._note_upstream_unavailable(err, request, response_started)
+            if not response_started:
+                code, reason = self._unavailable_status(err)
+                await self._send_error(conn, writer, code, reason, retry_after=_RETRY_AFTER)
+            return False
         except Exception:
             logger.log_trace("web proxy: upstream request failed")
             if not response_started:
                 await self._send_error(conn, writer, 502, b"Bad Gateway")
             return False
         return True
+
+    @staticmethod
+    def _unavailable_status(err):
+        """The status line to send when the Server did not answer.
+
+        Args:
+            err (Exception): The httpx error.
+
+        Returns:
+            tuple: ``(code, reason)``: 504 for a timeout, 503 when the Server
+            refused the connection (it is not listening yet), 502 otherwise.
+        """
+
+        if isinstance(err, httpx.TimeoutException):
+            return 504, b"Gateway Timeout"
+        if isinstance(err, httpx.ConnectError):
+            return 503, b"Service Unavailable"
+        return 502, b"Bad Gateway"
+
+    def _note_upstream_unavailable(self, err, request, response_started):
+        """Log that the Server did not answer, at most once every few seconds.
+
+        The query string is left out of the line: it can carry tokens.
+
+        Args:
+            err (Exception): The httpx error.
+            request (h11.Request): The request that failed.
+            response_started (bool): Whether the browser had already been sent
+                the start of a response.
+        """
+
+        now = self._now()
+        last = self._unavailable_logged_at
+        if last is not None and now - last < _UNAVAILABLE_LOG_EVERY:
+            self._unavailable_skipped += 1
+            return
+        skipped, self._unavailable_skipped = self._unavailable_skipped, 0
+        self._unavailable_logged_at = now
+        method = request.method.decode("latin1")
+        path = request.target.decode("latin1").split("?", 1)[0]
+        detail = f"{type(err).__name__}: {err}" if str(err) else type(err).__name__
+        when = "after the response had begun" if response_started else "before any response"
+        more = f" ({skipped} more since the last line)" if skipped else ""
+        logger.log_warn(
+            f"web proxy: the Server did not answer {method} {path} ({detail}), {when}.{more}"
+        )
 
     async def _write(self, writer, data):
         """Push one framed chunk to the client.
@@ -193,6 +264,11 @@ class ReverseProxy:
             _ClientGone: The client's socket is no longer writable.
         """
 
+        # uvloop does not return an error from a write to a closed socket; it raises
+        # RuntimeError ("the handler is closed"). Asking first needs no await between
+        # the question and the write, so the socket cannot close in between.
+        if writer.is_closing():
+            raise _ClientGone()
         try:
             writer.write(data)
             await writer.drain()
@@ -224,7 +300,7 @@ class ReverseProxy:
             headers.append((name, value))
         return headers
 
-    async def _send_error(self, conn, writer, code, reason):
+    async def _send_error(self, conn, writer, code, reason, retry_after=None):
         """Answer a failed exchange with a minimal plain-text page.
 
         Stays silent when the client has gone too: there is nobody left to
@@ -235,19 +311,19 @@ class ReverseProxy:
             writer (asyncio.StreamWriter): The client-facing socket.
             code (int): The HTTP status code to send.
             reason (bytes): One line of body text.
+            retry_after (int, optional): Seconds to put in a ``Retry-After``
+                header, for a failure that is expected to pass.
         """
 
         try:
             body = reason + b"\n"
-            frames = conn.send(
-                h11.Response(
-                    status_code=code,
-                    headers=[
-                        (b"content-length", str(len(body)).encode()),
-                        (b"content-type", b"text/plain; charset=utf-8"),
-                    ],
-                )
-            )
+            headers = [
+                (b"content-length", str(len(body)).encode()),
+                (b"content-type", b"text/plain; charset=utf-8"),
+            ]
+            if retry_after is not None:
+                headers.append((b"retry-after", str(int(retry_after)).encode()))
+            frames = conn.send(h11.Response(status_code=code, headers=headers))
             frames += conn.send(h11.Data(data=body))
             frames += conn.send(h11.EndOfMessage())
             await self._write(writer, frames)

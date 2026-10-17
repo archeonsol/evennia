@@ -344,23 +344,39 @@ class PortalSessionHandler(SessionHandler):
         if settings.TEST_ENVIRONMENT:
             return
 
-        def _callback(result, sessionhandler):
-            # we set a watchdog to stop self.disconnect from deleting
-            # sessions while we are looping over them.
-            sessionhandler._disconnect_all = True
-            for session in sessionhandler.values():
-                session.disconnect()
-            del sessionhandler._disconnect_all
-
         # inform Server; wait until finished sending before we continue
         # removing all the sessions.
 
         result = evennia.EVENNIA_PORTAL_SERVICE.server_amp.send_AdminPortal2Server(
             DUMMYSESSION, operation=PDISCONNALL
         )
-        result.addCallback(_callback, self)
-        result.addErrback(_callback, self)
+        result.addCallback(self._disconnect_each)
+        result.addErrback(self._disconnect_each)
         return result
+
+    def _disconnect_each(self, _result=None):
+        """
+        Disconnect every session held here, after the Server was told or could not be.
+
+        A session that ends can remove other entries from this handler (one still
+        waiting in the connection queue is dropped outright), so the loop runs over a
+        copy. Each disconnect is guarded, so one that fails does not leave the rest
+        connected, and the flag that stops ``disconnect`` deleting entries is always
+        cleared: left set, no later disconnect would remove its session.
+
+        Args:
+            _result: What the publication to the Server settled with; not used.
+
+        """
+        self._disconnect_all = True
+        try:
+            for session in list(self.values()):
+                try:
+                    session.disconnect()
+                except Exception:
+                    log_trace("portal: a session failed to disconnect")
+        finally:
+            self.__dict__.pop("_disconnect_all", None)
 
     def server_connect(self, protocol_path="", config=dict()):
         """

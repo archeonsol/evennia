@@ -842,3 +842,217 @@ class TestIrcSslFallback(TestCase):
 
         mock_opts.assert_called_once_with("irc.example.org")
         mock_reactor.connectSSL.assert_called_once()
+
+
+class _FakePortalSession:
+    """A session that can remove other entries from its handler when it disconnects."""
+
+    def __init__(self, handler, sessid, drops=(), fails=False):
+        self.handler = handler
+        self.sessid = sessid
+        self.drops = drops
+        self.fails = fails
+        self.disconnected = False
+
+    def disconnect(self):
+        self.disconnected = True
+        for sessid in self.drops:
+            self.handler.pop(sessid, None)
+        if self.fails:
+            raise RuntimeError("socket already gone")
+
+
+class TestPortalDisconnectAll(TestCase):
+    """Closing every session must survive sessions that drop other entries as they go."""
+
+    def test_every_session_is_disconnected_when_one_removes_the_others(self):
+        handler = PortalSessionHandler()
+        sessions = [
+            _FakePortalSession(handler, 1, drops=(2, 3)),
+            _FakePortalSession(handler, 2),
+            _FakePortalSession(handler, 3),
+        ]
+        for session in sessions:
+            handler[session.sessid] = session
+
+        handler._disconnect_each()
+
+        self.assertTrue(all(session.disconnected for session in sessions))
+        self.assertFalse(hasattr(handler, "_disconnect_all"))
+
+    def test_a_failing_disconnect_does_not_strand_the_rest_or_the_flag(self):
+        handler = PortalSessionHandler()
+        broken = _FakePortalSession(handler, 1, fails=True)
+        other = _FakePortalSession(handler, 2)
+        handler[1], handler[2] = broken, other
+
+        with mock.patch.object(portalsessionhandler, "log_trace") as traced:
+            handler._disconnect_each()
+
+        self.assertTrue(other.disconnected)
+        self.assertFalse(hasattr(handler, "_disconnect_all"))
+        traced.assert_called_once()
+
+    def test_the_flag_is_set_while_the_sessions_close(self):
+        handler = PortalSessionHandler()
+        seen = []
+
+        class Watcher(_FakePortalSession):
+            def disconnect(self):
+                seen.append(hasattr(self.handler, "_disconnect_all"))
+
+        handler[1] = Watcher(handler, 1)
+
+        handler._disconnect_each()
+
+        self.assertEqual(seen, [True])
+
+
+class TestTelnetMalformedInput(TestCase):
+    """Bad bytes from a client are logged for what they are, and not once per packet."""
+
+    def _protocol(self):
+        proto = object.__new__(TelnetProtocol)
+        proto.transport = Mock()
+        proto.transport.client = ("203.0.113.9", 40000)
+        return proto
+
+    def test_the_first_bad_input_is_one_info_line_naming_the_client(self):
+        proto = self._protocol()
+
+        with (
+            mock.patch("evennia.utils.logger.log_info") as info,
+            mock.patch("evennia.utils.logger.log_err") as err,
+        ):
+            proto._note_malformed_input(ValueError("Stumped", b"\xd0"))
+
+        err.assert_not_called()
+        info.assert_called_once()
+        line = info.call_args.args[0]
+        self.assertIn("Malformed telnet input", line)
+        self.assertIn("203.0.113.9", line)
+
+    def test_more_bad_input_within_a_minute_is_counted_not_logged(self):
+        proto = self._protocol()
+
+        with (
+            mock.patch("evennia.server.portal.telnet.time") as fake_time,
+            mock.patch("evennia.utils.logger.log_info") as info,
+        ):
+            fake_time.monotonic.side_effect = [100.0, 110.0, 120.0, 161.0]
+            for _ in range(4):
+                proto._note_malformed_input(ValueError("Stumped", b"\xd0"))
+
+        self.assertEqual(info.call_count, 2)
+        self.assertIn("(2 more from this client since the last line)", info.call_args.args[0])
+
+    def test_dataReceived_hands_a_parser_error_to_the_note_instead_of_raising(self):
+        from evennia.server.portal.telnet_parser import Telnet as ParserTelnet
+
+        proto = self._protocol()
+        proto.protocol_flags = {}
+
+        with (
+            mock.patch.object(
+                ParserTelnet, "dataReceived", side_effect=ValueError("Stumped", b"\xd0")
+            ),
+            mock.patch.object(proto, "_note_malformed_input") as note,
+        ):
+            proto.dataReceived(b"\xd0")
+
+        note.assert_called_once()
+
+
+class TestDiscordArchivedThread(TestCase):
+    """An edit that Discord refuses because the thread is archived is retried unarchived."""
+
+    ARCHIVED = json.dumps({"message": "Thread is archived", "code": 50083}).encode()
+
+    def _client(self):
+        from evennia.server.portal import discord
+
+        client = object.__new__(discord.DiscordClient)
+        client._rate_limiter = MagicMock()  # the property builds it on first use
+        client._rate_limiter.note_response.return_value = None
+        client._rate_limiter.run.side_effect = lambda key, send: send()
+        return client
+
+    def _requests(self):
+        """Patch the HTTP call; the sent requests and their reply callbacks are collected."""
+        from evennia.server.portal import discord
+
+        sent, callbacks = [], []
+
+        class _Pending:
+            def addCallback(self, callback):
+                callbacks.append(callback)
+                return self
+
+        def request(method, url, headers=None, data=None):
+            sent.append((method, url, json.loads(data)))
+            return _Pending()
+
+        return sent, callbacks, mock.patch.object(discord.http, "request", side_effect=request)
+
+    @staticmethod
+    def _reply(code, content=b"{}"):
+        response = MagicMock()
+        response.code = code
+        response.content = content
+        return response
+
+    def test_a_rename_of_an_archived_thread_is_retried_with_archived_false(self):
+        from evennia.server.portal import discord
+
+        client = self._client()
+        sent, callbacks, patched = self._requests()
+        with patched, mock.patch.object(discord.logger, "log_err") as log_err:
+            client.send_thread_update("123", name="Ticket 7", applied_tags=["9"])
+            callbacks[0](self._reply(400, self.ARCHIVED))
+
+        self.assertEqual(len(sent), 2)
+        method, url, data = sent[1]
+        self.assertEqual(method, "PATCH")
+        self.assertTrue(url.endswith("/channels/123"))
+        self.assertIs(data["archived"], False)
+        self.assertEqual(data["name"], "Ticket 7")
+        self.assertEqual(data["applied_tags"], ["9"])
+        log_err.assert_not_called()
+
+    def test_a_request_that_already_sets_archived_is_not_retried(self):
+        from evennia.server.portal import discord
+
+        client = self._client()
+        sent, callbacks, patched = self._requests()
+        with patched, mock.patch.object(discord.logger, "log_err") as log_err:
+            client.send_thread_archive("123", True)
+            callbacks[0](self._reply(400, self.ARCHIVED))
+
+        self.assertEqual(len(sent), 1)
+        log_err.assert_called_once()
+
+    def test_the_retry_is_not_repeated_when_it_is_refused_too(self):
+        from evennia.server.portal import discord
+
+        client = self._client()
+        sent, callbacks, patched = self._requests()
+        with patched, mock.patch.object(discord.logger, "log_err") as log_err:
+            client.send_thread_update("123", name="Ticket 7")
+            callbacks[0](self._reply(400, self.ARCHIVED))
+            callbacks[1](self._reply(400, self.ARCHIVED))
+
+        self.assertEqual(len(sent), 2)
+        log_err.assert_called_once()
+
+    def test_another_refusal_is_logged_as_before(self):
+        from evennia.server.portal import discord
+
+        client = self._client()
+        sent, callbacks, patched = self._requests()
+        body = json.dumps({"message": "Missing Permissions", "code": 50013}).encode()
+        with patched, mock.patch.object(discord.logger, "log_err") as log_err:
+            client.send_thread_update("123", name="Ticket 7")
+            callbacks[0](self._reply(403, body))
+
+        self.assertEqual(len(sent), 1)
+        log_err.assert_called_once()

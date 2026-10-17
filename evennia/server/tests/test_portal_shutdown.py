@@ -90,6 +90,43 @@ class PortalShutdownTest(SimpleTestCase):
         sibling.stop.assert_awaited_once()
         self.assertTrue(log_err.called)
 
+    def _shutdown_with_disconnect_error(self, error):
+        """Shut the Portal down when telling the Server its sessions close raises ``error``."""
+        service = self._service()
+        proxy = MagicMock()
+        proxy.stop = AsyncMock()
+        service._asyncio_proxies = [proxy]
+
+        with (
+            patch("evennia.server.portal.service.evennia") as evennia,
+            patch("evennia.server.portal.service.stop_launcher_servers", new=AsyncMock()),
+            patch("evennia.server.portal.service.clock.stop_loop"),
+            patch("evennia.server.portal.service.logger.log_trace") as log_trace,
+            patch("evennia.server.portal.service.logger.log_info") as log_info,
+        ):
+            evennia.PORTAL_SESSION_HANDLER.disconnect_all = AsyncMock(side_effect=error)
+            self.loop.run_until_complete(service.shutdown())
+
+        proxy.stop.assert_awaited_once()  # the rest of the shutdown ran either way
+        return log_trace, log_info
+
+    def test_a_server_that_is_already_gone_is_not_an_error(self):
+        from evennia.server.bus_result import TransportUnavailable
+
+        log_trace, log_info = self._shutdown_with_disconnect_error(
+            TransportUnavailable("peer is not ready")
+        )
+
+        log_trace.assert_not_called()
+        log_info.assert_called_once()
+        self.assertIn("Server is not connected", log_info.call_args.args[0])
+
+    def test_another_disconnect_failure_still_logs_its_traceback(self):
+        log_trace, log_info = self._shutdown_with_disconnect_error(ValueError("boom"))
+
+        log_trace.assert_called_once_with("portal session disconnect failed")
+        log_info.assert_not_called()
+
     def test_cancelled_start_closes_post_bind_listener(self):
         """Cancellation between bind and publication cannot lose the socket."""
         service = self._service()

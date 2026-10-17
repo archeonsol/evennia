@@ -56,6 +56,9 @@ DEFAULT_RETRY_DELAY = 30
 # reschedule itself forever.
 MAX_REQUEST_ATTEMPTS = 5
 
+# Discord's error code for "Thread is archived".
+THREAD_ARCHIVED = 50083
+
 _RATELIMIT_MAJOR_PARAMS = ("channels", "guilds", "webhooks")
 
 
@@ -520,6 +523,11 @@ class DiscordClient(WSClientProtocolBase, _BASE_SESSION_CLASS):
                     attempt=attempt + 1,
                     **kwargs,
                 )
+            elif self._edits_archived_thread(request_type, path, data, response):
+                # Discord refuses an edit to an archived thread unless the same request
+                # unarchives it. Tickets are renamed and re-tagged when they are claimed
+                # or change status, which can be days after the thread was archived.
+                self._post_json(path, {**data, "archived": False}, type=request_type, **kwargs)
             else:
                 self.log_request_failure(request_type, path, response)
 
@@ -529,6 +537,29 @@ class DiscordClient(WSClientProtocolBase, _BASE_SESSION_CLASS):
                 request_type, url, headers=self._request_headers(), data=body
             ).addCallback(cbResponse),
         )
+
+    @staticmethod
+    def _edits_archived_thread(method, path, data, response):
+        """
+        Tell whether a refused request was an edit to an archived thread.
+
+        Args:
+            method (str): The HTTP method of the request.
+            path (str): The API path of the request.
+            data (dict): The JSON sent. A request that already says whether the
+                thread is archived is not retried, so this cannot loop.
+            response: The HTTP response.
+
+        Returns:
+            bool: True for a PATCH of a channel that Discord refused with "Thread is
+            archived" (error code 50083).
+        """
+        if method != "PATCH" or not path.startswith("channels/") or "archived" in data:
+            return False
+        try:
+            return json.loads(response.content).get("code") == THREAD_ARCHIVED
+        except (ValueError, TypeError, AttributeError):
+            return False
 
     def log_request_failure(self, method, path, response):
         """Log a non-retryable REST failure with whatever Discord said about it."""
