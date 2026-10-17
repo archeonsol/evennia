@@ -1120,3 +1120,406 @@ class TestSlicedTick(_SchedulerTestMixin, BaseEvenniaTestCase):
         self._run_tick()
 
         self.assertEqual(self.events, [])
+
+
+@override_settings(SYSTEM_BODY_WARN_MS=100, SYSTEM_BODY_WARN_EVERY=60)
+class TestBodyTiming(_SchedulerTestMixin, BaseEvenniaTestCase):
+    """Every body is timed a turn at a time, counted, and named when a turn runs long."""
+
+    def setUp(self):
+        super().setUp()
+        self.perf = _PerfClock()
+        self.driver = SystemDriver(now=self.clock, perf=self.perf)
+        self._loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(self._loop)
+
+    def tearDown(self):
+        self._loop.close()
+        asyncio.set_event_loop(None)
+        super().tearDown()
+
+    def _register(self, name="s", cost=0.0):
+        def run(ctx):
+            self.fires.append(ctx)
+            self.perf.advance(cost)
+
+        register(name=name, cadence=every_tick(), scope=global_scope(), run=run)
+        return get_system(name)
+
+    async def _settle(self):
+        for _ in range(6):
+            await asyncio.sleep(0)
+
+    def _run(self, coro):
+        return self._loop.run_until_complete(coro)
+
+    # -- counting ---------------------------------------------------------------------
+
+    def test_a_synchronous_body_is_one_timed_turn(self):
+        system = self._register(cost=0.030)
+
+        self.driver.tick()
+
+        self.assertEqual(system.turns, 1)
+        self.assertAlmostEqual(system.busy_seconds, 0.030)
+        self.assertAlmostEqual(system.last_turn_seconds, 0.030)
+        self.assertAlmostEqual(system.worst_turn_seconds, 0.030)
+
+    def test_turns_add_up_and_the_worst_one_is_kept(self):
+        costs = iter([0.010, 0.040, 0.020])
+        system = self._register()
+        system.run = lambda ctx: self.perf.advance(next(costs))
+
+        for _ in range(3):
+            self.driver.tick()
+
+        self.assertEqual(system.turns, 3)
+        self.assertAlmostEqual(system.busy_seconds, 0.070)
+        self.assertAlmostEqual(system.last_turn_seconds, 0.020)
+        self.assertAlmostEqual(system.worst_turn_seconds, 0.040)
+
+    def test_a_body_that_raises_is_still_timed(self):
+        system = self._register()
+
+        def run(ctx):
+            self.perf.advance(0.050)
+            raise RuntimeError("boom")
+
+        system.run = run
+
+        with patch.object(systems, "logger"):
+            self.driver.tick()
+
+        self.assertEqual(system.turns, 1)
+        self.assertAlmostEqual(system.last_turn_seconds, 0.050)
+        self.assertFalse(system.in_flight)
+
+    def test_each_system_is_counted_on_its_own(self):
+        quick = self._register("quick", cost=0.001)
+        slow = self._register("slow", cost=0.020)
+
+        self.driver.tick()
+        self.driver.tick()
+
+        self.assertEqual((quick.turns, slow.turns), (2, 2))
+        self.assertAlmostEqual(quick.busy_seconds, 0.002)
+        self.assertAlmostEqual(slow.busy_seconds, 0.040)
+
+    def test_an_all_entities_body_is_timed_too(self):
+        def run(ctx):
+            self.perf.advance(0.015)
+
+        register(name="all", cadence=every(5), scope=all_entities(component="x.Y"), run=run)
+        system = get_system("all")
+        ids = self._loop.create_future()
+        ids.set_result([1])
+
+        async def scenario():
+            with patch.object(systems, "_entity_ids_deferred", return_value=ids):
+                self.clock.set(0.0)
+                self.driver.tick()  # prime
+                self.clock.set(5.0)
+                self.driver.tick()  # fire
+                await self._settle()
+
+        self._run(scenario())
+
+        self.assertEqual(system.turns, 1)
+        self.assertAlmostEqual(system.busy_seconds, 0.015)
+
+    # -- an async body ----------------------------------------------------------------
+
+    def test_an_async_body_is_timed_a_turn_at_a_time_and_not_while_it_waits(self):
+        gate = self._loop.create_future()
+
+        async def run(ctx):
+            self.perf.advance(0.010)
+            await gate
+            self.perf.advance(0.030)
+
+        register(name="a", cadence=every_tick(), scope=global_scope(), run=run)
+        system = get_system("a")
+
+        async def scenario():
+            self.driver.tick()
+            await self._settle()
+            self.assertEqual(system.turns, 1)
+            self.perf.advance(5.0)  # suspended: that time is not the reactor's
+            gate.set_result(None)
+            await self._settle()
+
+        self._run(scenario())
+
+        self.assertEqual(system.turns, 2)
+        self.assertAlmostEqual(system.busy_seconds, 0.040)
+        self.assertAlmostEqual(system.worst_turn_seconds, 0.030)
+        self.assertFalse(system.in_flight)
+
+    def test_an_async_body_that_raises_after_an_await_is_timed_and_logged(self):
+        async def run(ctx):
+            self.perf.advance(0.020)
+            await asyncio.sleep(0)
+            self.perf.advance(0.040)
+            raise RuntimeError("boom")
+
+        register(name="a", cadence=every_tick(), scope=global_scope(), run=run)
+        system = get_system("a")
+
+        async def scenario():
+            with patch.object(systems, "logger") as log:
+                self.driver.tick()
+                await self._settle()
+            return log
+
+        log = self._run(scenario())
+
+        self.assertEqual(system.turns, 2)
+        self.assertAlmostEqual(system.last_turn_seconds, 0.040)
+        self.assertTrue(log.log_trace.called)
+        self.assertFalse(system.in_flight)
+
+    def test_a_cancelled_async_body_sees_the_cancellation_and_is_timed(self):
+        seen = []
+        never = self._loop.create_future()
+
+        async def run(ctx):
+            self.perf.advance(0.010)
+            try:
+                await never
+            except asyncio.CancelledError:
+                seen.append("cancelled")
+                self.perf.advance(0.020)
+                raise
+
+        register(name="a", cadence=every_tick(), scope=global_scope(), run=run)
+        system = get_system("a")
+
+        async def scenario():
+            self.driver.tick()
+            await self._settle()
+            for task in list(self.driver._inflight):
+                task.cancel()
+            await self._settle()
+
+        self._run(scenario())
+
+        self.assertEqual(seen, ["cancelled"])
+        self.assertEqual(system.turns, 2)
+        self.assertAlmostEqual(system.busy_seconds, 0.030)
+        self.assertFalse(system.in_flight)
+
+    def test_a_body_that_returns_a_deferred_is_timed_for_the_call_only(self):
+        def run(ctx):
+            self.perf.advance(0.012)
+            return succeed(None)
+
+        register(name="d", cadence=every_tick(), scope=global_scope(), run=run)
+        system = get_system("d")
+
+        self._run(self._tick_and_settle())
+
+        self.assertEqual(system.turns, 1)
+        self.assertAlmostEqual(system.busy_seconds, 0.012)
+
+    async def _tick_and_settle(self):
+        self.driver.tick()
+        await self._settle()
+
+    def test_a_plain_function_that_hands_back_a_coroutine_counts_its_own_work(self):
+        async def later():
+            self.perf.advance(0.004)
+
+        def run(ctx):
+            self.perf.advance(0.025)
+            return later()
+
+        register(name="p", cadence=every_tick(), scope=global_scope(), run=run)
+        system = get_system("p")
+
+        self._run(self._tick_and_settle())
+
+        self.assertEqual(system.turns, 2)
+        self.assertAlmostEqual(system.busy_seconds, 0.029)
+
+    # -- who is running ---------------------------------------------------------------
+
+    def test_the_running_body_is_named_while_it_runs_and_not_after(self):
+        seen = []
+        system = self._register("who")
+        system.run = lambda ctx: seen.append(systems.running_body())
+
+        self.assertIsNone(systems.running_body())
+        self.driver.tick()
+
+        name, seconds = seen[0]
+        self.assertEqual(name, "who")
+        self.assertGreaterEqual(seconds, 0.0)
+        self.assertIsNone(systems.running_body())
+
+    def test_the_running_body_says_how_long_its_turn_has_gone_on(self):
+        with (
+            patch.object(systems, "_RUNNING", ("who", 10.0)),
+            patch.object(systems.time, "perf_counter", return_value=10.5),
+        ):
+            self.assertEqual(systems.running_body(), ("who", 0.5))
+
+    def test_nothing_is_running_after_a_body_raises(self):
+        system = self._register("who")
+
+        def run(ctx):
+            raise RuntimeError("boom")
+
+        system.run = run
+
+        with patch.object(systems, "logger"):
+            self.driver.tick()
+
+        self.assertIsNone(systems.running_body())
+
+    def test_an_async_body_is_named_in_each_turn_and_not_while_it_waits(self):
+        gate = self._loop.create_future()
+        seen = []
+
+        async def run(ctx):
+            seen.append(systems.running_body())
+            await gate
+            seen.append(systems.running_body())
+
+        register(name="a", cadence=every_tick(), scope=global_scope(), run=run)
+
+        async def scenario():
+            self.driver.tick()
+            await self._settle()
+            waiting = systems.running_body()
+            gate.set_result(None)
+            await self._settle()
+            return waiting
+
+        waiting = self._run(scenario())
+
+        self.assertIsNone(waiting)
+        self.assertEqual([entry[0] for entry in seen], ["a", "a"])
+        self.assertIsNone(systems.running_body())
+
+    # -- the line in the log ----------------------------------------------------------
+
+    def test_a_turn_at_the_limit_is_named(self):
+        system = self._register("slow", cost=0.100)
+
+        with patch.object(systems, "logger") as log:
+            self.driver.tick()
+
+        log.log_warn.assert_called_once()
+        text = log.log_warn.call_args.args[0]
+        self.assertIn("System 'slow' held the reactor for 100ms in one turn", text)
+        self.assertIn("limit 100ms", text)
+        self.assertEqual(system.slow_turns, 1)
+
+    def test_a_turn_under_the_limit_is_silent(self):
+        system = self._register("quick", cost=0.099)
+
+        with patch.object(systems, "logger") as log:
+            self.driver.tick()
+
+        log.log_warn.assert_not_called()
+        self.assertEqual(system.slow_turns, 0)
+
+    def test_the_line_is_held_back_for_a_minute_and_says_how_many_went_over(self):
+        system = self._register("slow", cost=0.100)
+
+        with patch.object(systems, "logger") as log:
+            self.driver.tick()
+            self.driver.tick()
+            self.driver.tick()
+            self.assertEqual(log.log_warn.call_count, 1)
+            self.perf.advance(60.0)
+            self.driver.tick()
+
+        self.assertEqual(log.log_warn.call_count, 2)
+        text = log.log_warn.call_args.args[0]
+        self.assertIn("3 turns went over the limit since the last line", text)
+        self.assertIn("the longest 100ms", text)
+        self.assertEqual(system.slow_turns, 4)
+
+    def test_the_first_line_does_not_count_turns_before_it(self):
+        self._register("slow", cost=0.100)
+
+        with patch.object(systems, "logger") as log:
+            self.driver.tick()
+
+        self.assertNotIn("went over", log.log_warn.call_args.args[0])
+
+    def test_each_system_has_its_own_line(self):
+        self._register("one", cost=0.100)
+        self._register("two", cost=0.100)
+
+        with patch.object(systems, "logger") as log:
+            self.driver.tick()
+
+        named = sorted(call.args[0].split("'")[1] for call in log.log_warn.call_args_list)
+        self.assertEqual(named, ["one", "two"])
+
+    @override_settings(SYSTEM_BODY_WARN_MS=0)
+    def test_a_zero_limit_turns_the_line_off(self):
+        system = self._register("slow", cost=5.0)
+
+        with patch.object(systems, "logger") as log:
+            self.driver.tick()
+
+        log.log_warn.assert_not_called()
+        self.assertEqual(system.slow_turns, 0)
+        self.assertAlmostEqual(system.worst_turn_seconds, 5.0)
+
+    @override_settings(SYSTEM_BODY_WARN_EVERY=0)
+    def test_a_zero_gap_names_every_slow_turn(self):
+        self._register("slow", cost=0.100)
+
+        with patch.object(systems, "logger") as log:
+            self.driver.tick()
+            self.driver.tick()
+
+        self.assertEqual(log.log_warn.call_count, 2)
+
+    # -- Prometheus and faults --------------------------------------------------------
+
+    def test_every_turn_is_handed_to_the_histogram(self):
+        self._register("measured", cost=0.030)
+
+        with patch.object(systems.prometheus_metrics, "record_system_body") as record:
+            self.driver.tick()
+
+        record.assert_called_once_with("measured", 0.030)
+
+    def test_the_histogram_counts_each_turn_by_system(self):
+        try:
+            from prometheus_client import REGISTRY
+        except ImportError:
+            self.skipTest("prometheus_client is not installed")
+        labels = {"system": "histogrammed"}
+
+        def sample(kind):
+            return REGISTRY.get_sample_value(f"evennia_system_body_seconds_{kind}", labels) or 0.0
+
+        self._register("histogrammed", cost=0.030)
+        count_before, total_before = sample("count"), sample("sum")
+
+        self.driver.tick()
+        self.driver.tick()
+
+        self.assertEqual(sample("count") - count_before, 2)
+        self.assertAlmostEqual(sample("sum") - total_before, 0.060)
+
+    def test_a_fault_in_the_timing_never_reaches_the_body_and_is_logged_once(self):
+        self._register("steady", cost=0.001)
+
+        with (
+            patch.object(
+                systems.prometheus_metrics, "best_effort", side_effect=RuntimeError("telemetry")
+            ),
+            patch.object(systems, "logger") as log,
+        ):
+            self.driver.tick()
+            self.driver.tick()
+
+        self.assertEqual(len(self.fires), 2)
+        self.assertEqual(log.log_trace.call_count, 1)

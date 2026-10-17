@@ -87,6 +87,23 @@ many entities (the dominant case — regen, decay, hunger) use
 reactor, compute in a worker, apply back in a single bulk UPDATE. The
 reactor-stall watchdog flags regressions.
 
+Every body is timed. A body holds the reactor while it runs, so the driver
+times each stretch of it (a *turn*: a synchronous body is one turn, an
+`async def` body has one for each `await` it passes) and keeps the numbers on
+the `System`: `turns`, `busy_seconds`, `last_turn_seconds`,
+`worst_turn_seconds` and `slow_turns`. The same time goes to the Prometheus
+histogram `evennia_system_body_seconds{system}`, whose count is the turns and
+whose sum is the time the system held the reactor. A turn at or over
+`settings.SYSTEM_BODY_WARN_MS` (default 100; 0 turns the line off) logs one
+warning that names the system, at most once every
+`settings.SYSTEM_BODY_WARN_EVERY` seconds (default 60) for each system, with
+how many turns went over since the last line. While a turn runs,
+`running_body()` names the system and how long it has been going, and the
+stall watchdog puts that in its stall lines. A stall then says which system was
+on the reactor and for how long, and not only which frame the sampler caught.
+A Deferred or Future that a body returns is not timed past the call: the work
+that settles it runs somewhere else.
+
 Registration is declared-startup-only. Modules listed in
 `settings.SYSTEM_MODULES` (plus the engine's own
 `evennia.server.engine_systems`) are loaded at server start; each must
@@ -144,6 +161,7 @@ from datetime import datetime, timedelta, timezone
 
 from django.conf import settings
 
+from evennia.server import prometheus_metrics
 from evennia.utils import clock, logger
 
 #: Driver tick rate in seconds. Part of the `every_tick` contract ("once per
@@ -186,6 +204,36 @@ _DEFAULT_WORKLOAD = SIMULATION
 _ENGINE_SYSTEM_MODULES = ("evennia.server.engine_systems",)
 
 _LAST_RUN_CONF_PREFIX = "system_lastrun_"
+
+#: A turn of a body at or over this many milliseconds is logged
+#: (`settings.SYSTEM_BODY_WARN_MS`; 0 turns the line off).
+_DEFAULT_BODY_WARN_MS = 100.0
+#: Seconds between two such lines about one system (`settings.SYSTEM_BODY_WARN_EVERY`).
+_DEFAULT_BODY_WARN_EVERY = 60.0
+
+#: The system body on the reactor right now, as ``(name, began)`` with ``began`` on
+#: the `time.perf_counter` clock, or None between turns. The stall watchdog reads it
+#: from its own thread. One tuple is stored and one is read, so no lock is needed.
+_RUNNING = None
+
+
+def running_body():
+    """
+    The system body on the reactor right now.
+
+    Safe to call from any thread: it reads one reference the driver replaces
+    whole. The watchdog uses it to name the system in a stall line.
+
+    Returns:
+        tuple or None: ``(name, seconds)``, the system and how long its current
+        turn has been running, or None when no system body is running.
+
+    """
+    current = _RUNNING
+    if current is None:
+        return None
+    return current[0], time.perf_counter() - current[1]
+
 
 _SYSTEM_REGISTRY = {}
 
@@ -521,6 +569,13 @@ class System:
         in_flight (bool): Whether a fire is currently executing.
         skip_count (int): Consecutive fires skipped because the previous one
             was still in flight; resets on a successful fire decision.
+        turns (int): Stretches of the body that have run on the reactor (this
+            process). A synchronous body is one turn a fire; an `async def` body
+            has one for each `await` it passes.
+        busy_seconds (float): The time those turns took, added up.
+        last_turn_seconds (float): The latest turn.
+        worst_turn_seconds (float): The longest turn so far.
+        slow_turns (int): Turns that reached `SYSTEM_BODY_WARN_MS`.
 
     """
 
@@ -547,7 +602,16 @@ class System:
         self.fire_count = 0
         self.in_flight = False
         self.skip_count = 0
+        self.turns = 0
+        self.busy_seconds = 0.0
+        self.last_turn_seconds = 0.0
+        self.worst_turn_seconds = 0.0
+        self.slow_turns = 0
         self._calendar_loaded = False
+        # when the last slow-turn line was logged (driver clock), and what has gone over since
+        self._warned_at = None
+        self._unreported_turns = 0
+        self._unreported_worst = 0.0
 
     def __repr__(self):
         return f"<System '{self.name}' {self.cadence.describe()} over {self.scope.describe()}>"
@@ -743,6 +807,51 @@ def _entity_ids_deferred(component):
 # ---------------------------------------------------------------------------
 
 
+class _Timed:
+    """
+    An `async def` body, awaited so that each stretch of it that runs on the reactor
+    between two awaits is timed and counted for its system.
+
+    Those stretches are the turns the reactor spends on the body. The time the body
+    spends suspended, waiting on something else, is not the reactor's and is not counted.
+    """
+
+    __slots__ = ("_coro", "_system", "_driver")
+
+    def __init__(self, coro, system, driver):
+        self._coro = coro
+        self._system = system
+        self._driver = driver
+
+    def __await__(self):
+        global _RUNNING
+        system, driver = self._system, self._driver
+        inner = self._coro.__await__()
+        send, throw = None, None
+        while True:
+            _RUNNING = (system.name, time.perf_counter())
+            began = driver._perf()
+            try:
+                waiting = inner.throw(throw) if throw is not None else inner.send(send)
+            except BaseException as error:
+                # The body returned (StopIteration) or raised: either way that was its last turn.
+                _RUNNING = None
+                driver._note_turn(system, driver._perf() - began)
+                if isinstance(error, StopIteration):
+                    return error.value
+                raise
+            _RUNNING = None
+            driver._note_turn(system, driver._perf() - began)
+            send, throw = None, None
+            try:
+                send = yield waiting
+            except GeneratorExit:
+                inner.close()
+                raise
+            except BaseException as error:
+                throw = error
+
+
 class SystemDriver:
     """
     The 1 Hz `LoopingCall` that checks cadences and fires due systems.
@@ -769,6 +878,7 @@ class SystemDriver:
     def __init__(self, now=time.time, perf=time.perf_counter):
         self._now = now
         self._perf = perf
+        self._timing_failed = False
         self._loop = clock.make_looping(self.tick_sliced)
         # Live fire tasks, kept so shutdown can drain/cancel them before the
         # final durability barrier (a fire finishing after the last attribute
@@ -863,6 +973,84 @@ class SystemDriver:
             if slice_seconds and self._perf() - slice_started >= slice_seconds:
                 await asyncio.sleep(0)
                 slice_started = self._perf()
+
+    def _call_body(self, system, ctx):
+        """
+        Call a system body and time it.
+
+        Returns what the body returned. An `async def` body comes back wrapped, so
+        the turns it takes after its first `await` are timed as it runs; the call
+        that only makes the coroutine is not counted as a turn.
+        """
+        global _RUNNING
+        _RUNNING = (system.name, time.perf_counter())
+        began = self._perf()
+        try:
+            result = system.run(ctx)
+        except BaseException:
+            _RUNNING = None
+            self._note_turn(system, self._perf() - began)
+            raise
+        _RUNNING = None
+        if inspect.iscoroutine(result):
+            if not inspect.iscoroutinefunction(system.run):
+                # A plain function that returned a coroutine: its own work was a turn.
+                self._note_turn(system, self._perf() - began)
+            return _Timed(result, system, self)
+        self._note_turn(system, self._perf() - began)
+        return result
+
+    def _note_turn(self, system, seconds):
+        """
+        Count one turn of a system body: its time, the worst so far, the histogram,
+        and a warning when it ran long. A fault in the timing never reaches the body
+        or the driver; it is logged once.
+        """
+        try:
+            system.turns += 1
+            system.busy_seconds += seconds
+            system.last_turn_seconds = seconds
+            if seconds > system.worst_turn_seconds:
+                system.worst_turn_seconds = seconds
+            prometheus_metrics.best_effort(
+                "system body", prometheus_metrics.record_system_body, system.name, seconds
+            )
+            limit_ms = float(getattr(settings, "SYSTEM_BODY_WARN_MS", _DEFAULT_BODY_WARN_MS) or 0)
+            if limit_ms > 0 and seconds * 1000.0 >= limit_ms:
+                self._warn_slow(system, seconds, limit_ms)
+        except Exception:
+            if not self._timing_failed:
+                self._timing_failed = True
+                logger.log_trace(f"System scheduler: could not time system '{system.name}'")
+
+    def _warn_slow(self, system, seconds, limit_ms):
+        """
+        Log a turn that ran past the limit. One line for each system every
+        `SYSTEM_BODY_WARN_EVERY` seconds (0 logs every one), saying how many turns
+        went over since the last line.
+        """
+        system.slow_turns += 1
+        system._unreported_turns += 1
+        system._unreported_worst = max(system._unreported_worst, seconds)
+        every = float(getattr(settings, "SYSTEM_BODY_WARN_EVERY", _DEFAULT_BODY_WARN_EVERY) or 0)
+        now = self._perf()
+        if system._warned_at is not None and now - system._warned_at < every:
+            return
+        turns, worst = system._unreported_turns, system._unreported_worst
+        system._warned_at = now
+        system._unreported_turns = 0
+        system._unreported_worst = 0.0
+        since = (
+            f" {turns} turns went over the limit since the last line about this system, "
+            f"the longest {worst * 1000.0:.0f}ms."
+            if turns > 1
+            else ""
+        )
+        logger.log_warn(
+            f"System '{system.name}' held the reactor for {seconds * 1000.0:.0f}ms in one turn "
+            f"(limit {limit_ms:.0f}ms).{since} Move the slow part off the reactor with "
+            "evennia.utils.defer, or into a bulk tick."
+        )
 
     def _fire_contained(self, system, now):
         """Fire one system, logging a scheduling-side failure instead of raising."""
@@ -1020,7 +1208,7 @@ class SystemDriver:
                 ctx = SystemContext(now=now, dt=dt, entities=_select_online_puppets())
             else:
                 ctx = SystemContext(now=now, dt=dt)
-            result = system.run(ctx)
+            result = self._call_body(system, ctx)
         except Exception:
             logger.log_trace(
                 f"System '{system.name}' errored on fire (run skipped, driver "
@@ -1042,7 +1230,7 @@ class SystemDriver:
         if scope.kind == _ALL_ENTITIES:
             entity_ids = await _entity_ids_deferred(scope.component)
             ctx = SystemContext(now=now, dt=dt, entity_ids=entity_ids)
-            return await clock.maybe_await(system.run(ctx))
+            return await clock.maybe_await(self._call_body(system, ctx))
         raise RuntimeError("_invoke_async is reserved for all_entities systems")
 
 
