@@ -25,16 +25,29 @@ matching release procedure.
 
 ---
 
-## 6.0.0+underspire.333: `@set` shows an attribute's markup as it was set
+## 6.0.0+underspire.334: The `@set` action shows an attribute's markup as it was set
+
+### Actions
+
+- **Viewing an attribute with `@set <obj>/<attr>` escapes its markup and shows the whole value**
+  ([`attributes.py`](evennia/actions/default/building/attributes.py)).
+  `AttributeOperations.view_attr` passes the value through `ansi.raw` and an escaping funcparser
+  pass, as `@examine` does, but does not crop it. A value of `|rred|n $you()` now reads
+  `|rred|n $you()`. Before, the client rendered the color and the outgoing funcparser filled in
+  `$you()`, so a builder could not copy a colored desc to another object. `@examine` shows the
+  same value cropped. Nested lookups (`obj/attr[0]`) are escaped the same way.
+- underspire.333 made this change only in the legacy `CmdSetAttribute` command. A game that
+  dispatches `@set` through actions saw no change until this release.
+
+## 6.0.0+underspire.333: Legacy `@set` command shows an attribute's markup as it was set
 
 ### Commands
 
-- **Viewing an attribute with `@set <obj>/<attr>` escapes its markup**
+- **Viewing an attribute with the legacy `CmdSetAttribute` escapes its markup**
   ([`building.py`](evennia/commands/default/building.py)). `CmdSetAttribute.view_attr` passes the
-  value through `ansi.raw` and an escaping funcparser pass, as `examine` already does. A value of
-  `|rred|n $you()` now reads `|rred|n $you()`. Before, the client rendered the color and the
-  outgoing funcparser filled in `$you()`, so a builder could not copy a colored desc to another
-  object. Nested lookups (`obj/attr[0]`) are escaped the same way.
+  value through `ansi.raw` and an escaping funcparser pass, as `examine` already does. The `@set`
+  action, which games on the action dispatch run, was not changed until underspire.334.
+  Nested lookups (`obj/attr[0]`) are escaped the same way.
 
 ## 6.0.0+underspire.332: Fewer stalls and tracebacks on the live game
 
