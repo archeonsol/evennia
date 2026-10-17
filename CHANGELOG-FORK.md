@@ -25,6 +25,73 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.335: Default actions match the old commands they replace
+
+A review of every action that replaces a command in `evennia/commands/default/` found
+security holes, silent data loss and behavior lost in the port. This release fixes them, and
+ports the old command tests that had no action test, so that the old tree can be deleted.
+
+### Security
+
+- **`@force` and `@userpassword` refuse a target with more authority than the caller**
+  ([`admin.py`](evennia/actions/default/admin.py),
+  [`account.py`](evennia/actions/default/account.py)). A builder could `@force` an admin to
+  `@grant` them `runtime_operator`, and a moderator could reset an operator's password. The
+  new `capabilities_beyond(principal, other)`
+  ([`service.py`](evennia/authorization/service.py)) returns the capabilities `principal`
+  holds that `other` lacks, ignoring quell; both verbs refuse when it is not empty.
+- **`@userpassword` works.** It crashed on every use (an Account has no `search_account`). It
+  now searches accounts with `evennia.utils.search.search_account`, reports a missing or
+  ambiguous name, and validates the new password against the target account.
+- **`@password old = new,pass` sets `new,pass`.** It read the comma as a list separator.
+- **The audit log masks passwords that contain symbols**, and abbreviated verbs
+  (`AUDIT_MASKS` in [`settings_default.py`](evennia/settings_default.py)).
+
+### Parser
+
+- **Arguments keep the spacing they were typed with**
+  ([`parser.py`](evennia/actions/parser.py)). The parser rebuilt arguments by joining split
+  words, so `say` text lost its spacing, `@py` code lost indentation and string contents,
+  `@sethelp` lost newlines, and a password with a double space could not be typed.
+- **Switches are lowercased, and a unique prefix expands to the full switch**
+  ([`muxargs.py`](evennia/actions/muxargs.py)). `ArgAction.switch_options` declares a verb's
+  switches; `normalize_switches(switches, options)` does the work. Before, `@scripts/del`
+  printed usage, `@option/SAVE` was ignored, `@tasks/<typo>` then `yes` raised a TypeError,
+  and `@grant/remove` granted. `@tasks`, `@grant` and `@cpattr` now refuse an unknown switch.
+- **`:` is a pose verb again** ([`roleplay.py`](evennia/actions/default/roleplay.py)).
+
+### Building
+
+- **No more silent data loss** ([`rules.py`](evennia/actions/default/building/rules.py),
+  [`attributes.py`](evennia/actions/default/building/attributes.py)):
+  - `@wipe obj:cat` wiped every attribute, and `@wipe obj/attr:cat` ignored the category.
+  - `@cpattr/move` used to swap two attributes removed both.
+  - `@alias/delete obj` with no name cleared every alias, and matched case-sensitively.
+  - `@set` stored the error text as the value of an unparseable literal, crashed on a list
+    index past the end, and aborted on Enter at a `[Y]/N` prompt.
+- **Stored markup shows as typed** in `@set`, its confirmation, `@examine`, `@cpattr` and
+  `@nick`. The new `as_typed(value)` in `attributes.py` escapes color codes, and escapes
+  `$func()` calls only when `FUNCPARSER_PARSE_OUTGOING_MESSAGES_ENABLED` is on. underspire.334
+  always escaped them, so a game with outgoing parsing off saw `\$you()`. The `@nick/list`
+  table still renders color: EvTable output is parsed again on its way out.
+- **`@examine/script` and `@examine/channel` work.** Scripts and channels had no examine
+  policy, and a missing policy denies; both now require `engine.object.examine`
+  ([`scripts.py`](evennia/scripts/scripts.py), [`comms.py`](evennia/comms/comms.py)).
+- **`@unlink` with no argument shows its own usage line.**
+
+### Tests
+
+- Action tests now cover what the old `evennia/commands/default/tests.py` checked for pose,
+  `@nick`, get/drop/give counts, `@tasks`, `@py`, `@scripts`, `@policy`, `@examine`,
+  `@alias`, `@copy`, `@wipe`, `@set`, `@cpattr`, `@link`, `@sethome` and help
+  ([`help/tests/test_renderer.py`](evennia/help/tests/test_renderer.py)).
+
+### Migration notes
+
+- A game that registers its own `ArgAction` subclasses gets lowercased switches with no
+  change. To get prefix expansion, declare `switch_options` on the class.
+- A game that relied on arguments with collapsed whitespace must strip or split them itself.
+
 ## 6.0.0+underspire.334: The `@set` action shows an attribute's markup as it was set
 
 ### Actions
