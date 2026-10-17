@@ -36,7 +36,7 @@ import evennia
 from evennia.utils import class_from_module
 
 from ..action import action
-from ..muxargs import ArgAction
+from ..muxargs import ArgAction, normalize_switches
 from ..result import CLAIM, SKIP
 from ..rule import rule
 from .general import Help, Look, Quit
@@ -102,7 +102,7 @@ class _RawArgAction(ArgAction):
     def parse(cls, raw_args, actor, context=None, switches=(), verb=None):
         return cls(
             args=(raw_args or "").strip(),
-            switches=tuple(switches or ()),
+            switches=normalize_switches(switches, cls.switch_options),
             verb=(verb or ""),
         )
 
@@ -142,6 +142,8 @@ class Encoding(_RawArgAction):
     encoding updates the session and synchronizes it with the portal; |w/clear|n
     resets the encoding to UTF-8.
     """
+
+    switch_options = ("clear",)
 
 
 @action("screenreader")

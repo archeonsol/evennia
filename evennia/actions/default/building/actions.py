@@ -77,6 +77,8 @@ class SetAttribute(ObjManipAction):
     |w/edit|n opens the line editor and converts a non-string value after confirmation.
     """
 
+    switch_options = ("edit", "script", "channel", "account", "room", "exit", "char", "character")
+
     __primary_handler__ = DefaultCharacter
 
 
@@ -93,6 +95,8 @@ class SetObjAlias(ArgAction):
     |wengine.world.build|n; mutations require edit or control access. An empty
     right side clears every alias, and |w/delete|n removes matching aliases.
     """
+
+    switch_options = ("category", "delete")
 
     __primary_handler__ = DefaultCharacter
 
@@ -124,6 +128,8 @@ class CpAttr(ObjManipAction):
     |w/move|n removes each copied source attribute after a successful transfer.
     """
 
+    switch_options = ("move",)
+
     __primary_handler__ = DefaultCharacter
 
 
@@ -136,6 +142,8 @@ class Link(ArgAction):
     setting a link requires edit or control access to the source, and |w/twoway|n
     requires it for both exits and sets each destination to the other's location.
     """
+
+    switch_options = ("twoway",)
 
     __primary_handler__ = DefaultCharacter
 
@@ -184,5 +192,7 @@ class Examine(ObjManipAction):
     and |w@ex|n are aliases; a leading |w*|n selects an account. Requires
     |wengine.object.examine|n. Without a target, it examines the current location.
     """
+
+    switch_options = ("account", "object", "script", "channel")
 
     __primary_handler__ = DefaultCharacter

@@ -208,6 +208,19 @@ class TestTasks(unittest.TestCase):
         self.assertIn("tick", out)
         self.assertIn("Actions:", out)
 
+    def test_unknown_task_action_is_refused_before_asking(self):
+        char, actor = _setup()
+        handler = _FakeTaskHandler({1: _task_entry()})
+        self._tasks(char, actor, raw="1", switches=("foo",), handler=handler)
+        self.assertEqual(_FakeTask.calls, [])
+        self.assertTrue(any("/foo is not a task action" in m for m in _texts(char)))
+
+    def test_switch_prefix_and_case_are_accepted(self):
+        char, actor = _setup()
+        handler = _FakeTaskHandler({1: _task_entry(), 2: _task_entry()})
+        self._tasks(char, actor, raw="tick", switches=("CANC",), handler=handler)
+        self.assertEqual(_FakeTask.calls, [(1, "cancel"), (2, "cancel")])
+
     def test_action_by_function_name(self):
         char, actor = _setup()
         handler = _FakeTaskHandler({1: _task_entry(), 2: _task_entry()})
@@ -484,7 +497,7 @@ class TestScripts(unittest.TestCase):
         fake_db = SimpleNamespace(objects=manager)
         answer = Deferred()
         answer.callback("no")
-        action = Scripts.parse("game.Store", actor, switches=("delete",), verb="@scripts")
+        action = Scripts.parse("game.Store", actor, switches=("del",), verb="@scripts")
         with (
             mock.patch.object(script_models, "ScriptDB", fake_db),
             mock.patch.object(engine_mod, "_get_input_future", return_value=answer),

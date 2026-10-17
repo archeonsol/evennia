@@ -55,6 +55,8 @@ class Option(ArgAction):
     setting when used with an assignment. |w/clear|n removes all saved settings.
     """
 
+    switch_options = ("save", "clear")
+
     __primary_handler__ = DefaultAccount
 
 

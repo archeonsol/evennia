@@ -34,7 +34,7 @@ from evennia.objects.character import DefaultCharacter
 
 from ..action import action
 from ..menus import ask_yes_no
-from ..muxargs import ArgAction
+from ..muxargs import ArgAction, normalize_switches
 from ..predicate import HasCapability
 from ..result import CLAIM, SKIP
 from ..rule import rule
@@ -70,6 +70,8 @@ class Tasks(ArgAction):
     matching task.
     """
 
+    switch_options = ("pause", "unpause", "do_task", "call", "remove", "cancel")
+
     __primary_handler__ = DefaultCharacter
 
 
@@ -84,6 +86,8 @@ class Py(ArgAction):
     console; |w/edit|n opens the persistent code editor.
     """
 
+    switch_options = ("time", "edit", "clientraw", "noecho")
+
     __primary_handler__ = DefaultCharacter
 
     @classmethod
@@ -92,7 +96,7 @@ class Py(ArgAction):
         # not a delimiter).
         return cls(
             args=(raw_args or "").strip(),
-            switches=tuple(switches or ()),
+            switches=normalize_switches(switches, cls.switch_options),
             verb=(verb or ""),
         )
 
@@ -121,6 +125,8 @@ class Scripts(ArgAction):
     a global script; assigning it to an object attaches it. |w/delete|n removes
     matching scripts and may require confirmation for multiple matches.
     """
+
+    switch_options = ("delete",)
 
     __primary_handler__ = DefaultCharacter
 
@@ -607,6 +613,12 @@ class CharacterSystemRules(PyRules):
         # a request to manipulate task(s)
         if switches and action.lhs:
             action_request = switches[0]
+            if action_request not in Tasks.switch_options:
+                caller.msg(
+                    f"/{action_request} is not a task action. Use one of: "
+                    + ", ".join(f"/{option}" for option in Tasks.switch_options)
+                )
+                return CLAIM
             try:
                 arg_is_id = int(action.lhslist[0])
             except ValueError:

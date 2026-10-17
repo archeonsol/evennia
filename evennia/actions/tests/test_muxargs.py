@@ -9,7 +9,7 @@ registry.
 import unittest
 from dataclasses import dataclass
 
-from evennia.actions.muxargs import ArgAction, mux_parse
+from evennia.actions.muxargs import ArgAction, mux_parse, normalize_switches
 
 
 class TestMuxParse(unittest.TestCase):
@@ -152,3 +152,29 @@ class TestArgAction(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestNormalizeSwitches(unittest.TestCase):
+    """Switches are lowercased and a unique prefix becomes the declared switch."""
+
+    def test_lowercases(self):
+        self.assertEqual(normalize_switches(("SAVE",), ("save", "clear")), ("save",))
+
+    def test_unique_prefix_expands(self):
+        self.assertEqual(normalize_switches(("del",), ("delete",)), ("delete",))
+
+    def test_exact_option_beats_longer_one(self):
+        self.assertEqual(normalize_switches(("room",), ("room", "rooms")), ("room",))
+
+    def test_ambiguous_prefix_is_kept(self):
+        self.assertEqual(normalize_switches(("ro",), ("room", "rooms")), ("ro",))
+
+    def test_unknown_switch_is_kept(self):
+        self.assertEqual(normalize_switches(("Remove",), ("revoke", "del")), ("remove",))
+
+    def test_parse_applies_the_declared_options(self):
+        @dataclass
+        class Verb(ArgAction):
+            switch_options = ("delete",)
+
+        self.assertEqual(Verb.parse("x", None, switches=("DEL",)).switches, ("delete",))

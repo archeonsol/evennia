@@ -212,6 +212,14 @@ class TestGrant(unittest.TestCase):
         self._grant(char, actor, "")
         self.assertTrue(any("Usage" in message for message in char.messages))
 
+    def test_unknown_switch_is_refused_before_granting(self):
+        char, actor = _setup(capabilities=("engine.runtime.manage",))
+        char.search_map["bob"] = FakeObj(key="bob")
+        with mock.patch("evennia.authorization.storage.grant_capabilities") as grant:
+            self._grant(char, actor, "bob = engine.world.build", switches=("remove",))
+        grant.assert_not_called()
+        self.assertTrue(any("Unknown switch /remove" in message for message in char.messages))
+
     def test_grants_registered_capability(self):
         char, actor = _setup(capabilities=("engine.runtime.manage",))
         char.pk = 1

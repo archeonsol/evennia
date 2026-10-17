@@ -40,7 +40,7 @@ from evennia.authorization.policy import (
 from evennia.objects.character import DefaultCharacter
 
 from ..action import action
-from ..muxargs import ArgAction
+from ..muxargs import ArgAction, normalize_switches
 from ..predicate import HasCapability
 from ..result import CLAIM, SKIP
 from ..rule import rule
@@ -79,6 +79,8 @@ class Nick(ArgAction):
     exactly as the stock command's custom |wparse|n.
     """
 
+    switch_options = ("inputline", "object", "account", "list", "delete", "clearall")
+
     __primary_handler__ = DefaultCharacter
 
     @classmethod
@@ -93,7 +95,7 @@ class Nick(ArgAction):
         lhs = lhs.replace("\\=", "=")
         return cls(
             args=args,
-            switches=tuple(switches or ()),
+            switches=normalize_switches(switches, cls.switch_options),
             verb=(verb or ""),
             lhs=lhs,
             rhs=rhs,
@@ -125,6 +127,17 @@ class SetHelp(ArgAction):
     overwrites an entry, |w/delete|n permanently deletes it, and name clashes
     require confirmation.
     """
+
+    switch_options = (
+        "edit",
+        "replace",
+        "append",
+        "extend",
+        "merge",
+        "category",
+        "policy",
+        "delete",
+    )
 
     __primary_handler__ = DefaultCharacter
 

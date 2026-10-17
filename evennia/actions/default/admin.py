@@ -60,6 +60,8 @@ class Emit(ArgAction):
     while |w@pemit|n forces puppeted accounts.
     """
 
+    switch_options = ("room", "rooms", "accounts", "contents")
+
     __primary_handler__ = DefaultCharacter
 
 
@@ -100,6 +102,8 @@ class Grant(ArgAction):
     control of an object or edit access to an account.
     """
 
+    switch_options = ("account", "revoke", "del")
+
     __primary_handler__ = DefaultCharacter
 
 
@@ -114,6 +118,8 @@ class Policy(ArgAction):
     control or edit access; |w/set|n replaces an override and |w/del|n removes it.
     """
 
+    switch_options = ("set", "del")
+
     __primary_handler__ = DefaultCharacter
 
 
@@ -127,6 +133,8 @@ class Scope(ArgAction):
     |wengine.world.build|n plus control or edit access; |w/set|n replaces all
     labels and |w/clear|n removes all of them.
     """
+
+    switch_options = ("set", "clear")
 
     __primary_handler__ = DefaultCharacter
 
@@ -270,6 +278,14 @@ class CharacterAdminRules:
 
         caller = self
         switches = action.switches
+        unknown = [switch for switch in switches if switch not in Grant.switch_options]
+        if unknown:
+            caller.msg(
+                "Unknown switch "
+                + ", ".join(f"/{switch}" for switch in unknown)
+                + ". Use /account, /revoke or /del."
+            )
+            return CLAIM
         lhs, rhs = action.lhs, action.rhs
 
         if not action.args:

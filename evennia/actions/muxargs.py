@@ -67,6 +67,9 @@ class ArgAction(Action):
 
     #: lhs/rhs delimiter(s), as for ``Command.rhs_split``. Not a dataclass field.
     rhs_split = "="
+    #: Switches this verb knows. A typed switch is lowercased, and a unique prefix
+    #: of one of these becomes the full switch (``/del`` is ``/delete``).
+    switch_options = ()
 
     args: str = ""
     switches: tuple = ()
@@ -95,7 +98,7 @@ class ArgAction(Action):
         parsed = mux_parse(raw_args, rhs_split=cls.rhs_split)
         return cls(
             args=parsed.args,
-            switches=tuple(switches or ()),
+            switches=normalize_switches(switches, cls.switch_options),
             verb=(verb or ""),
             lhs=parsed.lhs,
             rhs=parsed.rhs,
@@ -104,6 +107,25 @@ class ArgAction(Action):
             lhs_objs=tuple(parsed.lhs_objs),
             rhs_objs=tuple(parsed.rhs_objs),
         )
+
+
+def normalize_switches(switches, options=()) -> tuple:
+    """Lowercase ``switches`` and expand each unique prefix of one of ``options``.
+
+    An exact option wins over a longer one it prefixes. A switch that matches
+    no option, or the prefix of several, is kept as typed (lowercased), so the
+    rule that reads it can refuse it.
+    """
+
+    normalized = []
+    for switch in switches or ():
+        switch = switch.lower()
+        if switch not in options:
+            matches = [option for option in options if option.startswith(switch)]
+            if len(matches) == 1:
+                switch = matches[0]
+        normalized.append(switch)
+    return tuple(normalized)
 
 
 def mux_parse(raw_args: str, rhs_split: str | tuple | list = "=") -> MuxArgs:
