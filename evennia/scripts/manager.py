@@ -161,6 +161,8 @@ class ScriptDBManager(TypedObjectManager):
                 dmatch = dbref_match[0]
                 if not obj or dmatch.obj == obj:
                     return dbref_match
+            # A dbref names one script; if it is gone there is no name to search for.
+            return self.none()
 
         if typeclass:
             if callable(typeclass):

@@ -58,6 +58,11 @@ _BUSY_SHARE = 0.25
 _LOOP_IDLE_SHARE = 0.3
 #: The GIL is blamed on a thread only if it used at least this share of the window.
 _HOLDER_SHARE = 0.5
+#: The sampler starts noting where the loop is once a stall passes this share of the
+#: warning threshold. A stall just past the threshold is over within one sampler
+#: wake-up of crossing it, so waiting for the full threshold left about a third of the
+#: stalls on the live game with no place named.
+_NOTE_SHARE = 0.5
 #: Threads named in one warning, busiest first.
 _MAX_NAMED_THREADS = 3
 #: Innermost frames of a busy thread's stack kept in the live sample.
@@ -396,11 +401,16 @@ class ReactorStallWatchdog:
         return sys._current_frames().get(target_id) if target_id else None
 
     def _note_stalled_work(self, now):
-        """Record where the loop thread is while it is blocked past the warning threshold."""
+        """Record where the loop thread is while a stall runs, from half the threshold on.
+
+        Each wake-up overwrites the last one, so the place kept is where the loop was
+        when the sampler last looked. Only a stall that ends past the full threshold is
+        reported with it; a shorter one is dropped with the episode.
+        """
         with self._state_lock:
             last = self._last_heartbeat
             episode = self._heartbeat_episode
-        if last is None or (now - last - self.interval) * 1000.0 <= self.threshold_ms:
+        if last is None or (now - last - self.interval) * 1000.0 <= self.threshold_ms * _NOTE_SHARE:
             return None
         frame = self._loop_frame()
         if frame is None:

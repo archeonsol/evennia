@@ -169,6 +169,8 @@ class AccountDBManager(TypedObjectManager, UserManager):
             dbref_match = self.search_dbref(dbref)
             if dbref_match:
                 return dbref_match
+            # A dbref names one account; if it is gone there is no name to search for.
+            return self.none()
 
         query = {"username__iexact" if exact else "username__icontains": ostring}
         if typeclass:

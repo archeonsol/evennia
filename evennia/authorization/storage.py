@@ -1989,6 +1989,17 @@ async def _flush_authorization_prewarm(state: _PrewarmState) -> bool:
             state.task = None
 
 
+def _awaited_under_another_driver(exc: RuntimeError) -> bool:
+    """Whether asyncio refused an await because no task is driving this coroutine.
+
+    A rule can start a nested dispatch with ``ensureDeferred``. Twisted drives that
+    coroutine, while ``asyncio.current_task()`` still names the task that started it,
+    so awaiting the shared prewarm task there raises "await wasn't used with future".
+    The caller then reads inline, as it does when a fetch fails.
+    """
+    return "await wasn't used with future" in str(exc)
+
+
 def _finish_prewarm_wait(value: bool, outcome: str, started: float) -> bool:
     """Record one action's critical-path snapshot wait and return its result."""
 
@@ -2052,6 +2063,10 @@ async def prewarm_authorization(principals, resources) -> bool:
             if current_task.cancelling():
                 raise
             return _finish_prewarm_wait(False, "failed", started)
+        except RuntimeError as exc:
+            if not _awaited_under_another_driver(exc):
+                raise
+            return _finish_prewarm_wait(False, "failed", started)
     ready, _ = _prewarm_request(principals, resources, include_labels=False)
     return _finish_prewarm_wait(ready, "waited" if ready else "failed", started)
 
@@ -2106,6 +2121,10 @@ async def ensure_authorization(principals, resources) -> bool:
             # A reload or test clearing the shared task must not cancel the
             # action; only a cancellation of this task itself may propagate.
             if current_task.cancelling():
+                raise
+            return False
+        except RuntimeError as exc:
+            if not _awaited_under_another_driver(exc):
                 raise
             return False
         ready, _ = _prewarm_request(principals, resources, include_labels=False)

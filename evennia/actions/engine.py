@@ -594,8 +594,16 @@ class RuleEngine:
     def _fire(provider, spec, action, actor):
         """Call the rule body. The single firing seam — its raw return (a
         ``RuleResult``, ``None``, generator, or ``Deferred``) is interpreted by
-        the caller."""
-        return getattr(provider, spec.rule_name)(action, actor)
+        the caller.
+
+        The rules were collected before the first phase ran. A provider can change
+        class while an earlier rule works (a character that dies becomes a corpse),
+        and then it no longer has the rules that belonged to its old class. Those
+        rules are skipped; they were never a failure."""
+        body = getattr(provider, spec.rule_name, None)
+        if body is None:
+            return SKIP
+        return body(action, actor)
 
     @staticmethod
     def _coerce_final(value) -> RuleResult:

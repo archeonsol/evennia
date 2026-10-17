@@ -120,3 +120,8 @@ class TestPerceptionFilter(unittest.TestCase):
         self.eff._for = lambda name, *a, **k: Found(self.eff)
         self.eff._sugar = lambda name, *a, **k: self.eff
         self.assertIs(self.actor.search("me"), self.eff)
+
+    def test_an_effective_object_that_cannot_search_finds_nothing(self):
+        # A session with no body or account (the connect screen) has no search at all.
+        session = FakeNDB()
+        self.assertIsNone(Actor(session=session).search("lamp"))

@@ -156,6 +156,31 @@ class Faulty:
         return PASS
 
 
+class Gone:
+    """What a ``Dying`` provider turns into: a body with none of its old rules."""
+
+    def __init__(self, fired):
+        self.fired = fired
+
+
+class Dying:
+    """A provider that changes class in the middle of a dispatch, as a character does when it dies."""
+
+    def __init__(self, fired):
+        self.fired = fired
+
+    @rule(Kick, phase="carry_out", priority=10)
+    def die(self, action, actor):
+        self.fired.append("die")
+        self.__class__ = Gone
+        return PASS
+
+    @rule(Kick, phase="report")
+    def afterglow(self, action, actor):
+        self.fired.append("afterglow")
+        return PASS
+
+
 class Redirector:
     def __init__(self, fired):
         self.fired = fired
@@ -353,6 +378,14 @@ class TestCarryOutPhase(unittest.TestCase):
         with mock.patch.object(logger, "log_trace"):
             trace = _sync(ENGINE.dispatch(Kick(), _actor(), _ctx(Faulty(fired))))
         self.assertEqual(fired, ["boom", "still_runs"])
+        self.assertEqual(trace.outcome, "succeeded")
+
+    def test_a_rule_the_provider_lost_to_a_class_change_is_skipped_quietly(self):
+        fired = []
+        with mock.patch.object(logger, "log_trace") as log_trace:
+            trace = _sync(ENGINE.dispatch(Kick(), _actor(), _ctx(Dying(fired))))
+        self.assertEqual(fired, ["die"])  # the report rule never ran, and was not an error
+        log_trace.assert_not_called()
         self.assertEqual(trace.outcome, "succeeded")
 
 

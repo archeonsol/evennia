@@ -184,6 +184,40 @@ class TestStallWorkInWarning(SimpleTestCase):
 
         frames.assert_not_called()
 
+    def test_work_is_noted_before_the_stall_reaches_the_warning_threshold(self):
+        clock = _Clock()
+        wd = self._make(clock)
+        frame = _frames(_game_site("world/rpg/courier.py", 300, "generate"))
+
+        with (
+            patch.object(reactor_watchdog.sys, "_current_frames", return_value={123: frame}),
+            patch.object(reactor_watchdog.logger, "log_warn") as mock_warn,
+        ):
+            wd._tick()
+            clock.advance(0.20)  # 150 ms past the interval: over half the threshold, not all
+            wd._note_stalled_work(clock())
+            clock.advance(0.06)  # the turn ends 210 ms past its interval, just over 200
+            wd._tick()
+
+        self.assertIn("at world/rpg/courier.py:300 generate", mock_warn.call_args[0][0])
+
+    def test_a_stall_noted_early_that_ends_under_the_threshold_is_not_reported(self):
+        clock = _Clock()
+        wd = self._make(clock)
+        frame = _frames(_game_site("world/rpg/courier.py", 300, "generate"))
+
+        with (
+            patch.object(reactor_watchdog.sys, "_current_frames", return_value={123: frame}),
+            patch.object(reactor_watchdog.logger, "log_warn") as mock_warn,
+        ):
+            wd._tick()
+            clock.advance(0.20)
+            wd._note_stalled_work(clock())
+            clock.advance(0.01)  # the turn ends 160 ms past its interval
+            wd._tick()
+
+        mock_warn.assert_not_called()
+
 
 class TestLiveSampling(SimpleTestCase):
     """Live stacks are throttled within, never across, stall episodes."""
