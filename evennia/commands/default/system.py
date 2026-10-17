@@ -937,8 +937,9 @@ class CmdSystems(COMMAND_DEFAULT_CLASS):
 
     Lists every system registered with the system scheduler
     (evennia.utils.systems): its cadence, scope, last fire time, fire
-    count and whether a fire is currently in flight. Systems are
-    declared in code (SYSTEM_MODULES); this is inspection only.
+    count, whether a fire is currently in flight, and the average and
+    the worst time one turn of its body held the reactor, in milliseconds.
+    Systems are declared in code (SYSTEM_MODULES); this is inspection only.
 
     """
 
@@ -954,7 +955,9 @@ class CmdSystems(COMMAND_DEFAULT_CLASS):
         if not registered:
             self.msg("No systems are registered with the scheduler.")
             return
-        table = self.styled_table("system", "cadence", "scope", "last fired", "fires", "in flight")
+        table = self.styled_table(
+            "system", "cadence", "scope", "last fired", "fires", "in flight", "avg ms", "worst ms"
+        )
         for system in registered:
             if system.last_run:
                 last_fired = datetime_format(datetime.datetime.fromtimestamp(system.last_run))
@@ -967,6 +970,7 @@ class CmdSystems(COMMAND_DEFAULT_CLASS):
                 last_fired,
                 system.fire_count,
                 "*" if system.in_flight else "-",
+                *systems.describe_turns(system),
             )
         self.msg("|wRegistered systems|n:\n" + str(table))
 

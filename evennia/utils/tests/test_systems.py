@@ -1308,6 +1308,35 @@ class TestBodyTiming(_SchedulerTestMixin, BaseEvenniaTestCase):
         self.assertAlmostEqual(system.busy_seconds, 0.030)
         self.assertFalse(system.in_flight)
 
+    def test_a_body_that_yields_to_the_loop_is_cancelled_where_it_stands(self):
+        # A bare yield waits on no future, so the cancellation reaches the body only if it is
+        # thrown in at the yield; a body that waits on a cancelled future would see it anyway.
+        seen = []
+
+        async def run(ctx):
+            try:
+                while True:
+                    self.perf.advance(0.001)
+                    await asyncio.sleep(0)
+            except asyncio.CancelledError:
+                seen.append("cancelled")
+                raise
+
+        register(name="a", cadence=every_tick(), scope=global_scope(), run=run)
+        system = get_system("a")
+
+        async def scenario():
+            self.driver.tick()
+            await self._settle()
+            for task in list(self.driver._inflight):
+                task.cancel()
+            await self._settle()
+
+        self._run(scenario())
+
+        self.assertEqual(seen, ["cancelled"])
+        self.assertFalse(system.in_flight)
+
     def test_a_body_that_returns_a_deferred_is_timed_for_the_call_only(self):
         def run(ctx):
             self.perf.advance(0.012)
@@ -1362,6 +1391,18 @@ class TestBodyTiming(_SchedulerTestMixin, BaseEvenniaTestCase):
             patch.object(systems.time, "perf_counter", return_value=10.5),
         ):
             self.assertEqual(systems.running_body(), ("who", 0.5))
+
+    def test_describe_turns_gives_the_average_and_the_worst_in_milliseconds(self):
+        system = self._register("measured")
+        system.turns = 4
+        system.busy_seconds = 0.0123
+        system.worst_turn_seconds = 0.0374
+
+        self.assertEqual(systems.describe_turns(system), ("3.1", "37"))
+
+    def test_describe_turns_gives_dashes_for_a_system_that_has_not_run(self):
+        self.assertEqual(systems.describe_turns(self._register("idle")), ("-", "-"))
+        self.assertEqual(systems.describe_turns(object()), ("-", "-"))
 
     def test_nothing_is_running_after_a_body_raises(self):
         system = self._register("who")
@@ -1440,6 +1481,22 @@ class TestBodyTiming(_SchedulerTestMixin, BaseEvenniaTestCase):
         self.assertIn("3 turns went over the limit since the last line", text)
         self.assertIn("the longest 100ms", text)
         self.assertEqual(system.slow_turns, 4)
+
+    def test_the_longest_is_counted_from_the_last_line(self):
+        costs = iter([0.300, 0.150, 0.120, 0.100])
+        system = self._register("slow")
+        system.run = lambda ctx: self.perf.advance(next(costs))
+
+        with patch.object(systems, "logger") as log:
+            self.driver.tick()  # 300ms: the first line
+            self.driver.tick()  # 150ms: held back
+            self.driver.tick()  # 120ms: held back
+            self.perf.advance(60.0)
+            self.driver.tick()  # 100ms: the second line
+
+        text = log.log_warn.call_args.args[0]
+        self.assertIn("3 turns went over the limit since the last line", text)
+        self.assertIn("the longest 150ms", text)
 
     def test_the_first_line_does_not_count_turns_before_it(self):
         self._register("slow", cost=0.100)

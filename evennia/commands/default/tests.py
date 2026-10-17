@@ -412,6 +412,27 @@ class TestSystem(BaseEvenniaCommandTest):
             output = self.call(system.CmdSystems(), "")
             self.assertIn("test-system", output)
             self.assertIn("every 60s", output)
+            self.assertIn("worst ms", output)
+        finally:
+            systems_mod._clear_registry()
+
+    def test_systems_shows_how_long_a_turn_takes(self):
+        from evennia.utils import systems as systems_mod
+
+        systems_mod._clear_registry()
+        registered = systems_mod.register(
+            name="test-system",
+            cadence=systems_mod.every(60),
+            scope=systems_mod.global_scope(),
+            run=lambda ctx: None,
+        )
+        registered.turns = 4
+        registered.busy_seconds = 0.0123
+        registered.worst_turn_seconds = 0.0374
+        try:
+            output = self.call(system.CmdSystems(), "")
+            self.assertIn("3.1", output)
+            self.assertIn("37", output)
         finally:
             systems_mod._clear_registry()
 

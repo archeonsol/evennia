@@ -206,7 +206,8 @@ _ENGINE_SYSTEM_MODULES = ("evennia.server.engine_systems",)
 _LAST_RUN_CONF_PREFIX = "system_lastrun_"
 
 #: A turn of a body at or over this many milliseconds is logged
-#: (`settings.SYSTEM_BODY_WARN_MS`; 0 turns the line off).
+#: (`settings.SYSTEM_BODY_WARN_MS`; 0 turns the line off). The defaults are the ones in
+#: `evennia/settings_default.py`, for a game whose settings lack them.
 _DEFAULT_BODY_WARN_MS = 100.0
 #: Seconds between two such lines about one system (`settings.SYSTEM_BODY_WARN_EVERY`).
 _DEFAULT_BODY_WARN_EVERY = 60.0
@@ -233,6 +234,27 @@ def running_body():
     if current is None:
         return None
     return current[0], time.perf_counter() - current[1]
+
+
+def describe_turns(system):
+    """
+    How long a system's body holds the reactor, as short text for a listing.
+
+    Args:
+        system (System): The system to describe.
+
+    Returns:
+        tuple: ``(average, worst)``, milliseconds a turn, as text; ``("-", "-")``
+        for a system whose body has not run in this process.
+
+    """
+    turns = int(getattr(system, "turns", 0) or 0)
+    if not turns:
+        return "-", "-"
+    return (
+        f"{float(system.busy_seconds) * 1000.0 / turns:.1f}",
+        f"{float(system.worst_turn_seconds) * 1000.0:.0f}",
+    )
 
 
 _SYSTEM_REGISTRY = {}

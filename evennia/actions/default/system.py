@@ -548,7 +548,16 @@ class CharacterSystemRules(PyRules):
         page_size = 10
         page_count = (len(registered) + page_size - 1) // page_size
         for page_index in range(page_count):
-            table = EvTable("system", "cadence", "scope", "last fired", "fires", "in flight")
+            table = EvTable(
+                "system",
+                "cadence",
+                "scope",
+                "last fired",
+                "fires",
+                "in flight",
+                "avg ms",
+                "worst ms",
+            )
             start = page_index * page_size
             for system in registered[start : start + page_size]:
                 try:
@@ -564,6 +573,7 @@ class CharacterSystemRules(PyRules):
                         last_fired,
                         system.fire_count,
                         "*" if system.in_flight else "-",
+                        *systems.describe_turns(system),
                     )
                 except Exception:
                     from evennia.utils import logger
@@ -577,6 +587,8 @@ class CharacterSystemRules(PyRules):
                         "<error>",
                         "<error>",
                         "-",
+                        "?",
+                        "?",
                         "?",
                         "?",
                     )
