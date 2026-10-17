@@ -30,6 +30,7 @@ from evennia.actions.default.building import rules as rules_module
 from evennia.actions.tests.fakes import FakeAccount, FakeChar, FakeObj, dispatch, make_actor
 from evennia.authorization.storage import grant_capabilities, principal_refs
 from evennia.objects.character import DefaultCharacter
+from evennia.objects.models import ObjectDB
 from evennia.utils.ansi import strip_ansi
 from evennia.utils.test_resources import EvenniaTest
 
@@ -544,6 +545,71 @@ class TestExamineOnTheDatabase(BuildingDBTest):
         self.assertIn("Scripts: ", self._examine())
         self.account.scripts.add(self.script.__class__)
         self.assertIn("Name/key: TestAccount", self._examine("*TestAccount"))
+
+
+class TestAliasOnTheDatabase(BuildingDBTest):
+    """``@alias`` views, sets and clears stored aliases."""
+
+    def _alias(self, raw):
+        return self.run_action(SetObjAlias, raw)
+
+    def test_usage_and_not_found(self):
+        self.assertEqual(self._alias(""), "Usage: alias <obj> [= [alias[,alias ...]]]")
+        self.assertEqual(self._alias("NotFound ="), "Could not find 'NotFound'.")
+
+    def test_set_show_and_clear(self):
+        self.assertEqual(self._alias("Obj = TestObj1b"), "Alias(es) for 'Obj' set to 'testobj1b'.")
+        self.assertEqual(self._alias("Obj"), "Aliases for Obj: 'testobj1b'")
+        self.assertEqual(self._alias("Obj ="), "Cleared aliases from Obj: testobj1b")
+        self.assertEqual(self.obj1.aliases.all(), [])
+        self.assertEqual(self._alias("Obj ="), "No aliases to clear.")
+
+
+class TestCopyOnTheDatabase(BuildingDBTest):
+    """``@copy`` makes new stored objects."""
+
+    def test_copy_to_named_targets_with_aliases(self):
+        shown = self.run_action(Copy, "Obj = TestObj2;TestObj2b, TestObj3;TestObj3b")
+        self.assertEqual(
+            shown,
+            "Copied Obj to 'TestObj2' (aliases: ['TestObj2b']).\n"
+            "Copied Obj to 'TestObj3' (aliases: ['TestObj3b']).",
+        )
+        for key, alias in (("TestObj2", "testobj2b"), ("TestObj3", "testobj3b")):
+            (copy,) = ObjectDB.objects.filter(db_key=key)
+            self.assertEqual([a.lower() for a in copy.aliases.all()], [alias])
+            self.assertEqual(copy.location, self.room1)
+
+    def test_identical_copy(self):
+        self.assertEqual(
+            self.run_action(Copy, "Obj"), "Identical copy of Obj, named 'Obj_copy' was created."
+        )
+        self.assertTrue(ObjectDB.objects.filter(db_key="Obj_copy").exists())
+
+    def test_usage_and_not_found(self):
+        self.assertEqual(
+            self.run_action(Copy, ""),
+            "Usage: copy <obj> [=<new_name>[;alias;alias..]][:<new_location>] [, <new_name2>...]",
+        )
+        self.assertEqual(self.run_action(Copy, "NotFound = Foo"), "Could not find 'NotFound'.")
+        self.assertFalse(ObjectDB.objects.filter(db_key="Foo").exists())
+
+
+class TestWipeOnTheDatabase(BuildingDBTest):
+    """``@wipe`` removes named or all stored attributes."""
+
+    def test_usage(self):
+        self.assertEqual(self.run_action(Wipe, ""), "Usage: wipe <object>[/<attr>/<attr>...]")
+
+    def test_wipe_named_then_all(self):
+        for key in ("test1", "test2", "test3"):
+            self.obj2.attributes.add(key, key)
+        self.assertEqual(
+            self.run_action(Wipe, "Obj2/test2/test3"), "Wiped attributes test2,test3 on Obj2."
+        )
+        self.assertEqual([attr.key for attr in self.obj2.attributes.all()], ["test1"])
+        self.assertEqual(self.run_action(Wipe, "Obj2"), "Wiped all attributes on Obj2.")
+        self.assertEqual(self.obj2.attributes.all(), [])
 
 
 if __name__ == "__main__":
