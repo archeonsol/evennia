@@ -25,6 +25,17 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.333: `@set` shows an attribute's markup as it was set
+
+### Commands
+
+- **Viewing an attribute with `@set <obj>/<attr>` escapes its markup**
+  ([`building.py`](evennia/commands/default/building.py)). `CmdSetAttribute.view_attr` passes the
+  value through `ansi.raw` and an escaping funcparser pass, as `examine` already does. A value of
+  `|rred|n $you()` now reads `|rred|n $you()`. Before, the client rendered the color and the
+  outgoing funcparser filled in `$you()`, so a builder could not copy a colored desc to another
+  object. Nested lookups (`obj/attr[0]`) are escaped the same way.
+
 ## 6.0.0+underspire.332: Fewer stalls and tracebacks on the live game
 
 ### Objects
