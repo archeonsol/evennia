@@ -44,6 +44,7 @@ from ..muxargs import ArgAction, normalize_switches
 from ..predicate import HasCapability
 from ..result import CLAIM, SKIP
 from ..rule import rule
+from .building.attributes import as_typed
 
 __all__ = [
     "Nick",
@@ -256,7 +257,8 @@ class NickRules:
                     _, _, old_nickstring, old_replstring = oldnick.value
                     caller.nicks.remove(old_nickstring, category=nicktype)
                     caller.msg(
-                        f"{nicktypestr} removed: '|w{old_nickstring}|n' -> |w{old_replstring}|n."
+                        f"{nicktypestr} removed: '|w{as_typed(old_nickstring)}|n'"
+                        f" -> |w{as_typed(old_replstring)}|n."
                     )
             else:
                 caller.msg("No matching nicks to remove.")
@@ -278,11 +280,14 @@ class NickRules:
                 for nick in nicks:
                     _, _, nick, repl = nick.value
                     if nick.startswith(action.lhs):
-                        strings.append(f"{nicktype.capitalize()}-nick: '{nick}' -> '{repl}'")
+                        strings.append(
+                            f"{nicktype.capitalize()}-nick:"
+                            f" '{as_typed(nick)}' -> '{as_typed(repl)}'"
+                        )
             if strings:
                 caller.msg("\n".join(strings))
             else:
-                caller.msg(f"No nicks found matching '{action.lhs}'")
+                caller.msg(f"No nicks found matching '{as_typed(action.lhs)}'")
             return CLAIM
 
         if not action.args or not action.lhs:
@@ -307,6 +312,8 @@ class NickRules:
             oldnick = caller.nicks.get(key=nickstring, category=nicktype, return_obj=True)
             if oldnick:
                 _, _, old_nickstring, old_replstring = oldnick.value
+            shown_old_nick, shown_old_repl = as_typed(old_nickstring), as_typed(old_replstring)
+            shown_nick, shown_repl = as_typed(nickstring), as_typed(replstring)
             if replstring:
                 errstring = ""
                 if oldnick:
@@ -314,11 +321,11 @@ class NickRules:
                         string += f"\nIdentical {nicktypestr.lower()} already set."
                     else:
                         string += (
-                            f"\n{nicktypestr} '|w{old_nickstring}|n' updated to map to"
-                            f" '|w{replstring}|n'."
+                            f"\n{nicktypestr} '|w{shown_old_nick}|n' updated to map to"
+                            f" '|w{shown_repl}|n'."
                         )
                 else:
-                    string += f"\n{nicktypestr} '|w{nickstring}|n' mapped to '|w{replstring}|n'."
+                    string += f"\n{nicktypestr} '|w{shown_nick}|n' mapped to '|w{shown_repl}|n'."
                 try:
                     caller.nicks.add(nickstring, replstring, category=nicktype)
                 except NickTemplateInvalid:
@@ -328,7 +335,7 @@ class NickRules:
                     return CLAIM
             elif old_nickstring and old_replstring:
                 # just looking at the nick
-                string += f"\n{nicktypestr} '|w{old_nickstring}|n' maps to '|w{old_replstring}|n'."
+                string += f"\n{nicktypestr} '|w{shown_old_nick}|n' maps to '|w{shown_old_repl}|n'."
                 errstring = ""
         string = errstring if errstring else string
         caller.msg(_cy(string))

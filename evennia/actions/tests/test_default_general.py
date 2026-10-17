@@ -20,6 +20,7 @@ from evennia.actions.engine import RuleEngine
 from evennia.actions.tests.fakes import FakeChar, FakeObj, dispatch, make_actor
 from evennia.authorization.policy import Always, RequiresCapability
 from evennia.typeclasses.attributes import NickTemplateInvalid
+from evennia.utils import ansi
 
 engine_mod = sys.modules["evennia.actions.engine"]
 
@@ -142,6 +143,18 @@ class TestNick(unittest.TestCase):
         char.nicks.add("hi", "say Hello")
         self._nick(char, actor, "hi")
         self.assertTrue(any("'hi' -> 'say Hello'" in m for m in char.messages))
+
+    def test_output_shows_stored_markup_as_typed(self):
+        char, actor = _setup()
+        self._nick(char, actor, "hi = say |rHello|n")
+        self.assertEqual(char.nicks.get(key="hi").repl, "say |rHello|n")
+        self._nick(char, actor, "hi")
+        self._nick(char, actor, "hi", switches=("delete",))
+        self.assertEqual(len(char.messages), 3)
+        for message in char.messages:
+            shown = ansi.parse_ansi(message)
+            self.assertIn("say |rHello|n", shown)
+            self.assertNotIn(ansi.ANSI_RED, shown)
 
     def test_show_unknown_nick(self):
         char, actor = _setup()
