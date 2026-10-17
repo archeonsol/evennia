@@ -245,6 +245,11 @@ class CharacterAdminRules:
         if not targ.access(caller, "edit"):
             caller.msg(f"You don't have permission to force {targ} to execute commands.")
             return CLAIM
+        from evennia.authorization.service import capabilities_beyond
+
+        if capabilities_beyond(targ, caller):
+            caller.msg(f"{targ} holds capabilities you don't; you can't force them.")
+            return CLAIM
         targ.execute_cmd(action.rhs)
         caller.msg(f"You have forced {targ} to: {action.rhs}")
         return CLAIM

@@ -1061,3 +1061,41 @@ class HoldsCapabilityTest(TestCase):
         account.attributes.add("_quell", True)
 
         self.assertFalse(holds_capability(account, "engine.object.view"))
+
+
+class CapabilitiesBeyondTest(TestCase):
+    """`capabilities_beyond` names what one principal holds that another lacks."""
+
+    def tearDown(self):
+        clear_authorization_caches()
+        super().tearDown()
+
+    def _account(self, username, *capabilities):
+        from django.contrib.auth import get_user_model
+
+        account = get_user_model().objects.create_user(
+            username=username, email="", password="q" * 16
+        )
+        for capability in capabilities:
+            grant_capability(f"account:{account.pk}", capability, scope_kind="world", scope_key="*")
+        return account
+
+    def test_names_capabilities_the_other_lacks(self):
+        from evennia.authorization.service import capabilities_beyond
+
+        operator = self._account("beyond-op", "engine.runtime.manage", "engine.moderation.manage")
+        moderator = self._account("beyond-mod", "engine.moderation.manage")
+        clear_authorization_caches()
+
+        self.assertEqual(capabilities_beyond(operator, moderator), {"engine.runtime.manage"})
+        self.assertEqual(capabilities_beyond(moderator, operator), frozenset())
+
+    def test_quell_does_not_hide_capabilities(self):
+        from evennia.authorization.service import capabilities_beyond
+
+        operator = self._account("beyond-quelled", "engine.runtime.manage")
+        operator.attributes.add("_quell", True)
+        builder = self._account("beyond-builder", "engine.world.build")
+        clear_authorization_caches()
+
+        self.assertEqual(capabilities_beyond(operator, builder), {"engine.runtime.manage"})

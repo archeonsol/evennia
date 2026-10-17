@@ -275,15 +275,15 @@ class DefaultAccountRules(NickRules):
         if not action.rhs:
             msg("Usage: @password <oldpass> = <newpass>")
             return CLAIM
-        oldpass = action.lhslist[0]
-        newpass = action.rhslist[0]
+        oldpass = action.lhs
+        newpass = action.rhs
 
-        validated, error = account.validate_password(newpass)
+        validated, error = account.validate_password(newpass, account=account)
 
         if not account.check_password(oldpass):
             msg("The specified old password isn't correct.")
         elif not validated:
-            errors = [e for suberror in error.messages for e in error.messages]
+            errors = error.messages
             msg("\n".join(errors))
         else:
             account.set_password(newpass)
@@ -311,22 +311,35 @@ class DefaultAccountRules(NickRules):
             msg("Usage: @userpassword <user obj> = <new password>")
             return CLAIM
 
-        account = caller.search_account(action.lhs)
-        if not account:
+        from evennia.authorization.service import capabilities_beyond
+        from evennia.utils.search import search_account
+
+        query = action.lhs.lstrip("*")
+        matches = list(search_account(query))
+        if not matches:
+            msg(f"Could not find an account named '{query}'.")
+            return CLAIM
+        if len(matches) > 1:
+            names = ", ".join(f"{match.name}(#{match.id})" for match in matches)
+            msg(f"More than one account matches '{query}': {names}.")
+            return CLAIM
+        account = matches[0]
+        if account != caller and capabilities_beyond(account, caller):
+            msg(f"{account.name} holds capabilities you don't; you can't set their password.")
             return CLAIM
 
         newpass = action.rhs
 
-        validated, error = account.validate_password(newpass)
+        validated, error = account.validate_password(newpass, account=account)
         if not validated:
-            errors = [e for suberror in error.messages for e in error.messages]
+            errors = error.messages
             msg("\n".join(errors))
             return CLAIM
 
         account.set_password(newpass)
         account.save()
         msg(f"{account.name} - new password set to '{newpass}'.")
-        if account.character != caller:
+        if account != caller:
             account.msg(f"{caller.name} has changed your password to '{newpass}'.")
         address = getattr(session, "address", "unknown")
         logger.log_sec(f"Password Changed: {account} (Caller: {caller}, IP: {address}).")

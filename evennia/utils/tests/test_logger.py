@@ -72,6 +72,14 @@ class TestMaskSensitiveInput(unittest.TestCase):
             "@userpassword johnny = ***********",
         )
 
+    def test_userpassword_abbreviated_with_symbols(self):
+        masked = mask_sensitive_input("@userp johnny = hunter2!")
+        self.assertNotIn("hunter2", masked)
+        self.assertTrue(masked.startswith("@userp johnny = "))
+
+    def test_password_abbreviated(self):
+        self.assertNotIn("new!pw", mask_sensitive_input("@pass old = new!pw"))
+
     def test_non_sensitive(self):
         safe = "say connect johnny password123"
         self.assertEqual(mask_sensitive_input(safe), safe)

@@ -186,10 +186,14 @@ class FakeAccount(FakeObj):
         self.saved = False
         self.character = None
 
+    @property
+    def search_account(self):
+        raise AttributeError("an Account has no search_account; only objects do")
+
     def check_password(self, password):
         return password == self.password
 
-    def validate_password(self, password):
+    def validate_password(self, password, account=None):
         if self.valid_password:
             return True, None
         return False, SimpleNamespace(messages=["Password failed validation."])

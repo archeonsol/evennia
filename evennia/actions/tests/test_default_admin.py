@@ -171,11 +171,26 @@ class TestForce(unittest.TestCase):
         self.assertEqual(bob.executed, [])
         self.assertTrue(any("permission" in m for m in char.messages))
 
+    def test_refuses_target_with_more_capabilities(self):
+        char, actor = _setup()
+        bob = FakeObj(key="bob")
+        char.search_map["bob"] = bob
+        with mock.patch(
+            "evennia.authorization.service.capabilities_beyond",
+            return_value=frozenset({"engine.runtime.manage"}),
+        ):
+            self._force(char, actor, "bob = @grant me = bundle:runtime_operator")
+        self.assertEqual(bob.executed, [])
+        self.assertTrue(any("holds capabilities you don't" in m for m in char.messages))
+
     def test_forces_command_execution(self):
         char, actor = _setup()
         bob = FakeObj(key="bob")
         char.search_map["bob"] = bob
-        self._force(char, actor, "bob = get stick")
+        with mock.patch(
+            "evennia.authorization.service.capabilities_beyond", return_value=frozenset()
+        ):
+            self._force(char, actor, "bob = get stick")
         self.assertEqual(bob.executed, ["get stick"])
         self.assertTrue(any("You have forced bob to: get stick" in m for m in char.messages))
 

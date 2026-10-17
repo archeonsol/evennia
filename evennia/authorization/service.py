@@ -267,6 +267,21 @@ def has_capability(principal, capability: str, *, resource=None, session=None) -
     return result
 
 
+def capabilities_beyond(principal, other) -> frozenset[str]:
+    """Capabilities ``principal`` is granted that ``other`` is not, quell ignored.
+
+    A capability granted at any scope counts as held, and break-glass is not
+    counted. Use this to refuse acting on someone who outranks the caller.
+    """
+
+    held = load_grants(other, ignore_quell=True).by_capability
+    return frozenset(
+        capability
+        for capability in load_grants(principal, ignore_quell=True).by_capability
+        if capability not in held
+    )
+
+
 def holds_capability(principal, capability: str, *, resource=None) -> bool:
     """Whether a principal holds a capability, quelled or not.
 

@@ -8,6 +8,7 @@ password changes, and gates.
 """
 
 import unittest
+from unittest import mock
 
 from evennia.actions.default.account import (
     DefaultAccountRules,
@@ -170,6 +171,11 @@ class TestPassword(unittest.TestCase):
         self.assertTrue(account.saved)
         self.assertTrue(any("Password changed" in m for m in account.messages))
 
+    def test_new_password_may_contain_a_comma(self):
+        account, _, actor = _setup()
+        self._password(account, actor, "secret = new,pass")
+        self.assertEqual(account.password, "new,pass")
+
     def test_not_gated_by_capability(self):
         account, _, actor = _setup()
         trace = self._password(account, actor, "secret = hunter2")
@@ -179,9 +185,14 @@ class TestPassword(unittest.TestCase):
 
 # --- @userpassword ---------------------------------------------------------------
 class TestUserPassword(unittest.TestCase):
-    def _userpassword(self, account, actor, raw):
+    def _userpassword(self, account, actor, raw, matches=(), beyond=frozenset()):
         action = UserPassword.parse(raw, actor, verb="@userpassword")
-        return dispatch(action, actor, [account])
+        with mock.patch(
+            "evennia.utils.search.search_account", return_value=list(matches)
+        ), mock.patch(
+            "evennia.authorization.service.capabilities_beyond", return_value=beyond
+        ):
+            return dispatch(action, actor, [account])
 
     def test_usage_without_rhs(self):
         account, _, actor = _setup(capabilities=("engine.moderation.manage",))
@@ -191,20 +202,42 @@ class TestUserPassword(unittest.TestCase):
     def test_sets_target_password(self):
         account, _, actor = _setup(capabilities=("engine.moderation.manage",))
         target = FakeAccount(key="bob", password="old")
-        account.account_search_map["bob"] = target
-        self._userpassword(account, actor, "bob = newpass")
+        self._userpassword(account, actor, "bob = newpass", matches=[target])
         self.assertEqual(target.password, "newpass")
         self.assertTrue(target.saved)
         self.assertTrue(any("new password set" in m for m in account.messages))
         self.assertTrue(any("changed your password" in m for m in target.messages))
 
+    def test_unknown_account_reported(self):
+        account, _, actor = _setup(capabilities=("engine.moderation.manage",))
+        self._userpassword(account, actor, "*nobody = newpass")
+        self.assertTrue(any("Could not find an account named 'nobody'" in m for m in account.messages))
+
+    def test_ambiguous_account_reported(self):
+        account, _, actor = _setup(capabilities=("engine.moderation.manage",))
+        first, second = FakeAccount(key="bob"), FakeAccount(key="bobby")
+        first.id, second.id = 1, 2
+        self._userpassword(account, actor, "bob = newpass", matches=[first, second])
+        self.assertEqual(first.password, "secret")
+        self.assertTrue(any("More than one account" in m for m in account.messages))
+
+    def test_refuses_target_with_more_capabilities(self):
+        account, _, actor = _setup(capabilities=("engine.moderation.manage",))
+        target = FakeAccount(key="op", password="old")
+        self._userpassword(
+            account, actor, "op = newpass", matches=[target], beyond={"engine.runtime.manage"}
+        )
+        self.assertEqual(target.password, "old")
+        self.assertTrue(any("holds capabilities you don't" in m for m in account.messages))
+
     def test_invalid_password_reported(self):
         account, _, actor = _setup(capabilities=("engine.moderation.manage",))
         target = FakeAccount(key="bob", valid_password=False)
-        account.account_search_map["bob"] = target
-        self._userpassword(account, actor, "bob = x")
+        self._userpassword(account, actor, "bob = x", matches=[target])
         self.assertEqual(target.password, "secret")
-        self.assertTrue(any("failed validation" in m for m in account.messages))
+        self.assertEqual(
+            [m for m in account.messages if "failed validation" in m], ["Password failed validation."]
+        )
 
     def test_gated_for_builder(self):
         account, _, actor = _setup(capabilities=("engine.world.build",))
