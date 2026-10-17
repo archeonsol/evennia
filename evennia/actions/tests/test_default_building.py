@@ -612,5 +612,254 @@ class TestWipeOnTheDatabase(BuildingDBTest):
         self.assertEqual(self.obj2.attributes.all(), [])
 
 
+class TestSetOnTheDatabase(BuildingDBTest):
+    """``@set`` messages and nested index, key and tuple paths on stored attributes."""
+
+    def _steps(self, steps):
+        for raw, expected in steps:
+            with self.subTest(raw=raw):
+                self.assertEqual(self.run_action(SetAttribute, raw), expected)
+
+    def test_usage(self):
+        self.assertEqual(
+            self.run_action(SetAttribute, ""),
+            "Usage: set obj/attr[:category] = value. Use empty value to clear.",
+        )
+
+    def test_create_view_delete_and_missing(self):
+        self._steps(
+            [
+                ('Obj/test1="value1"', "Created attribute Obj/test1 [category:None] = value1"),
+                ("Obj/test1", "Attribute Obj/test1 [category:None] = value1"),
+                ("Obj/NotFound", "Attribute Obj/notfound [category:None] does not exist."),
+                ("Obj/test1 = ", "Deleted attribute Obj/test1 [category:None]."),
+                ("Obj2/test4:Foo = 'Bar'", "Created attribute Obj2/test4 [category:Foo] = Bar"),
+            ]
+        )
+        self.assertFalse(self.obj1.attributes.has("test1"))
+        self.assertEqual(self.obj2.attributes.get("test4", category="Foo"), "Bar")
+
+    def test_category_view(self):
+        self.obj1.attributes.add("test", "value", category="cat")
+        self.obj1.attributes.add("testdict", {"key": "value"}, category="cat")
+        self._steps(
+            [
+                ("Obj/test:cat", "Attribute Obj/test [category:cat] = value"),
+                ("Obj/testdict['key']:cat", "Attribute Obj/testdict['key'] [category:cat] = value"),
+            ]
+        )
+
+    def test_nested_list(self):
+        self._steps(
+            [
+                ("Obj/test1=[1,2]", "Created attribute Obj/test1 [category:None] = [1, 2]"),
+                ("Obj/test1", "Attribute Obj/test1 [category:None] = [1, 2]"),
+                ("Obj/test1[0]", "Attribute Obj/test1[0] [category:None] = 1"),
+                ("Obj/test1[1]", "Attribute Obj/test1[1] [category:None] = 2"),
+                ("Obj/test1[0] = 99", "Modified attribute Obj/test1[0] [category:None] = [99, 2]"),
+                ("Obj/test1[0]", "Attribute Obj/test1[0] [category:None] = 99"),
+                ("Obj/test1[0] =", "Deleted attribute Obj/test1[0] [category:None]."),
+                ("Obj/test1[0]", "Attribute Obj/test1[0] [category:None] = 2"),
+                (
+                    "Obj/test1[1]",
+                    "Attribute Obj/test1[1] [category:None] does not exist. "
+                    "(Nested lookups attempted)",
+                ),
+                (
+                    "Obj/test1[5] =",
+                    "No attribute Obj/test1[5] [category: None] was found to delete. "
+                    "(Nested lookups attempted)",
+                ),
+                ("Obj/test1[+] = 42", "Modified attribute Obj/test1[+] [category:None] = [2, 42]"),
+                (
+                    "Obj/test1[+0] = -1",
+                    "Modified attribute Obj/test1[+0] [category:None] = [-1, 2, 42]",
+                ),
+            ]
+        )
+        self.assertEqual(ObjectDB.objects.get(id=self.obj1.id).db.test1, [-1, 2, 42])
+
+    def test_nested_dict(self):
+        missing = "does not exist. (Nested lookups attempted)"
+        self._steps(
+            [
+                (
+                    "Obj/test2={ 'one': 1, 'two': 2 }",
+                    "Created attribute Obj/test2 [category:None] = {'one': 1, 'two': 2}",
+                ),
+                ("Obj/test2", "Attribute Obj/test2 [category:None] = {'one': 1, 'two': 2}"),
+                ("Obj/test2['one']", "Attribute Obj/test2['one'] [category:None] = 1"),
+                ("Obj/test2['one]", "Attribute Obj/test2['one] [category:None] = 1"),
+                (
+                    "Obj/test2['one']=99",
+                    "Modified attribute Obj/test2['one'] [category:None] = {'one': 99, 'two': 2}",
+                ),
+                ("Obj/test2['one']", "Attribute Obj/test2['one'] [category:None] = 99"),
+                ("Obj/test2['two']", "Attribute Obj/test2['two'] [category:None] = 2"),
+                ("Obj/test2[+'three']", f"Attribute Obj/test2[+'three'] [category:None] {missing}"),
+                (
+                    "Obj/test2[+'three'] = 3",
+                    "Modified attribute Obj/test2[+'three'] [category:None] = "
+                    "{'one': 99, 'two': 2, \"+'three'\": 3}",
+                ),
+                ("Obj/test2[+'three'] =", "Deleted attribute Obj/test2[+'three'] [category:None]."),
+                (
+                    "Obj/test2['three']=3",
+                    "Modified attribute Obj/test2['three'] [category:None] = "
+                    "{'one': 99, 'two': 2, 'three': 3}",
+                ),
+                ("Obj/test2['two'] =", "Deleted attribute Obj/test2['two'] [category:None]."),
+                ("Obj/test2['two']", f"Attribute Obj/test2['two'] [category:None] {missing}"),
+                ("Obj/test2", "Attribute Obj/test2 [category:None] = {'one': 99, 'three': 3}"),
+                ("Obj/test2[0]", f"Attribute Obj/test2[0] [category:None] {missing}"),
+                (
+                    "Obj/test2['five'] =",
+                    "No attribute Obj/test2['five'] [category: None] was found to delete. "
+                    "(Nested lookups attempted)",
+                ),
+                (
+                    "Obj/test2[+]=42",
+                    "Modified attribute Obj/test2[+] [category:None] = "
+                    "{'one': 99, 'three': 3, '+': 42}",
+                ),
+                (
+                    "Obj/test2[+1]=33",
+                    "Modified attribute Obj/test2[+1] [category:None] = "
+                    "{'one': 99, 'three': 3, '+': 42, '+1': 33}",
+                ),
+            ]
+        )
+        self.assertEqual(
+            ObjectDB.objects.get(id=self.obj1.id).db.test2,
+            {"one": 99, "three": 3, "+": 42, "+1": 33},
+        )
+
+    def test_nested_dict_keys_keep_their_case(self):
+        self._steps(
+            [
+                (
+                    "Obj/test_case = {'FooBar': 1}",
+                    "Created attribute Obj/test_case [category:None] = {'FooBar': 1}",
+                ),
+                (
+                    "Obj/test_case['FooBar'] = 2",
+                    "Modified attribute Obj/test_case['FooBar'] [category:None] = {'FooBar': 2}",
+                ),
+                ("Obj/test_case", "Attribute Obj/test_case [category:None] = {'FooBar': 2}"),
+                (
+                    "Obj/test_case['FooBar'] = {'BarBaz': 1}",
+                    "Modified attribute Obj/test_case['FooBar'] [category:None] = {'FooBar': {'BarBaz': 1}}",
+                ),
+                (
+                    "Obj/test_case['FooBar']['BarBaz'] = 2",
+                    "Modified attribute Obj/test_case['FooBar']['BarBaz'] [category:None] = {'FooBar': {'BarBaz': 2}}",
+                ),
+                (
+                    "Obj/test_case",
+                    "Attribute Obj/test_case [category:None] = {'FooBar': {'BarBaz': 2}}",
+                ),
+            ]
+        )
+
+    def test_nested_tuple_is_not_changed(self):
+        refused = "'tuple' object does not support item assignment."
+        self._steps(
+            [
+                ("Obj/tup = (1,2)", "Created attribute Obj/tup [category:None] = (1, 2)"),
+                ("Obj/tup[1] = 99", f"Could not set Obj/tup[1]: {refused}"),
+                ("Obj/tup[+] = 99", f"Could not set Obj/tup[+]: {refused}"),
+                ("Obj/tup[+1] = 99", f"Could not set Obj/tup[+1]: {refused}"),
+                (
+                    "Obj/tup[1] = ",
+                    "No attribute Obj/tup[1] [category: None] was found to delete. "
+                    "(Nested lookups attempted)",
+                ),
+            ]
+        )
+        self.assertEqual(self.obj1.db.tup, (1, 2))
+
+    def test_deeper_nesting(self):
+        self._steps(
+            [
+                (
+                    "Obj/test3=[{'one': 1}]",
+                    "Created attribute Obj/test3 [category:None] = [{'one': 1}]",
+                ),
+                ("Obj/test3[0]['one']", "Attribute Obj/test3[0]['one'] [category:None] = 1"),
+                ("Obj/test3[0]", "Attribute Obj/test3[0] [category:None] = {'one': 1}"),
+                ("Obj/test3[0]['one'] =", "Deleted attribute Obj/test3[0]['one'] [category:None]."),
+                ("Obj/test3[0]", "Attribute Obj/test3[0] [category:None] = {}"),
+                ("Obj/test3", "Attribute Obj/test3 [category:None] = [{}]"),
+            ]
+        )
+        self.assertEqual(ObjectDB.objects.get(id=self.obj1.id).db.test3, [{}])
+
+    def test_bracketed_key_and_nested_value_coexist(self):
+        self._steps(
+            [
+                ("Obj/test4[0]='foo'", "Created attribute Obj/test4[0] [category:None] = foo"),
+                ("Obj/test4[0]", "Attribute Obj/test4[0] [category:None] = foo"),
+                (
+                    "Obj/test4=[{'one': 1}]",
+                    "Created attribute Obj/test4 [category:None] = [{'one': 1}]",
+                ),
+                ("Obj/test4[0]['one']", "Attribute Obj/test4[0]['one'] [category:None] = 1"),
+                ("Obj/test4[0]", "Attribute Obj/test4[0] [category:None] = {'one': 1}"),
+            ]
+        )
+        self.assertEqual(self.run_action(Wipe, "Obj/test4"), "Wiped attributes test4 on Obj.")
+        self._steps(
+            [
+                ("Obj/test4[0]", "Attribute Obj/test4[0] [category:None] = foo"),
+                (
+                    "Obj/test4[0]['one']",
+                    "Attribute Obj/test4[0]['one'] [category:None] does not exist. "
+                    "(Nested lookups attempted)",
+                ),
+            ]
+        )
+
+
+class TestNestedAttributeHelpers(unittest.TestCase):
+    """The split and lookup helpers behind nested ``@set`` paths."""
+
+    def test_split_nested_attr(self):
+        cases = {
+            "test1": [("test1", [])],
+            'test2["dict"]': [("test2", ["dict"]), ('test2["dict"]', [])],
+            "test3[dict]": [("test3", ["dict"]), ("test3[dict]", [])],
+            'test4["dict]': [("test4", ["dict"]), ('test4["dict]', [])],
+            "test5[0][0]": [("test5", [0, 0]), ("test5[0]", [0]), ("test5[0][0]", [])],
+            'test6["0"][0]': [("test6", ["0", 0]), ('test6["0"]', [0]), ('test6["0"][0]', [])],
+            "test7[dict": [("test7[dict", [])],
+        }
+        for attr, expected in cases.items():
+            with self.subTest(attr=attr):
+                self.assertEqual(
+                    list(attributes_module.AttributeOperations.split_nested_attr(attr)), expected
+                )
+
+    def test_nested_lookup(self):
+        lookup = attributes_module.AttributeOperations.nested_lookup
+        missing = attributes_module._NOT_FOUND
+        cases = [
+            ([], ("test1",), missing),
+            ([1], ("test2",), missing),
+            ([], (0,), missing),
+            ([], ("0",), missing),
+            ([1], (2,), missing),
+            ([1], (0,), 1),
+            ([1], ("0",), missing),
+            ({}, ("test3",), missing),
+            ({}, (0,), missing),
+            ({"foo": "bar"}, ("foo",), "bar"),
+            ({"one": [1, 2, 3]}, ("one", 0), 1),
+            ([{}, {"two": 2}, 3], (1, "two"), 2),
+        ]
+        for value, keys, expected in cases:
+            with self.subTest(value=value, keys=keys):
+                self.assertEqual(lookup(value, *keys), expected)
+
+
 if __name__ == "__main__":
     unittest.main()
