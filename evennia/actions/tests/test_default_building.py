@@ -8,7 +8,6 @@ from types import SimpleNamespace
 from unittest import mock
 
 from django.test import override_settings
-
 from twisted.internet.defer import Deferred
 
 from evennia.actions.default import python_console, roleplay, script_paging, system
@@ -29,7 +28,10 @@ from evennia.actions.default.building import attributes as attributes_module
 from evennia.actions.default.building import examine as examine_module
 from evennia.actions.default.building import rules as rules_module
 from evennia.actions.tests.fakes import FakeAccount, FakeChar, FakeObj, dispatch, make_actor
+from evennia.authorization.storage import grant_capabilities, principal_refs
 from evennia.objects.character import DefaultCharacter
+from evennia.utils.ansi import strip_ansi
+from evennia.utils.test_resources import EvenniaTest
 
 engine_module = sys.modules["evennia.actions.engine"]
 
@@ -461,6 +463,87 @@ class TestCpAttrMove(unittest.TestCase):
                 any(name.startswith("evennia.commands.default") for name in imports),
                 module.__name__,
             )
+
+
+class BuildingCharacter(CharacterBuildingRules, DefaultCharacter):
+    """A database character carrying the default building rules."""
+
+
+class BuildingDBTest(EvenniaTest):
+    """Building actions run by Char, whose account holds the build grants."""
+
+    character_typeclass = BuildingCharacter
+    maxDiff = None
+
+    def setUp(self):
+        super().setUp()
+        grant_capabilities(
+            principal_refs(self.char1)[0],
+            ["engine.object.edit", "engine.object.control", "engine.object.examine"],
+            scope_kind="world",
+            scope_key="*",
+            provenance="test",
+        )
+
+    def run_action(self, action_cls, raw, switches=()):
+        """Dispatch one building action and return what Char was sent, markup stripped."""
+        actor = make_actor(self.char1, account=self.account)
+        action = action_cls.parse(raw, actor, switches=switches, verb="@build")
+        self.char1.msg = mock.Mock()
+        try:
+            dispatch(action, actor, [self.char1])
+            shown = []
+            for call in self.char1.msg.call_args_list:
+                text = call.kwargs.get("text", call.args[0] if call.args else "")
+                shown.append(strip_ansi(str(text[0] if isinstance(text, tuple) else text)))
+        finally:
+            del self.char1.msg
+        return "\n".join(shown)
+
+
+class TestExamineOnTheDatabase(BuildingDBTest):
+    """``@examine`` targets, attribute views and the markers it adds."""
+
+    def _examine(self, raw=""):
+        return self.run_action(Examine, raw)
+
+    def test_no_argument_examines_the_location(self):
+        self.assertIn("Name/key: Room", self._examine())
+
+    def test_object_account_and_exit(self):
+        self.assertIn("Name/key: Obj", self._examine("Obj"))
+        self.assertIn("Name/key: TestAccount", self._examine("*TestAccount"))
+        self.assertIn("Name/key: out", self._examine("out"))
+
+    def test_not_found(self):
+        self.assertEqual(self._examine("NotFound"), "Could not find 'NotFound'.")
+
+    def test_attribute_view(self):
+        self.char1.db.test = "testval"
+        self.assertEqual(
+            self._examine("self/test"), "Attribute Char/test [category=None]:\n\ntestval"
+        )
+
+    @override_settings(FUNCPARSER_PARSE_OUTGOING_MESSAGES_ENABLED=True)
+    def test_attribute_view_escapes_func_calls(self):
+        self.char1.db.test2 = "this is a $random() value."
+        self.assertEqual(
+            self._examine("self/test2"),
+            "Attribute Char/test2 [category=None]:\n\nthis is a \\$random() value.",
+        )
+
+    def test_attribute_view_marks_a_string_value(self):
+        self.char1.attributes.add("strattr", "testval", strattr=True)
+        self.assertEqual(
+            self._examine("self/strattr"),
+            "Attribute Char/strattr [category=None] [strvalue]:\n\ntestval",
+        )
+
+    def test_scripts_are_listed(self):
+        self.room1.scripts.add(self.script.__class__)
+        self.assertIn("Scripts: ", self._examine())
+        self.account.scripts.add(self.script.__class__)
+        self.assertIn("Name/key: TestAccount", self._examine("*TestAccount"))
 
 
 if __name__ == "__main__":
