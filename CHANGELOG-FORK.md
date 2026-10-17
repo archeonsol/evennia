@@ -25,6 +25,74 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.332: Fewer stalls and tracebacks on the live game
+
+### Objects
+
+- **A dbref that names nothing finds nothing** ([`manager.py`](evennia/objects/manager.py)).
+  `search_object("#123")` for an object that was gone fell through to a search for the name
+  `"#123"`: a scan of every object and every alias tag. On the live game that was 43 ms a call
+  (154 at most), it never found anything, and it ran 79,485 times in 11 days: 38% of all database
+  time. A miss, or a hit outside the candidates, now returns nothing after the one primary key read.
+  `search_script` and `search_account` had the same fall-through. `use_dbref=False` still treats the
+  text as a name.
+
+### Actions
+
+- **A rule whose provider changed class during the dispatch is skipped.** A character that dies
+  becomes a corpse; the rule was looked up by name on its turn and raised `AttributeError` in the
+  report phase (8 tracebacks in 11 days).
+- **`Actor.search` on an effective object with no `search`** (a session on the connect screen)
+  finds nothing instead of raising `AttributeError`.
+- **`ensure_authorization` and `prewarm_authorization` return False under a Twisted-driven
+  coroutine**, where awaiting the shared prewarm task raised "await wasn't used with future". The
+  caller reads inline, as it does when a fetch fails.
+
+### Portal
+
+- **The web proxy answers a restarting Server without a traceback.** While the Server was down,
+  every request failed with a full httpx traceback (about 100 in 8 days). It is one short log line
+  now (at most one every 10 seconds, the rest counted, no query string), and the browser gets 503,
+  502 or 504 with `Retry-After: 5`. A failure after the response began adds no second page. Errors
+  that are not "the Server is not there" keep their traceback.
+- **`_write` asks whether the socket is closing first.** A browser that left mid-response raised
+  `RuntimeError` under uvloop, not `OSError` (8 in 8 days); that now counts as the client leaving.
+- **Shutdown with the Server already gone logs one info line** (`TransportUnavailable`, 16 tracebacks
+  in 8 days).
+- **`PortalSessionHandler.disconnect_all` loops over a copy**, guards each disconnect and always
+  clears the flag that stops `disconnect` deleting entries. Before, sessions removed entries from the
+  dict under the loop ("dictionary changed size during iteration"), which left the flag set and the
+  remaining sessions open.
+- **Bad telnet bytes are one info line per client per minute**, naming the client and counting the
+  rest (about 50 error lines in 3.6 days).
+- **Discord: an edit to an archived thread is retried once** with `archived: false` (error 50083,
+  "Thread is archived"; a player reply that reopens a closed ticket).
+
+### Performance
+
+- **A flush asks the spool for less** ([`jsonb_handler.py`](evennia/typeclasses/jsonb_handler.py)).
+  A flush listed the spool twice per dirty row and the async flush a third time per adopted row, and
+  every row lock probed its two directories before opening its file. `mark_clean(pending=)` takes
+  the answer from a caller that holds the lock and has just listed the queue; an async adoption
+  makes one listing (`_SpoolListing`); a lock opens its file first and makes directories only when
+  the open fails. The check under the lock stays once per row, because another process may queue an
+  intent. A flush of 40 rows went from 360 calls into the spool directory to 80 and from 110 ms to
+  67 ms on Windows; building the row state of a loaded object went from 7 calls to 2.
+- **The watchdog notes where the loop is from half the warning threshold.** The sampler woke every
+  25 ms but looked at the loop only after a stall passed 200 ms, so about a third of logged stalls
+  said "work not sampled". It notes the place from 100 ms and keeps the last one. A stall that ends
+  under the threshold is still not reported.
+
+### Webclient
+
+- Ticket toasts no longer name who holds the ticket (carried from `55e372334`), and the shell is
+  rebuilt to include it.
+- Unreleased since `.331`: `fix(actions): keep markup out of give and put help` (`186230453`).
+
+### Migration
+
+None.
+
 ## 6.0.0+underspire.331: Put and give refuse what does not hold or receive
 
 ### Actions
