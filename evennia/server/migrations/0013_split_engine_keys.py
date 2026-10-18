@@ -22,11 +22,19 @@ SPLIT_KEYS = {
         "engine.account.password",
     ),
 }
+# A delegated grant passes on only what could have been delegated to begin with.
+DELEGABLE = {"engine.world.search"}
 PROVENANCE = "migration:server.0013_split_engine_keys"
 
 
 def split_keys(apps, schema_editor):
-    """Grant each split-out key wherever its broad key is held, scope for scope."""
+    """Grant each split-out key wherever its broad key is held, scope for scope.
+
+    Each new grant is a child of its source, so revoking the source revokes it.
+    Where two sources give the same key, the one that lasts longest wins.
+    """
+
+    from django.db.models import F
 
     AuthorizationGrant = apps.get_model("server", "AuthorizationGrant")
     AuthorizationAuditEvent = apps.get_model("server", "AuthorizationAuditEvent")
@@ -37,9 +45,11 @@ def split_keys(apps, schema_editor):
     grants, events = [], []
     sources = AuthorizationGrant.objects.filter(
         capability__in=SPLIT_KEYS, revoked_at__isnull=True
-    ).order_by("id")
+    ).order_by(F("expires_at").desc(nulls_first=True), "id")
     for source in sources:
         for capability in SPLIT_KEYS[source.capability]:
+            if source.parent_grant_id and capability not in DELEGABLE:
+                continue
             slot = (source.principal_ref, capability, source.scope_kind, source.scope_key)
             if slot in held:
                 continue
@@ -54,6 +64,7 @@ def split_keys(apps, schema_editor):
                     constraints=source.constraints,
                     expires_at=source.expires_at,
                     provenance=PROVENANCE,
+                    parent_grant_id=source.grant_id,
                 )
             )
             events.append(

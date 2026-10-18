@@ -7,7 +7,7 @@ from django.apps import apps
 from django.test import TestCase
 from django.utils import timezone
 
-from evennia.authorization.storage import grant_capability, revoke_grant
+from evennia.authorization.storage import delegate_grant, grant_capability, revoke_grant
 from evennia.server.models import AuthorizationAuditEvent, AuthorizationGrant
 
 migration = importlib.import_module("evennia.server.migrations.0013_split_engine_keys")
@@ -90,3 +90,36 @@ class SplitEngineKeysTest(TestCase):
         migration.split_keys(apps, None)
         migration.unsplit_keys(apps, None)
         self.assertEqual({cap for cap, *_ in _active("account:7")}, {"engine.world.build"})
+
+    def test_revoking_the_source_revokes_what_it_gave(self):
+        grant = grant_capability(
+            "account:8", "engine.world.build", scope_kind="world", scope_key="*"
+        )
+        migration.split_keys(apps, None)
+        revoke_grant(grant.grant_id, actor_ref="account:1", reason="test")
+        self.assertEqual(_active("account:8"), set())
+
+    def test_a_delegated_source_gives_only_delegable_keys(self):
+        grant = grant_capability(
+            "account:9", "engine.world.build", scope_kind="world", scope_key="*"
+        )
+        delegate_grant(grant.grant_id, "account:10", scope_kind="world", scope_key="*")
+        migration.split_keys(apps, None)
+        self.assertEqual(
+            {cap for cap, *_ in _active("account:10")},
+            {"engine.world.build", "engine.world.search"},
+        )
+
+    def test_a_permanent_source_beats_an_expiring_one(self):
+        grant_capability(
+            "account:11",
+            "engine.world.build",
+            scope_kind="world",
+            scope_key="*",
+            expires_at=timezone.now() + timedelta(days=1),
+        )
+        grant_capability(
+            "account:11", "engine.moderation.manage", scope_kind="world", scope_key="*"
+        )
+        migration.split_keys(apps, None)
+        self.assertIn(("engine.world.announce", "world", "*", None), _active("account:11"))
