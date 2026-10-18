@@ -87,6 +87,10 @@ those verbs now checks a key of its own.
   - World break-glass without constraints covers everything.
 - **Revoking a grant reaches every generation delegated from it**
   ([`storage.py`](evennia/authorization/storage.py)). It stopped at eight.
+- **Refreshing a grant carries its expiry and constraints to the keys split from it**: every
+  live child grant held by the same principal. Extending or narrowing build or moderation
+  now changes the keys the migration split from it. A grant delegated to someone else keeps
+  its own terms.
 - **A line break in a verb's arguments becomes a space** (`fold_line_breaks` in
   [`parser.py`](evennia/actions/parser.py)): a typed newline, vertical tab, form feed or the
   `|/` markup. 335 let them through to every verb, so `say hi|/A tall man says...` showed a
@@ -103,14 +107,18 @@ those verbs now checks a key of its own.
 - **`@cpattr` reads every source before it writes** (`stored_slot` in
   [`attributes.py`](evennia/actions/default/building/attributes.py)). A swap
   (`@cpattr/move Obj/x/y = Obj/y/x`) or a chain (`a/b = b/c`) lost a value.
-- **`@set` shows bytes as `b'...'`**, which pastes back as bytes.
+- **`@set` shows bytes as `b'...'` and an infinity as `1e999`**, which paste back as the
+  same value, also inside a list, tuple, set or dict.
 - **`@cpattr/move` to the same slot in another category case keeps the value.** Categories
   are lowercased when parsed, as the attribute handler stores them.
 - **The `@set/edit` conversion prompt continues only on Enter, `y` or `yes`.**
-- **The `@nick/list` table shows stored markup as typed.**
+- **The `@nick/list` table shows stored markup as typed, and its columns line up.**
 - **`@emit/r` means `/room` again.** `/rooms` made the prefix ambiguous.
 - **The audit log masks `@us`, `@user` and `@pas`, with or without a switch.** The
   typo-tolerant `create` masks need a leading `c`, so `treat` and `trace` are not masked.
+  `mask_sensitive_input(..., logged_in=True)` skips the `connect` and `create` masks, which
+  only matter before login; the fail-closed security log passes it for a logged-in actor,
+  so an in-game `create place` is logged as typed.
 - **`render_help` folds subtopic case itself**
   ([`renderer.py`](evennia/help/renderer.py)), so `help test/More` works without
   `CmdHelp.parse`.
@@ -123,12 +131,8 @@ those verbs now checks a key of its own.
   collapses the escape before MXP runs, so a stored link still renders as a link.
 - With `FUNCPARSER_PARSE_OUTGOING_MESSAGES_ENABLED` on, the outgoing pass eats backslashes in
   a value `as_typed` shows.
-- The `@nick/list` table's right edge is uneven for markup typed in a nick. EvTable sizes a
-  cell one markup parse before the text is shown.
-- `@set` shows `float('inf')` as `inf`, which pastes back as a string.
-- The `create` audit mask also hides the arguments of an in-game `create <something>` verb.
-- Extending a build or moderation grant does not extend the keys the migration split from
-  it. Grant those keys again to extend them.
+- A key the migration gave as a grant of its own (two sources) keeps the expiry it got. A
+  later change to either source does not reach it.
 
 ### Migration notes
 
