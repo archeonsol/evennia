@@ -89,7 +89,7 @@ def render_help(caller, topic: str = "", subtopics=None, cmdset=None, session=No
     )
     from evennia.help.formatters import HelpCategory, HelpFormatter
 
-    subtopics = list(subtopics or [])
+    subtopics = [subtopic.strip().lower() for subtopic in subtopics or []]
     helper = HelpFormatter()
     helper.caller = caller
     helper.session = session

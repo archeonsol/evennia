@@ -145,7 +145,7 @@ class TestRenderHelpEntries(EvenniaTest):
             ("partial both levels", ["creating extra", "subsub"], _SUBSUB),
             (
                 "heading case folds",
-                ["something else"],
+                ["Something Else"],
                 "Help for test/something else\n\nSomething else",
             ),
             (
@@ -153,7 +153,7 @@ class TestRenderHelpEntries(EvenniaTest):
                 ["more"],
                 "Help for test/more\n\nAnother text\n\nSubtopics:\n  test/more/second-more",
             ),
-            ("nested heading case folds", ["more", "second-more"], _SECOND_MORE),
+            ("nested heading case folds", ["More", "Second-More"], _SECOND_MORE),
             ("nested partial match", ["more", "-more"], _SECOND_MORE),
             (
                 "third level",
