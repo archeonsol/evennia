@@ -86,6 +86,8 @@ class Py(ArgAction):
     console; |w/edit|n opens the persistent code editor.
     """
 
+    keeps_newlines = True
+
     switch_options = ("time", "edit", "clientraw", "noecho")
 
     __primary_handler__ = DefaultCharacter

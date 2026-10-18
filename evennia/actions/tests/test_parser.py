@@ -797,6 +797,11 @@ if __name__ == "__main__":
     unittest.main()
 
 
+@dataclass
+class _Code(Speak):
+    keeps_newlines = True
+
+
 class TestArgumentSpacing(unittest.TestCase):
     """Arguments reach the action as typed: inner spacing and newlines are kept."""
 
@@ -807,9 +812,26 @@ class TestArgumentSpacing(unittest.TestCase):
         res = self._p().parse("say hello    world", _actor())
         self.assertEqual(res.action.message, "hello    world")
 
-    def test_newlines_and_indentation_are_kept(self):
-        res = self._p().parse("say for i in x:\n    print(i)", _actor())
+    def test_a_newline_becomes_a_space(self):
+        res = self._p().parse('say hi\n  The guard says, "drop it."', _actor())
+        self.assertEqual(res.action.message, 'hi The guard says, "drop it."')
+
+    def test_a_glued_verb_folds_newlines_too(self):
+        res = self._p().parse('"hi\nfake line', _actor())
+        self.assertEqual(res.action.message, "hi fake line")
+
+    def test_an_action_that_keeps_newlines_gets_them_with_indentation(self):
+        reg = _symbol_registry()
+        reg.register(_Code, ("code",))
+        res = ActionParser(registry=reg).parse("code for i in x:\n    print(i)", _actor())
         self.assertEqual(res.action.message, "for i in x:\n    print(i)")
+
+    def test_code_and_help_text_keep_newlines(self):
+        from evennia.actions.default.general import SetHelp
+        from evennia.actions.default.system import Py
+
+        self.assertTrue(Py.keeps_newlines)
+        self.assertTrue(SetHelp.keeps_newlines)
 
     def test_space_after_the_verb_is_dropped(self):
         res = self._p().parse("say/loud    hello  there", _actor())

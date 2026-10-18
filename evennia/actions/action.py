@@ -130,6 +130,11 @@ class Action:
 
     __primary_handler__: ClassVar[Optional[type]] = None
 
+    #: A newline typed in the arguments reaches ``parse`` only when this is True.
+    #: Otherwise it becomes a space, so text one player sends cannot show as a
+    #: separate line that looks like someone else's.
+    keeps_newlines: ClassVar[bool] = False
+
     _actor: object = field(default=None, init=False, repr=False, compare=False)
     _raw_string: str = field(default="", init=False, repr=False, compare=False)
     _trace: object = field(default=None, init=False, repr=False, compare=False)

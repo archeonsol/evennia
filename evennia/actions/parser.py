@@ -298,6 +298,8 @@ class ActionParser:
             canonical, action_cls, confidence = match
             raw_verb = verb
 
+        if not action_cls.keeps_newlines:
+            raw_args = re.sub(r"[ \t]*[\r\n]+[ \t]*", " ", raw_args)
         try:
             built = action_cls.parse(raw_args, actor, context, switches=switches, verb=canonical)
         except ParseError as err:

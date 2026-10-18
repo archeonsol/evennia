@@ -129,6 +129,8 @@ class SetHelp(ArgAction):
     require confirmation.
     """
 
+    keeps_newlines = True
+
     switch_options = (
         "edit",
         "replace",
