@@ -57,18 +57,22 @@ class CategoryAttributes:
         return_obj=False,
         return_list=False,
     ):
+        marker = (key, category)
+        if return_obj and key is not None:
+            if marker not in self.values:
+                return default
+            return SimpleNamespace(key=key, value=self.values[marker], strvalue=None)
         if return_obj:
             return [
                 SimpleNamespace(key=attr_key) for attr_key, cat in self.values if cat == category
             ]
-        marker = (key, category)
         if marker not in self.values:
             if raise_exception:
                 raise AttributeError(key)
             return default
         return self.values[marker]
 
-    def add(self, key, value, category=None):
+    def add(self, key, value, category=None, strattr=False):
         self.values[(key, category)] = value
 
     def remove(self, key, category=None):
@@ -313,20 +317,17 @@ class TestSetAndAlias(unittest.TestCase):
 
     def test_non_string_edit_cancel_does_not_mutate(self):
         self.obj.attributes.add("count", 3)
-        answers = iter(["no"])
-
-        def input_future(actor, prompt):
-            deferred = Deferred()
-            deferred.callback(next(answers))
-            return deferred
-
-        with (
-            mock.patch.object(engine_module, "_get_input_future", side_effect=input_future),
-            mock.patch.object(rules_module, "EvEditor") as editor,
-        ):
-            self._set("box/count", switches=("edit",))
-        self.assertEqual(self.obj.attributes.get("count"), 3)
-        editor.assert_not_called()
+        for reply in ("no", "cancel", "q"):
+            with self.subTest(reply=reply):
+                answer = Deferred()
+                answer.callback(reply)
+                with (
+                    mock.patch.object(engine_module, "_get_input_future", return_value=answer),
+                    mock.patch.object(rules_module, "EvEditor") as editor,
+                ):
+                    self._set("box/count", switches=("edit",))
+                self.assertEqual(self.obj.attributes.get("count"), 3)
+                editor.assert_not_called()
 
     def test_non_string_edit_yes_only_persists_on_editor_save(self):
         self.obj.attributes.add("count", 3)
@@ -546,7 +547,9 @@ class TestExamineOnTheDatabase(BuildingDBTest):
         self.room1.scripts.add(self.script.__class__)
         self.assertIn("Scripts: ", self._examine())
         self.account.scripts.add(self.script.__class__)
-        self.assertIn("Name/key: TestAccount", self._examine("*TestAccount"))
+        shown = self._examine("*TestAccount")
+        self.assertIn("Name/key: TestAccount", shown)
+        self.assertIn("Scripts: ", shown)
 
 
 class TestAliasOnTheDatabase(BuildingDBTest):
@@ -565,6 +568,12 @@ class TestAliasOnTheDatabase(BuildingDBTest):
         self.assertEqual(self._alias("Obj ="), "Cleared aliases from Obj: testobj1b")
         self.assertEqual(self.obj1.aliases.all(), [])
         self.assertEqual(self._alias("Obj ="), "No aliases to clear.")
+
+    def test_delete_removes_the_alias_from_every_category(self):
+        self.obj1.aliases.add("testobj1b")
+        self.obj1.aliases.add("testobj1b", category="other")
+        self.run_action(SetObjAlias, "Obj = testobj1b", switches=("delete",))
+        self.assertEqual(self.obj1.aliases.all(return_key_and_category=True), [])
 
 
 class TestCopyOnTheDatabase(BuildingDBTest):
@@ -635,11 +644,33 @@ class TestSetOnTheDatabase(BuildingDBTest):
                 ("Obj/test1", "Attribute Obj/test1 [category:None] = value1"),
                 ("Obj/NotFound", "Attribute Obj/notfound [category:None] does not exist."),
                 ("Obj/test1 = ", "Deleted attribute Obj/test1 [category:None]."),
-                ("Obj2/test4:Foo = 'Bar'", "Created attribute Obj2/test4 [category:Foo] = Bar"),
+                ("Obj2/test4:Foo = 'Bar'", "Created attribute Obj2/test4 [category:foo] = Bar"),
             ]
         )
         self.assertFalse(self.obj1.attributes.has("test1"))
         self.assertEqual(self.obj2.attributes.get("test4", category="Foo"), "Bar")
+
+    def test_a_string_that_reads_as_something_else_is_shown_quoted(self):
+        for typed, shown in (
+            ('"123"', "'123'"),
+            ('"[1, 2]"', "'[1, 2]'"),
+            ('"None"', "'None'"),
+            ('"$dbref(#1)"', "'$dbref(#1)'"),
+            ("plain words", "plain words"),
+        ):
+            with self.subTest(typed=typed):
+                self.run_action(SetAttribute, f"Obj/test1 = {typed}")
+                self.assertEqual(
+                    self.run_action(SetAttribute, "Obj/test1"),
+                    f"Attribute Obj/test1 [category:None] = {shown}",
+                )
+
+    def test_a_string_attribute_is_shown(self):
+        self.obj1.attributes.add("test1", "kept text", strattr=True)
+        self.assertEqual(
+            self.run_action(SetAttribute, "Obj/test1"),
+            "Attribute Obj/test1 [category:None] = kept text",
+        )
 
     def test_category_view(self):
         self.obj1.attributes.add("test", "value", category="cat")
@@ -839,6 +870,16 @@ class TestCpAttrOnTheDatabase(BuildingDBTest):
         )
         self.assertEqual(self.obj1.db.test1, "value1")
         self.assertEqual(self.obj2.db.test3, "value1")
+
+    def test_move_to_the_same_slot_in_another_case_keeps_the_value(self):
+        self.obj1.attributes.add("a", "keep", category="cat")
+        self.run_action(CpAttr, "Obj/a:Cat = Obj/a:cat", switches=("move",))
+        self.assertEqual(self.obj1.attributes.get("a", category="cat"), "keep")
+
+    def test_a_string_attribute_is_copied(self):
+        self.obj1.attributes.add("s", "kept text", strattr=True)
+        self.run_action(CpAttr, "Obj/s = Obj2/s")
+        self.assertEqual(self.obj2.attributes.get("s", strattr=True), "kept text")
 
     def test_unknown_switch_changes_nothing(self):
         self.obj2.db.test2 = "value2"

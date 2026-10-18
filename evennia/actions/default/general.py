@@ -38,6 +38,7 @@ from evennia.authorization.policy import (
     RequiresCapability,
 )
 from evennia.objects.character import DefaultCharacter
+from evennia.utils.ansi import raw as ansi_raw
 
 from ..action import action
 from ..muxargs import ArgAction, normalize_switches
@@ -63,6 +64,11 @@ def _help_policy(declaration):
 
     value = str(declaration or "public").strip().lower()
     return Always() if value == "public" else RequiresCapability(value)
+
+
+def _as_typed_in_table(value):
+    """``value`` as typed inside an EvTable cell, which parses markup twice more."""
+    return ansi_raw(ansi_raw(as_typed(value)))
 
 
 def _cy(string):
@@ -217,8 +223,8 @@ class NickRules:
                     table.add_row(
                         str(inum + 1),
                         nickobj.db_category,
-                        _cy(nickvalue),
-                        _cy(replacement),
+                        _cy(_as_typed_in_table(nickvalue)),
+                        _cy(_as_typed_in_table(replacement)),
                     )
                 string = "|wDefined Nicks:|n\n%s" % table
             caller.msg(string)

@@ -165,8 +165,9 @@ class TestNick(unittest.TestCase):
         self._nick(char, actor, "hi = say |rHello|n")
         self.assertEqual(char.nicks.get(key="hi").repl, "say |rHello|n")
         self._nick(char, actor, "hi")
+        self._nick(char, actor, "", switches=("list",))
         self._nick(char, actor, "hi", switches=("delete",))
-        self.assertEqual(len(char.messages), 3)
+        self.assertEqual(len(char.messages), 4)
         for message in char.messages:
             shown = ansi.parse_ansi(message)
             self.assertIn("say |rHello|n", shown)

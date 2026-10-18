@@ -34,6 +34,7 @@ def _objattrs(items):
         category = None
         if ":" in objdef:
             objdef, category = (part.strip() for part in objdef.rsplit(":", 1))
+            category = category.lower()
         if ";" in objdef:
             objdef = objdef.split(";", 1)[0].strip()
         attrs = []

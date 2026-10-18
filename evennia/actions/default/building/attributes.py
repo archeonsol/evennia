@@ -11,7 +11,14 @@ from evennia.utils import funcparser, search, utils
 from evennia.utils.ansi import raw as ansi_raw
 from evennia.utils.utils import variable_from_module
 
-__all__ = ["AttributeOperations", "as_typed", "convert_from_string", "search_typed"]
+__all__ = [
+    "AttributeOperations",
+    "as_typed",
+    "convert_from_string",
+    "pasteable",
+    "search_typed",
+    "stored_value",
+]
 
 LIST_APPEND_CHAR = "+"
 _NESTED_RE = re.compile(r"\[.*?\]")
@@ -33,6 +40,38 @@ def as_typed(value):
     if _OUTGOING_FUNCPARSER is None:
         _OUTGOING_FUNCPARSER = funcparser.FuncParser(settings.FUNCPARSER_OUTGOING_MESSAGES_MODULES)
     return _OUTGOING_FUNCPARSER.parse(text, escape=True)
+
+
+def stored_value(obj, key, category=None):
+    """The value of an attribute that exists, read from ``strvalue`` for a string attribute."""
+    stored = obj.attributes.get(key, category=category, return_obj=True)
+    if stored.value is None and stored.strvalue is not None:
+        return stored.strvalue
+    return stored.value
+
+
+def pasteable(value):
+    """``value`` as ``@set`` would need it typed to store it again unchanged.
+
+    A string is quoted when its bare text would be read as something else: a
+    literal (``123``, ``None``), a ``$dbref``/``$search`` call, or text that
+    loses its edge spaces or newlines on the way in.
+    """
+    if not isinstance(value, str):
+        return value
+    if (
+        not value
+        or value != value.strip()
+        or "\n" in value
+        or "$dbref(" in value
+        or "$search(" in value
+    ):
+        return repr(value)
+    try:
+        ast.literal_eval(value)
+    except (SyntaxError, ValueError, TypeError, MemoryError, RecursionError):
+        return value
+    return repr(value)
 
 
 def convert_from_string(caller, value):
@@ -124,14 +163,15 @@ class AttributeOperations:
     def view_attr(self, obj, attr, category):
         """Return player-facing output for an attribute or nested value.
 
-        Markup in the value is escaped, so it reads as it was set.
+        Markup in the value is escaped and a string is quoted where it must be,
+        so the shown value can be pasted back into ``@set``.
         """
         nested = False
         for key, nested_keys in self.split_nested_attr(attr):
             nested = nested or bool(nested_keys)
             if not obj.attributes.has(key, category):
                 continue
-            value = obj.attributes.get(key, category=category)
+            value = stored_value(obj, key, category)
             if nested_keys:
                 deep = self.nested_lookup(value, *nested_keys[:-1])
                 if deep is _NOT_FOUND:
@@ -140,7 +180,8 @@ class AttributeOperations:
                     value = deep[nested_keys[-1]]
                 except (IndexError, KeyError, TypeError):
                     continue
-            return f"\nAttribute {obj.name}/|w{attr}|n [category:{category}] = {as_typed(value)}"
+            shown = as_typed(pasteable(value))
+            return f"\nAttribute {obj.name}/|w{attr}|n [category:{category}] = {shown}"
         suffix = " (Nested lookups attempted)" if nested else ""
         return f"\nAttribute {obj.name}/|w{attr}|n [category:{category}] does not exist.{suffix}"
 

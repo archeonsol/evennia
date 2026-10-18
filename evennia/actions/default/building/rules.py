@@ -9,7 +9,13 @@ from ...predicate import HasCapability
 from ...result import CLAIM, SKIP
 from ...rule import rule
 from .actions import Copy, CpAttr, Examine, Link, SetAttribute, SetHome, SetObjAlias, Unlink, Wipe
-from .attributes import AttributeOperations, as_typed, parse_attribute_value, search_typed
+from .attributes import (
+    AttributeOperations,
+    as_typed,
+    parse_attribute_value,
+    search_typed,
+    stored_value,
+)
 from .examine import ExamineFormatter, search_examine_target
 
 __all__ = ["CharacterBuildingRules"]
@@ -208,8 +214,9 @@ class CharacterBuildingRules(AttributeOperations):
                     f"{f'[{source_category}]' if source_category else ''}."
                 )
                 return CLAIM
-        source_values = {
-            attr: source.attributes.get(attr, category=source_category) for attr in source_attrs
+        source_slots = {
+            attr: source.attributes.get(attr, category=source_category, return_obj=True)
+            for attr in source_attrs
         }
         remove_sources = set()
         written = set()
@@ -226,8 +233,10 @@ class CharacterBuildingRules(AttributeOperations):
             target_category = target_def["category"]
             for index, source_attr in enumerate(source_attrs):
                 target_attr = target_attrs[index] if index < len(target_attrs) else source_attr
-                value = source_values[source_attr]
-                target.attributes.add(target_attr, value, category=target_category)
+                slot = source_slots[source_attr]
+                strattr = slot.value is None and slot.strvalue is not None
+                value = slot.strvalue if strattr else slot.value
+                target.attributes.add(target_attr, value, category=target_category, strattr=strattr)
                 written.add((target, target_attr, target_category))
                 source_suffix = f"[{source_category}]" if source_category else ""
                 target_suffix = f"[{target_category}]" if target_category else ""
@@ -278,25 +287,23 @@ class CharacterBuildingRules(AttributeOperations):
                 caller.msg("Use `set/edit <objname>/<attr>` to define the Attribute to edit.")
                 return CLAIM
             attr = attrs[0]
-            try:
-                old_value = obj.attributes.get(attr, category=category, raise_exception=True)
-            except AttributeError:
-                old_value = ""
+            old_value = (
+                stored_value(obj, attr, category) if obj.attributes.has(attr, category) else ""
+            )
             if not isinstance(old_value, str):
                 answer = yield (
                     f"|rWarning: Attribute |w{attr}|r is of type "
                     f"|w{type(old_value).__name__}|r.\nTo continue editing, it must be "
                     "converted to (and saved as) a string. Continue? [Y]/N?"
                 )
-                if answer is None or answer.strip().lower() in ("n", "no"):
+                if answer is None or answer.strip().lower() not in ("", "y", "yes"):
                     caller.msg("Aborted edit.")
                     return CLAIM
 
             def load(editor_caller):
-                try:
-                    return str(obj.attributes.get(attr, category=category, raise_exception=True))
-                except AttributeError:
+                if not obj.attributes.has(attr, category):
                     return ""
+                return str(stored_value(obj, attr, category))
 
             def save(editor_caller, buffer):
                 if not _account_has(editor_caller, "engine.world.build") or not _can_edit(
