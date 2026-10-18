@@ -42,7 +42,7 @@ those verbs now checks a key of its own.
   | `engine.authorization.manage` | `@policy`, `@scope` |
   | `engine.world.announce` | `@emit`, `@remit`, `@pemit`, `@wall` |
   | `engine.account.password` | `@userpassword` |
-  | `engine.world.search` | nothing yet; reserved for database search |
+  | `engine.world.search` | matching a `#dbref` outside the searcher's reach |
 
 - **`engine.world.build` admits the building verbs only.** Each object's own policy
   (`edit`, `delete` and the rest) still decides which objects a builder may change, so a
@@ -58,8 +58,54 @@ those verbs now checks a key of its own.
   `engine.world.build` grant (force, authorization, announce, search) or
   `engine.moderation.manage` grant (announce, password). Each new grant copies its source's
   scope, constraints and expiry, and gets a `grant_created` audit event from
-  `system:migration`. Reversing it deletes only the grants it made. No current holder loses a
-  verb; revoke the new keys by hand where a builder should not keep them.
+  `system:migration`. Each new grant is a child of its source, so revoking the source revokes
+  it. Where two sources give the same key, the one that lasts longest wins. Reversing the
+  migration deletes only the grants it made.
+- **A delegated `engine.world.build` grant gives only `engine.world.search`.** The other new
+  keys cannot be delegated, so a builder who held build by delegation loses `@force`,
+  `@policy`, `@scope` and `@emit`. Every other holder keeps every verb; revoke the new keys
+  by hand where a builder should not keep them.
+
+### Fixes to underspire.335
+
+- **The check that refuses a higher target reads all of the target's authority**
+  (`capabilities_beyond` in [`service.py`](evennia/authorization/service.py), with the new
+  `authority_scopes` in [`storage.py`](evennia/authorization/storage.py)):
+  - A character nobody puppets counts its owner account. A builder could `@force` a
+    logged-off admin's character, and the command ran with the admin's account grants.
+  - An account counts grants on the characters it owns. A moderator could reset the
+    password of an admin whose grants sat on their character.
+  - The caller covers a grant only by holding the same key at `world:*` or the same scope.
+    An area-scoped `engine.authorization.manage` counted as equal to a world grant.
+  - World break-glass covers everything, so an emergency operator is not refused.
+- **A typed newline becomes a space** ([`parser.py`](evennia/actions/parser.py)). 335 let a
+  newline through to every verb, so `say hi` with a second line could show that line as if
+  someone else had spoken it. An action that needs newlines sets
+  `keeps_newlines = True` ([`action.py`](evennia/actions/action.py)); `@py` and `@sethelp`
+  do.
+- **`@set` view quotes a string that would paste back as something else**
+  (`pasteable` in [`attributes.py`](evennia/actions/default/building/attributes.py)):
+  `'123'`, `'None'`, `'$dbref(#1)'`, an empty string, and text with edge spaces or newlines.
+- **String attributes** (`strattr=True`) show in `@set` and `/edit`, and `@cpattr` copies
+  them. Before, each read them as `None`.
+- **`@cpattr/move` to the same slot in another category case keeps the value.** Categories
+  are lowercased when parsed, as the attribute handler stores them.
+- **The `@set/edit` conversion prompt continues only on Enter, `y` or `yes`.**
+- **The `@nick/list` table shows stored markup as typed.**
+- **`@emit/r` means `/room` again.** `/rooms` made the prefix ambiguous.
+- **The audit log masks `@us`, `@user` and `@pas`.**
+- **`render_help` folds subtopic case itself**
+  ([`renderer.py`](evennia/help/renderer.py)), so `help test/More` works without
+  `CmdHelp.parse`.
+- **A password set in-game before 335 with a run of spaces was saved with one space.** The
+  player must type it with one space, or reset it.
+
+### Known gaps
+
+- `as_typed` escapes MXP links (`|lc...|lt...|le`) at the ANSI level only. The ANSI parser
+  collapses the escape before MXP runs, so a stored link still renders as a link.
+- With `FUNCPARSER_PARSE_OUTGOING_MESSAGES_ENABLED` on, the outgoing pass eats backslashes in
+  a value `as_typed` shows.
 
 ### Migration notes
 
@@ -67,6 +113,10 @@ those verbs now checks a key of its own.
   `@policy`, `@scope` or `@emit` must now grant those keys too.
 - A game that grants `engine.moderation.manage` and expects `@wall` or `@userpassword` must
   grant `engine.world.announce` or `engine.account.password`.
+- A game whose verbs need typed newlines (multi-line poses, code) sets
+  `keeps_newlines = True` on those action classes.
+- Dbref search with `use_dbref` unset checks `engine.world.search`, not
+  `engine.world.build`.
 
 ## 6.0.0+underspire.335: Default actions match the old commands they replace
 
@@ -4937,94 +4987,3 @@ No migration: no settings, API or wire-format changes.
 ### Migration
 
 - No migration and no settings change.
-
----
-
-## 6.0.0+underspire.212 — Two prod faults the logs were already reporting
-
-### Engine
-
-- [`server/redis_bus.py`](evennia/server/redis_bus.py): `RedisPortalBus` gains
-  `send_Status2Launcher` and `get_status`. `ipc_handlers_portal` pushes status
-  to the launcher after a PSYNC by calling that method on whatever link it was
-  handed, and only the AMP protocol had it, so every server restart on the
-  Redis bus raised
-
-      AttributeError: 'RedisPortalBus' object has no attribute 'send_Status2Launcher'
-
-  swallowed as "PSYNC status push failed". The launcher never learned the server
-  had come back: it waited for a status that could not arrive and timed out its
-  graceful shutdown on every restart, which is the `Graceful shutdown timed out;
-  stopping immediately` followed by `Retrying Evennia start once` that a deploy
-  shows.
-
-  The Redis bus has no socket to the server, so it reads the server *process*
-  for liveness through the `_PidTransport` already in that module. The status
-  tuple is now built by one shared function in
-  [`amp_server.py`](evennia/server/portal/amp_server.py): the two transports
-  disagree about exactly one thing -- how they know the server is up -- so that
-  is the argument and the rest is computed identically.
-
-- [`server/models.py`](evennia/server/models.py): the `SessionRecord` indexes on
-  `telnet_sig` and `tls_sig` are named to match the migrations that created
-  them. Django derives a hashed name for an unnamed index, so the model
-  disagreed with its own applied state: `makemigrations` produced a rename
-  nobody wanted, and every deploy reported pending migrations against a database
-  that was already correct.
-
-### Tests
-
-- `server/tests/test_redis_status.py` covers the status push without needing
-  Redis: the bus object is built without connecting, because what is under test
-  is what it answers rather than what it transports. Four of its ten fail
-  without the fix.
-- The `test_redis_bus` and `test_redis_reload` suites flake under fakeredis,
-  which never wakes a blocked `XREADGROUP`. This release was checked against
-  that: the same tests fail one-or-two times per run both with and without the
-  change, and the failing set shuffles in both directions.
-
-### Migration
-
-- No migration and no settings change. A game seeing pending migrations for the
-  `server` app after `underspire.211` needs only this release -- the database
-  was always correct; the model was describing it wrongly.
-
----
-
-## 6.0.0+underspire.211 — Console authentication, declared
-
-### Engine
-
-- [`web/console/views.py`](evennia/web/console/views.py): `ConsoleView` now
-  declares `authentication_classes = [SessionAuthentication]` rather than
-  inheriting whatever a game configured.
-
-  `APIView` reads `DEFAULT_AUTHENTICATION_CLASSES` once, at import, into a class
-  attribute. A game whose own API is token only -- and which therefore drops
-  `SessionAuthentication` from that setting -- left **every console request
-  anonymous**. DRF answered 401, the console page rendered, the strip lamps lit,
-  and the first fetch failed with nothing naming the cause. The console's auth
-  module already stated the model in its docstring ("the session cookie
-  authenticates and a scoped custom header must accompany it"); it just never
-  said so to DRF.
-
-  `BasicAuthentication` is deliberately not offered even though it is in the
-  stock defaults. It would carry credentials on every request rather than once
-  at sign-in, which is the wrong trade in front of a REPL.
-
-### Tests
-
-- `override_settings` cannot reproduce this, because the class attribute is
-  bound before any test runs -- the first version of these tests passed against
-  the bug. They now assert the invariant directly (the console declares rather
-  than inherits) and patch the inherited attribute to prove the declaration is
-  what serves the request. Three of the five fail without the fix.
-
-### Migration
-
-- No migration, no settings change. Games on `underspire.210` that saw a 401
-  from `/api/console/` while signed in need only this release.
-- Reaching the console still requires an explicit grant. `is_superuser` does not
-  imply `engine.console.access`: that is decision D1, and the capability is
-  equivalent to shell access on the game server. Grant it in game with
-  `@grant/account *<name> = engine.console.access`.
