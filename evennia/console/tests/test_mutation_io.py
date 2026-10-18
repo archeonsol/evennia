@@ -339,6 +339,45 @@ class AdminMutationServiceTest(BaseEvenniaTest):
             {"engine.message.read", "engine.message.edit", "engine.message.delete"},
         )
 
+    def test_a_delegated_read_does_not_stand_in_for_a_participant_grant(self):
+        from evennia.authorization.storage import delegate_grant, grant_capability, revoke_grant
+
+        message = Msg.objects.create_message(self.account, "capability message")
+        message_ref = message.authorization_resource_ref()
+        lender = grant_capability(
+            "account:999999", "engine.message.read", scope_kind="world", scope_key="*"
+        )
+        delegate_grant(
+            lender.grant_id,
+            f"account:{self.account2.pk}",
+            scope_kind="resource",
+            scope_key=message_ref,
+        )
+
+        result = mutate_admin(
+            AdminMutationRequest(
+                self.account.pk,
+                "comms.msg",
+                message.pk,
+                (),
+                (("db_receivers_accounts", (self.account2.pk,)),),
+                (),
+            )
+        )
+        revoke_grant(lender.grant_id)
+
+        self.assertEqual(result.status, "changed", result)
+        self.assertTrue(
+            AuthorizationGrant.objects.filter(
+                principal_ref=f"account:{self.account2.pk}",
+                capability="engine.message.read",
+                scope_kind="resource",
+                scope_key=message_ref,
+                provenance="message_participant",
+                revoked_at__isnull=True,
+            ).exists()
+        )
+
     def test_post_load_recovery_fault_returns_verified_partial(self):
         request = AdminMutationRequest(
             self.account.pk,

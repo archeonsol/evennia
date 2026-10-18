@@ -815,6 +815,7 @@ def _apply_message_relations(obj, relations):
             capability=capability,
             scope_kind="resource",
             scope_key=message_ref,
+            parent_grant_id="",
             revoked_at__isnull=True,
         ).first()
         if existing is not None and existing.provenance not in (

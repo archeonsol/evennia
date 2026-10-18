@@ -99,6 +99,9 @@ those verbs now checks a key of its own.
   and the delegatee's cached grants are dropped. Before, a delegation outlived a shortened
   parent.
 - **A delegation keeps its parent's constraints** (`delegate_grant`). It was unconstrained.
+- **A console edit to a message's participants grants them read even where they hold it by
+  delegation** (`ensure_grant` in [`services.py`](evennia/console/services.py)). The
+  delegated grant stood in for theirs, and revoking the delegator took their read.
 - **Revoking a grant writes a `grant_revoked` event for each grant it takes**, not only the
   first.
 - **The `@grant` listing names each grant's source** (`from <grant id>`), so two grants of
