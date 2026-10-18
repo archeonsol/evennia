@@ -102,6 +102,14 @@ class TestEmit(unittest.TestCase):
         self.assertNotIn("hi", bob.messages)
         self.assertTrue(any("not a room" in m for m in char.messages))
 
+    def test_short_room_switch_restricts_to_rooms(self):
+        char, actor = _setup(capabilities=("engine.world.announce",))
+        bob = FakeObj(key="bob", location=FakeObj(key="room"))
+        char.search_map["bob"] = bob
+        self._emit(char, actor, "bob = hi", switches=("r",))
+        self.assertNotIn("hi", bob.messages)
+        self.assertTrue(any("not a room" in m for m in char.messages))
+
     def test_pemit_ignores_unpuppeted(self):
         char, actor = _setup(capabilities=("engine.world.announce",))
         bob = FakeObj(key="bob", puppeted=False)

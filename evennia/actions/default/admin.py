@@ -60,7 +60,7 @@ class Emit(ArgAction):
     while |w@pemit|n forces puppeted accounts.
     """
 
-    switch_options = ("room", "rooms", "accounts", "contents")
+    switch_options = ("room", "accounts", "contents")
 
     __primary_handler__ = DefaultCharacter
 
