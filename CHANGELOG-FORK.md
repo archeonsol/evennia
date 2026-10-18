@@ -25,6 +25,43 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.335: get_by_tag answers with a plain semi-join
+
+`get_by_tag` joined every object that has a tag of the type to the tags that match, grouped by object
+and counted the matches. That is the only way to rank a `match="any"` search, but a `match="all"` search
+does not need it, and it cost the same however few objects matched. On the live game a search that found
+nothing took about 9 ms, and a search for the list of drop-off rooms took 78 ms. Five systems that ask
+for the objects in some state every few seconds paid the 9 ms on every turn, and about forty other
+searches in game code pay it each time they run.
+
+### Typeclasses
+
+- **A `match="all"` search is one semi-join per key**
+  ([`managers.py`](evennia/typeclasses/managers.py)). The tag ids that match (model, tag type, key,
+  category) feed the through table, whose holder ids feed `pk IN (...)` on the model table. There is no
+  DISTINCT, no GROUP BY and no count, so it costs the same with a million tagged objects as with ten, and
+  it is a queryset ordered by id like before.
+- **The counting join stays as `_get_by_tag_counted`** for the searches the plain query cannot answer the
+  same way: `match="any"`, a search over several categories with no key, and a search that repeats a key.
+  `get_by_tag` hands those to it unchanged. The key and category pairing both paths use moved to
+  `_tag_pairs`, and the lower casing to `_tag_terms`, so the two cannot drift apart.
+- **The tag type is lower-cased and stripped before it is compared**, like the key and the category, so
+  a search for `"ALIAS"` still finds an alias. The tag handler stores the type in lower case, so the
+  compare is exact and uses the index.
+
+### Tests
+
+- `TestGetByTagPlainQuery` compares the plain query with the counting join over more than a hundred key
+  and category shapes, checks the plain SQL has no DISTINCT, GROUP BY or COUNT, that a search is one query
+  whether it finds something or not, that the result chains and is ordered by id, and that a typeclass
+  manager keeps to its own typeclass.
+
+### Migration notes
+
+None. The result set of every search is the same as before.
+
+---
+
 ## 6.0.0+underspire.334: A stall line names the system that held the reactor
 
 Before this, a reactor stall named the frame the sampler caught, and that frame is often a bystander:
