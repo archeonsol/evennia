@@ -116,10 +116,15 @@ class TestActions(TestCase):
         self.assertTrue(result["rows"])
 
     def test_resolving_a_known_verb(self):
+        # A game may register its own action for "drop", so the expected name
+        # comes from the registry the panel reads.
+        from evennia.actions.registry import action_registry
+
+        expected = action_registry.match_verb("drop")[1].__name__
         result = self.panel.resolve(_io(), text="drop sword")
         self.assertIsNotNone(result["matched"])
-        self.assertEqual(result["matched"]["action"], "Drop")
-        self.assertIn("Drop", result["explanation"])
+        self.assertEqual(result["matched"]["action"], expected)
+        self.assertIn(expected, result["explanation"])
 
     def test_resolving_an_abbreviation(self):
         result = self.panel.resolve(_io(), text="co somebody")
