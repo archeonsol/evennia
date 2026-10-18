@@ -306,6 +306,29 @@ class TestGrant(unittest.TestCase):
             self._grant(char, actor, "bob = grant-1", switches=("del",))
         revoke.assert_called_once()
 
+    def test_listing_names_the_source_of_a_split_key(self):
+        char, actor = _setup(capabilities=("engine.runtime.manage",))
+        target = FakeObj(key="bob")
+        target.pk = 2
+        char.search_map["bob"] = target
+        rows = [
+            SimpleNamespace(
+                grant_id=grant_id,
+                capability="engine.world.announce",
+                scope_kind="world",
+                scope_key="*",
+                parent_grant_id=parent,
+            )
+            for grant_id, parent in (("g1", ""), ("g2", "build-1"))
+        ]
+        with mock.patch("evennia.server.models.AuthorizationGrant") as grant_model:
+            grant_model.objects.filter.return_value.order_by.return_value = rows
+            self._grant(char, actor, "bob")
+        self.assertIn(
+            "g1 engine.world.announce [world:*]\ng2 engine.world.announce [world:*] from build-1",
+            char.messages,
+        )
+
     def test_gated_without_runtime_manage(self):
         char, actor = _setup()
         trace = self._grant(char, actor, "bob = engine.world.build")

@@ -318,6 +318,7 @@ class CharacterAdminRules:
             caller.msg(
                 "\n".join(
                     f"{grant.grant_id} {grant.capability} [{grant.scope_kind}:{grant.scope_key}]"
+                    + (f" from {grant.parent_grant_id}" if grant.parent_grant_id else "")
                     for grant in grants
                 )
                 or "<No active capability grants>"

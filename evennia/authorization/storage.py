@@ -698,36 +698,42 @@ def _validated_grant_constraints(constraints: dict | None) -> dict:
     return validate_grant_constraints(constraints)
 
 
-def _carry_terms_to_split_keys(principal_ref, parents, now):
-    """Give each live descendant the principal holds the expiry and constraints of its parent.
+def _carry_terms_to_children(parents, now) -> set:
+    """Pass refreshed grants' terms down to every live grant that came from them.
 
-    A child grant held by its parent's own principal is that authority split
-    into another key, so extending or narrowing the parent changes it too. A
-    child delegated to someone else keeps its own terms.
+    A child with another capability than its parent's is the parent's
+    authority split into a narrower key, so it takes the parent's expiry and
+    constraints. A delegated child takes the parent's constraints and ends no
+    later than the parent. Returns the principals whose grants changed.
     """
 
+    changed_principals = set()
     frontier = {grant.grant_id: grant for grant in parents}
     seen = set(frontier)
     while frontier:
         children = [
             child
             for child in AuthorizationGrant.objects.filter(
-                principal_ref=principal_ref,
-                parent_grant_id__in=frontier,
-                revoked_at__isnull=True,
+                parent_grant_id__in=frontier, revoked_at__isnull=True
             )
             if child.grant_id not in seen
         ]
         for child in children:
             parent = frontier[child.parent_grant_id]
-            child.expires_at = parent.expires_at
+            if child.capability != parent.capability or (
+                parent.expires_at
+                and (child.expires_at is None or child.expires_at > parent.expires_at)
+            ):
+                child.expires_at = parent.expires_at
             child.constraints = parent.constraints
             child.updated_at = now
+            changed_principals.add(child.principal_ref)
         AuthorizationGrant.objects.bulk_update(
             children, ["expires_at", "constraints", "updated_at"]
         )
         frontier = {child.grant_id: child for child in children}
         seen |= set(frontier)
+    return changed_principals
 
 
 def _apply_grants(
@@ -767,11 +773,13 @@ def _apply_grants(
                 capability__in=keys,
                 scope_kind=scope_kind,
                 scope_key=scope_key,
+                parent_grant_id=parent_grant_id,
                 revoked_at__isnull=True,
             )
         }
         created = []
         refreshed = []
+        changed_principals = {principal_ref}
         # bulk_update reads the attribute rather than calling pre_save, so an
         # auto_now column keeps its old value unless it is set explicitly here.
         now = timezone.now()
@@ -794,7 +802,6 @@ def _apply_grants(
             else:
                 grant.expires_at = expires_at
                 grant.provenance = provenance
-                grant.parent_grant_id = parent_grant_id
                 grant.constraints = constraints
                 grant.updated_at = now
                 refreshed.append(grant)
@@ -806,12 +813,11 @@ def _apply_grants(
                 [
                     "expires_at",
                     "provenance",
-                    "parent_grant_id",
                     "constraints",
                     "updated_at",
                 ],
             )
-            _carry_terms_to_split_keys(principal_ref, refreshed, now)
+            changed_principals |= _carry_terms_to_children(refreshed, now)
         AuthorizationAuditEvent.objects.bulk_create(
             [
                 AuthorizationAuditEvent(
@@ -826,8 +832,11 @@ def _apply_grants(
                 for key in keys
             ]
         )
-        bump_principal_generation(principal_ref)
-        transaction.on_commit(lambda: bump_principal_generation(principal_ref))
+        for principal in changed_principals:
+            bump_principal_generation(principal)
+        transaction.on_commit(
+            lambda: [bump_principal_generation(ref) for ref in changed_principals]
+        )
     by_key = {grant.capability: grant for grant in created}
     by_key.update({grant.capability: grant for grant in refreshed})
     return [by_key[key] for key in keys]
@@ -986,6 +995,7 @@ def delegate_grant(
             actor_ref=actor_ref,
             reason=reason,
             parent_grant_id=parent.grant_id,
+            constraints=parent.constraints,
         )
 
 
@@ -999,25 +1009,32 @@ def revoke_grant(grant_id: str, *, actor_ref: str = "", reason: str = "") -> boo
         now = timezone.now()
         grant.revoked_at = now
         grant.save(update_fields=["revoked_at", "updated_at"])
+        revoked = [(grant.principal_ref, grant.capability)]
+        cascade_reason = f"Revoked with grant {grant_id}. {reason}".strip()[:255]
         frontier = [grant_id]
-        affected_principals = {grant.principal_ref}
         while frontier:
             children = list(
                 AuthorizationGrant.objects.filter(
                     parent_grant_id__in=frontier, revoked_at__isnull=True
-                ).values_list("grant_id", "principal_ref")
+                ).values_list("grant_id", "principal_ref", "capability")
             )
-            frontier = [child_id for child_id, _ in children]
-            affected_principals.update(principal for _, principal in children)
+            frontier = [child_id for child_id, _, _ in children]
+            revoked.extend((principal, capability) for _, principal, capability in children)
             AuthorizationGrant.objects.filter(grant_id__in=frontier).update(revoked_at=now)
-        AuthorizationAuditEvent.objects.create(
-            event_id=uuid.uuid4().hex,
-            kind="grant_revoked",
-            principal_ref=grant.principal_ref,
-            capability=grant.capability,
-            actor_ref=actor_ref,
-            reason=reason,
+        AuthorizationAuditEvent.objects.bulk_create(
+            [
+                AuthorizationAuditEvent(
+                    event_id=uuid.uuid4().hex,
+                    kind="grant_revoked",
+                    principal_ref=principal,
+                    capability=capability,
+                    actor_ref=actor_ref,
+                    reason=reason if index == 0 else cascade_reason,
+                )
+                for index, (principal, capability) in enumerate(revoked)
+            ]
         )
+        affected_principals = {principal for principal, _ in revoked}
         for principal in affected_principals:
             bump_principal_generation(principal)
         transaction.on_commit(

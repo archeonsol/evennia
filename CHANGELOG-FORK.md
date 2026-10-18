@@ -54,15 +54,18 @@ those verbs now checks a key of its own.
 
 ### Migration
 
-- **`server.0013_split_engine_keys`** grants the new keys to every principal with an active
-  `engine.world.build` grant (force, authorization, announce, search) or
-  `engine.moderation.manage` grant (announce, password). Each new grant copies its source's
-  scope, constraints and expiry, and gets a `grant_created` audit event from
-  `system:migration`. A key that one source gives is a child of it, so revoking the source
-  revokes the key. A key that two sources give (an admin's build and moderation grants both
-  give announce) is a grant of its own with the expiry of the longer-lasting source, so
-  revoking one source keeps it. Reversing the migration deletes the grants it made and every
-  grant delegated from them.
+- **`server.0013_grant_source_uniq`** lets a principal hold one active grant per scope and
+  capability for each source. `parent_grant_id` joins the unique constraint
+  (`authgrant_active_source_uniq` replaces `authgrant_active_scope_uniq`) and gets an index.
+  Reversing it revokes all but one active grant per slot: the direct one, or else the newest.
+- **`server.0014_split_engine_keys`** gives every unrevoked `engine.world.build` grant
+  (force, authorization, announce, search) and `engine.moderation.manage` grant (announce,
+  password) a child grant of each new key. Each child copies its source's scope, constraints
+  and expiry, and gets a `grant_created` audit event from `system:migration`. An expired
+  source is split too, so renewing it brings the keys back. A key that two sources give is
+  two grants, and revoking one source keeps the other's. A direct grant of a new key is a
+  separate row. Reversing the migration deletes the grants it made and every grant
+  delegated from them.
 - **A delegated `engine.world.build` grant gives only `engine.world.search`.** The other new
   keys cannot be delegated, so a builder who held build by delegation loses `@force`,
   `@policy`, `@scope` and `@emit`. Every other holder keeps every verb; revoke the new keys
@@ -87,10 +90,19 @@ those verbs now checks a key of its own.
   - World break-glass without constraints covers everything.
 - **Revoking a grant reaches every generation delegated from it**
   ([`storage.py`](evennia/authorization/storage.py)). It stopped at eight.
-- **Refreshing a grant carries its expiry and constraints to the keys split from it**: every
-  live child grant held by the same principal. Extending or narrowing build or moderation
-  now changes the keys the migration split from it. A grant delegated to someone else keeps
-  its own terms.
+- **A grant's source is part of its slot** (`_apply_grants` in
+  [`storage.py`](evennia/authorization/storage.py)). A delegation onto a key the delegatee
+  already held refreshed that grant, made it a child of the delegator, and revoking the
+  delegator took it. It is now a grant of its own.
+- **Refreshing a grant reaches every grant that came from it.** A key split from it takes
+  its expiry and constraints. A delegation takes its constraints and ends no later than it,
+  and the delegatee's cached grants are dropped. Before, a delegation outlived a shortened
+  parent.
+- **A delegation keeps its parent's constraints** (`delegate_grant`). It was unconstrained.
+- **Revoking a grant writes a `grant_revoked` event for each grant it takes**, not only the
+  first.
+- **The `@grant` listing names each grant's source** (`from <grant id>`), so two grants of
+  one key read apart.
 - **A line break in a verb's arguments becomes a space** (`fold_line_breaks` in
   [`parser.py`](evennia/actions/parser.py)): a typed newline, vertical tab, form feed or the
   `|/` markup. The default actions let them through to every verb, so `say hi|/A tall man says...` showed a
@@ -131,8 +143,6 @@ those verbs now checks a key of its own.
   collapses the escape before MXP runs, so a stored link still renders as a link.
 - With `FUNCPARSER_PARSE_OUTGOING_MESSAGES_ENABLED` on, the outgoing pass eats backslashes in
   a value `as_typed` shows.
-- A key the migration gave as a grant of its own (two sources) keeps the expiry it got. A
-  later change to either source does not reach it.
 
 ### Migration notes
 

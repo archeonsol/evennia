@@ -11,7 +11,7 @@ from evennia.authorization import invalidation
 from evennia.authorization import service as authorization_service
 from evennia.authorization import storage as authorization_storage
 from evennia.authorization.legacy_import.migration import migrate_resource
-from evennia.authorization.service import access_check, authorize
+from evennia.authorization.service import access_check, authorize, has_capability
 from evennia.authorization.storage import (
     AuthorizationSnapshotUnavailable,
     _fetch_authorization_snapshots,
@@ -1284,3 +1284,109 @@ class ExamineScriptsAndChannelsTest(TestCase):
         self.assertTrue(channel.access(examiner, "examine"))
         self.assertFalse(script.access(player, "examine"))
         self.assertFalse(channel.access(player, "examine"))
+
+
+class GrantSourceTest(TestCase):
+    """A grant's source is part of its slot, and a source's terms bound what came from it."""
+
+    def tearDown(self):
+        clear_authorization_caches()
+        super().tearDown()
+
+    def _account(self, username):
+        from django.contrib.auth import get_user_model
+
+        return get_user_model().objects.create_user(username=username, email="", password="q" * 16)
+
+    def test_a_delegation_does_not_take_over_a_direct_grant(self):
+        source = grant_capability(
+            "account:1", "engine.world.build", scope_kind="world", scope_key="*"
+        )
+        direct = grant_capability(
+            "account:2", "engine.world.build", scope_kind="world", scope_key="*"
+        )
+        delegate_grant(
+            source.grant_id,
+            "account:2",
+            scope_kind="world",
+            scope_key="*",
+            expires_at=timezone.now() + timedelta(days=1),
+        )
+        revoke_grant(source.grant_id, actor_ref="account:9", reason="test")
+        direct.refresh_from_db()
+        self.assertIsNone(direct.revoked_at)
+        self.assertIsNone(direct.expires_at)
+        self.assertEqual(direct.parent_grant_id, "")
+
+    def test_a_delegation_keeps_its_parents_constraints(self):
+        source = grant_capability(
+            "account:1",
+            "engine.world.build",
+            scope_kind="world",
+            scope_key="*",
+            constraints={"requires_label": "area:docks"},
+        )
+        delegated = delegate_grant(source.grant_id, "account:2", scope_kind="world", scope_key="*")
+        self.assertEqual(delegated.constraints, source.constraints)
+
+    def test_narrowing_a_parent_narrows_its_delegations(self):
+        source = grant_capability(
+            "account:1", "engine.world.build", scope_kind="world", scope_key="*"
+        )
+        delegated = delegate_grant(source.grant_id, "account:2", scope_kind="world", scope_key="*")
+        grant_capability(
+            "account:1",
+            "engine.world.build",
+            scope_kind="world",
+            scope_key="*",
+            constraints={"requires_label": "area:docks"},
+        )
+        delegated.refresh_from_db()
+        self.assertEqual(delegated.constraints, {"requires_label": "area:docks"})
+
+    def test_shortening_a_parent_ends_its_delegations_with_it(self):
+        owner = f"account:{self._account('source-owner').pk}"
+        holder = self._account("source-short")
+        source = grant_capability(owner, "engine.world.build", scope_kind="world", scope_key="*")
+        delegate_grant(source.grant_id, f"account:{holder.pk}", scope_kind="world", scope_key="*")
+        self.assertTrue(has_capability(holder, "engine.world.build"))
+        grant_capability(
+            owner,
+            "engine.world.build",
+            scope_kind="world",
+            scope_key="*",
+            expires_at=timezone.now() - timedelta(minutes=1),
+        )
+        self.assertFalse(has_capability(holder, "engine.world.build"))
+
+    def test_extending_a_parent_leaves_a_shorter_delegation_alone(self):
+        expires = timezone.now() + timedelta(days=2)
+        source = grant_capability(
+            "account:1", "engine.world.build", scope_kind="world", scope_key="*"
+        )
+        delegated = delegate_grant(
+            source.grant_id,
+            "account:1",
+            scope_kind="label",
+            scope_key="area:docks",
+            expires_at=expires,
+        )
+        grant_capability("account:1", "engine.world.build", scope_kind="world", scope_key="*")
+        delegated.refresh_from_db()
+        self.assertEqual(delegated.expires_at, expires)
+
+    def test_revoking_a_grant_audits_each_grant_it_takes(self):
+        source = grant_capability(
+            "account:1", "engine.world.build", scope_kind="world", scope_key="*"
+        )
+        middle = delegate_grant(source.grant_id, "account:2", scope_kind="world", scope_key="*")
+        delegate_grant(middle.grant_id, "account:3", scope_kind="world", scope_key="*")
+        revoke_grant(source.grant_id, actor_ref="account:9", reason="test")
+        self.assertEqual(
+            sorted(
+                AuthorizationAuditEvent.objects.filter(kind="grant_revoked").values_list(
+                    "principal_ref", flat=True
+                )
+            ),
+            ["account:1", "account:2", "account:3"],
+        )

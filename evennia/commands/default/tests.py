@@ -636,6 +636,26 @@ class TestAdmin(BaseEvenniaCommandTest):
             "Granted engine.object.view to Char2.",
         )
 
+    def test_grant_listing_names_the_source_of_a_split_key(self):
+        from evennia.authorization.storage import grant_capability
+
+        build = grant_capability(
+            f"object:{self.obj1.pk}", "engine.world.build", scope_kind="world", scope_key="*"
+        )
+        split = grant_capability(
+            f"object:{self.obj1.pk}",
+            "engine.object.force",
+            scope_kind="world",
+            scope_key="*",
+            parent_grant_id=build.grant_id,
+        )
+        self.call(
+            admin.CmdGrant(),
+            "Obj",
+            f"{split.grant_id} engine.object.force [world:*] from {build.grant_id}\n"
+            f"{build.grant_id} engine.world.build [world:*]",
+        )
+
     def test_grant_bundle_in_one_call(self):
         with (
             patch("evennia.commands.default.admin.grant_capabilities") as grant,

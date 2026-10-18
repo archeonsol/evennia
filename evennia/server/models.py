@@ -158,6 +158,12 @@ class AuthorizationGrant(models.Model):
     Grants never imply hierarchy or ownership. Generic references allow
     accounts, objects, sessions, integrations, and future providers to share
     the same authorization substrate.
+
+    A principal holds at most one active row per scope and capability for each
+    source: ``parent_grant_id`` is ``""`` for a direct grant, or the grant it
+    came from. A child with its parent's capability was delegated and is bounded
+    by the parent. A child with another capability is the parent's authority
+    split into a narrower key and shares the parent's terms.
     """
 
     grant_id = models.CharField(max_length=32, unique=True, db_index=True)
@@ -178,9 +184,15 @@ class AuthorizationGrant(models.Model):
 
         constraints = [
             models.UniqueConstraint(
-                fields=["principal_ref", "capability", "scope_kind", "scope_key"],
+                fields=[
+                    "principal_ref",
+                    "capability",
+                    "scope_kind",
+                    "scope_key",
+                    "parent_grant_id",
+                ],
                 condition=models.Q(revoked_at__isnull=True),
-                name="authgrant_active_scope_uniq",
+                name="authgrant_active_source_uniq",
             ),
         ]
         indexes = [
@@ -189,6 +201,7 @@ class AuthorizationGrant(models.Model):
                 name="authgrant_principal_cap_idx",
             ),
             models.Index(fields=["expires_at"], name="authgrant_expires_idx"),
+            models.Index(fields=["parent_grant_id"], name="authgrant_parent_idx"),
         ]
 
 
