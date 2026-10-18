@@ -111,6 +111,27 @@ class TestSystems(unittest.TestCase):
         self.assertIn("heartbeat", out)
         self.assertIn("every 10s", out)
 
+    def test_a_system_that_has_not_run_shows_dashes_for_its_turns(self):
+        char, actor = _setup(perms=("Builder",))
+        with mock.patch.object(systems_module, "all_systems", return_value=[_FakeSystem()]):
+            self._systems(char, actor)
+        out = "\n".join(_texts(char))
+        self.assertIn("avg ms", out)
+        self.assertIn("worst ms", out)
+        self.assertNotIn("<error>", out)
+
+    def test_shows_the_average_and_worst_turn_in_milliseconds(self):
+        char, actor = _setup(perms=("Builder",))
+        ran = _FakeSystem("heartbeat")
+        ran.turns = 4
+        ran.busy_seconds = 0.0123
+        ran.worst_turn_seconds = 0.0374
+        with mock.patch.object(systems_module, "all_systems", return_value=[ran]):
+            self._systems(char, actor)
+        out = "\n".join(_texts(char))
+        self.assertIn("3.1", out)
+        self.assertIn("37", out)
+
     def test_no_systems_registered(self):
         char, actor = _setup(perms=("Builder",))
         with mock.patch.object(systems_module, "all_systems", return_value=[]):

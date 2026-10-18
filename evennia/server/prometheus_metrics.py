@@ -62,6 +62,7 @@ GC_PAUSE_SECONDS = None
 GC_RECLAIM_TOTAL = None
 GC_RECLAIMED_OBJECTS_TOTAL = None
 REACTOR_STALL_SECONDS = None
+SYSTEM_BODY_SECONDS = None
 DB_POOL_EVENTS_TOTAL = None
 BUS_OUTGOING_DEPTH = None
 BUS_OUTGOING_BYTES = None
@@ -204,6 +205,7 @@ def _create_metrics() -> bool:
     global IDMAPPER_FLUSH_BATCHES_TOTAL
     global IDMAPPER_FLUSH_OBJECTS_TOTAL, IDMAPPER_FLUSH_ROW_QUERIES_TOTAL
     global IDMAPPER_FLUSH_FAILURES_TOTAL, GC_PAUSE_SECONDS, REACTOR_STALL_SECONDS
+    global SYSTEM_BODY_SECONDS
     global GC_RECLAIM_TOTAL, GC_RECLAIMED_OBJECTS_TOTAL
     global DB_POOL_EVENTS_TOTAL
     global BUS_OUTGOING_DEPTH, BUS_OUTGOING_BYTES, BUS_PUBLISHED_TOTAL
@@ -492,6 +494,13 @@ def _create_metrics() -> bool:
         ("cause",),
         buckets=(0.2, 0.3, 0.5, 0.75, 1.0, 1.5, 2.5, 5.0, 10.0, 30.0),
     )
+    SYSTEM_BODY_SECONDS = Histogram(
+        "evennia_system_body_seconds",
+        "Time one turn of a system body held the reactor, by system: the count is the "
+        "turns and the sum is the time the system held the reactor",
+        ("system",),
+        buckets=(0.0005, 0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5),
+    )
     DB_POOL_EVENTS_TOTAL = Counter(
         "evennia_db_pool_events_total",
         "Database connection pool events: opened (new connection), reused, parked, "
@@ -610,6 +619,19 @@ def record_reactor_stall(duration_seconds: float, cause: str) -> None:
         return
     label = cause if cause in _STALL_CAUSES else "unknown"
     REACTOR_STALL_SECONDS.labels(cause=label).observe(max(0.0, float(duration_seconds)))
+
+
+def record_system_body(system: str, seconds: float) -> None:
+    """Record one turn of a system body on the reactor.
+
+    Args:
+        system (str): The registered system's name. Systems are declared at startup
+            only, so the names are a fixed set.
+        seconds (float): How long the turn held the reactor.
+    """
+    if not _init_metrics() or SYSTEM_BODY_SECONDS is None:
+        return
+    SYSTEM_BODY_SECONDS.labels(system=system).observe(max(0.0, float(seconds)))
 
 
 def record_db_pool_event(event: str) -> None:

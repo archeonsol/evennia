@@ -69,11 +69,18 @@ ports the old command tests that had no action test, so that the old tree can be
   - `@alias/delete obj` with no name cleared every alias, and matched case-sensitively.
   - `@set` stored the error text as the value of an unparseable literal, crashed on a list
     index past the end, and aborted on Enter at a `[Y]/N` prompt.
+- **Viewing an attribute with `@set <obj>/<attr>` escapes its markup and shows the whole value**
+  ([`attributes.py`](evennia/actions/default/building/attributes.py)).
+  `AttributeOperations.view_attr` escapes it with `as_typed` (below), as `@examine` does, but
+  does not crop it. A value of `|rred|n $you()` now reads
+  `|rred|n $you()`. Before, the client rendered the color and the outgoing funcparser filled in
+  `$you()`, so a builder could not copy a colored desc to another object. `@examine` shows the
+  same value cropped. Nested lookups (`obj/attr[0]`) are escaped the same way.
 - **Stored markup shows as typed** in `@set`, its confirmation, `@examine`, `@cpattr` and
   `@nick`. The new `as_typed(value)` in `attributes.py` escapes color codes, and escapes
-  `$func()` calls only when `FUNCPARSER_PARSE_OUTGOING_MESSAGES_ENABLED` is on. underspire.334
-  always escaped them, so a game with outgoing parsing off saw `\$you()`. The `@nick/list`
-  table still renders color: EvTable output is parsed again on its way out.
+  `$func()` calls only when `FUNCPARSER_PARSE_OUTGOING_MESSAGES_ENABLED` is on, so a game with
+  outgoing parsing off does not see `\$you()`. The `@nick/list` table still renders color:
+  EvTable output is parsed again on its way out.
 - **`@examine/script` and `@examine/channel` work.** Scripts and channels had no examine
   policy, and a missing policy denies; both now require `engine.object.examine`
   ([`scripts.py`](evennia/scripts/scripts.py), [`comms.py`](evennia/comms/comms.py)).
@@ -92,19 +99,65 @@ ports the old command tests that had no action test, so that the old tree can be
   change. To get prefix expansion, declare `switch_options` on the class.
 - A game that relied on arguments with collapsed whitespace must strip or split them itself.
 
-## 6.0.0+underspire.334: The `@set` action shows an attribute's markup as it was set
+## 6.0.0+underspire.334: A stall line names the system that held the reactor
 
-### Actions
+Before this, a reactor stall named the frame the sampler caught, and that frame is often a bystander:
+the cost sits earlier in the same body, or in a system that ran just before. Nothing timed a system
+body, so a stall hunt on the live game on 2026-10-17 took hours.
 
-- **Viewing an attribute with `@set <obj>/<attr>` escapes its markup and shows the whole value**
-  ([`attributes.py`](evennia/actions/default/building/attributes.py)).
-  `AttributeOperations.view_attr` passes the value through `ansi.raw` and an escaping funcparser
-  pass, as `@examine` does, but does not crop it. A value of `|rred|n $you()` now reads
-  `|rred|n $you()`. Before, the client rendered the color and the outgoing funcparser filled in
-  `$you()`, so a builder could not copy a colored desc to another object. `@examine` shows the
-  same value cropped. Nested lookups (`obj/attr[0]`) are escaped the same way.
-- underspire.333 made this change only in the legacy `CmdSetAttribute` command. A game that
-  dispatches `@set` through actions saw no change until this release.
+### Systems
+
+- **The scheduler times every system body**
+  ([`systems.py`](evennia/utils/systems.py)). `SystemDriver` times each stretch of a system body that
+  runs on the reactor, with the driver's own perf clock. A synchronous body is one turn. An `async def`
+  body has one turn for each `await` it passes, and the time it spends suspended is not counted. A body
+  that raises or is cancelled is timed too. A Deferred or Future a body returns is not timed past the
+  call. The numbers stay on the `System`: `turns`, `busy_seconds`, `last_turn_seconds`,
+  `worst_turn_seconds` and `slow_turns`. A fault in the timing itself is logged once and never reaches
+  the body or the driver.
+- **A slow turn is named.** A turn at or over `SYSTEM_BODY_WARN_MS` (100; 0 turns the line off) logs one
+  line naming the system and the milliseconds, at most once every `SYSTEM_BODY_WARN_EVERY` seconds (60; 0
+  logs every one) for each system, with how many turns went over since the last line.
+- **`systems.running_body()`** returns `(name, seconds into the turn)` for the body on the reactor now.
+  It reads one reference and is safe from any thread.
+- **`@systems` shows the average and the worst turn.** Both listings of the scheduler, the `@systems`
+  action ([`system.py`](evennia/actions/default/system.py)) and the older command
+  ([`system.py`](evennia/commands/default/system.py)), get two columns, `avg ms` and `worst ms`, from
+  `systems.describe_turns`. A system that has not run in this process shows dashes, and so does a listed
+  object that lacks the numbers.
+
+### Watchdog
+
+- **A stall line names the system on the reactor**
+  ([`reactor_watchdog.py`](evennia/utils/reactor_watchdog.py)). The watchdog reads `running_body()` at
+  the same moment it reads the loop's frame: `at world/butcher/lair.py:149 residents (system
+  'butcher-rite', 148ms into its turn)`. The milliseconds tell a body that caused the stall, which had
+  been running about as long as the stall is long, from one that began late in it after something else
+  held the loop. The system is named in the ordinary stall line, the collection line, the GIL line and
+  the live stack sample, and only with a sampled place. A stall with no system body running reads as
+  before.
+
+### Metrics
+
+- **`evennia_system_body_seconds{system}`**
+  ([`prometheus_metrics.py`](evennia/server/prometheus_metrics.py)). A histogram of each turn. Its count
+  is the turns and its sum is the time the system held the reactor. The buckets are the ones the GC pause
+  histogram uses (12), so a system adds 14 series to `/metrics`.
+
+### Settings
+
+- `SYSTEM_BODY_WARN_MS = 100` and `SYSTEM_BODY_WARN_EVERY = 60` are declared in `settings_default.py`
+  beside `SYSTEM_TICK_SLICE_MS`.
+
+### Migration notes
+
+None. The two settings have defaults, the new `@systems` columns need nothing from a third-party
+`System`, and the console runtime panel is unchanged (it can read the new numbers off the `System`).
+
+### Tests
+
+`TestBodyTiming` in `evennia/utils/tests/test_systems.py`, `TestStallNamesTheSystem` in
+`evennia/utils/tests/test_reactor_watchdog.py`, and one test for each `@systems` listing.
 
 ## 6.0.0+underspire.333: Legacy `@set` command shows an attribute's markup as it was set
 
@@ -113,7 +166,7 @@ ports the old command tests that had no action test, so that the old tree can be
 - **Viewing an attribute with the legacy `CmdSetAttribute` escapes its markup**
   ([`building.py`](evennia/commands/default/building.py)). `CmdSetAttribute.view_attr` passes the
   value through `ansi.raw` and an escaping funcparser pass, as `examine` already does. The `@set`
-  action, which games on the action dispatch run, was not changed until underspire.334.
+  action, which games on the action dispatch run, was not changed until underspire.335.
   Nested lookups (`obj/attr[0]`) are escaped the same way.
 
 ## 6.0.0+underspire.332: Fewer stalls and tracebacks on the live game

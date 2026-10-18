@@ -872,6 +872,13 @@ SYSTEM_TICK_MAX_ADMISSIONS = None
 # time (ms) has passed since its last yield, so systems that come due together run
 # as several short turns, not one long one. 0 runs every due system in one turn.
 SYSTEM_TICK_SLICE_MS = 25
+# The system scheduler times each turn of a system body (a stretch that runs on the reactor
+# between two awaits; a plain body is one turn). A turn this many ms or longer logs a warning
+# naming the system (0 = no line). At most one line for each system every
+# SYSTEM_BODY_WARN_EVERY seconds (0 = every slow turn), saying how many went over since the last.
+# The time of every turn also goes to the evennia_system_body_seconds histogram.
+SYSTEM_BODY_WARN_MS = 100
+SYSTEM_BODY_WARN_EVERY = 60
 # Export engine metrics on the default Prometheus registry (/metrics via django-prometheus).
 ENGINE_PROMETHEUS_METRICS_ENABLED = True
 # --- Tier 1 performance (RP / command path) ---
