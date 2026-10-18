@@ -281,26 +281,126 @@ class TypedObjectManager(idmapper.manager.SharedMemoryManager):
             IndexError: If `key` and `category` are both lists and `category` is shorter
                 than `key`.
 
+        Notes:
+            The tag handler stores keys, categories and tag types in lower case, and the
+            lookup relies on that so that the key+category index is used. A search with
+            `match="all"` over distinct keys, or over one category, is answered with one
+            semi-join for each key, as a plain queryset (no DISTINCT, no GROUP BY, no
+            counting), so it costs the same however many objects are tagged and it stays
+            cheap when none are. A search with `match="any"`, one over several categories
+            and no key, and one that repeats a key keep the counting join
+            (`_get_by_tag_counted`).
+
         """
         if key is None and category is None:
             return []
 
-        global _Tag
-        if not _Tag:
-            from evennia.typeclasses.models import Tag as _Tag
-
+        keys, categories = self._tag_terms(key, category)
+        dbmodel = self.model.__dbclass__.__name__.lower()
         anymatch = "any" == kwargs.get("match", "all").lower().strip()
 
+        if not anymatch:
+            if keys:
+                pairs = self._tag_pairs(keys, categories)
+                plain = len(set(pairs)) == len(pairs)
+            else:
+                unique_categories = set(categories)
+                pairs = [(None, tag_category) for tag_category in unique_categories]
+                plain = len(unique_categories) == 1
+            if plain:
+                tagtype = str(tagtype).strip().lower() if tagtype is not None else None
+                return self._get_by_tag_plain(pairs, tagtype, dbmodel)
+        return self._get_by_tag_counted(key=key, category=category, tagtype=tagtype, **kwargs)
+
+    @staticmethod
+    def _tag_terms(key, category):
+        """Return the search keys and categories as lists of stripped, lower case strings."""
         _normalize_tag_value = lambda value: (
             str(value).strip().lower() if value is not None else None
         )
-
         keys = [_normalize_tag_value(val) for val in make_iter(key)] if key is not None else []
         categories = (
             [_normalize_tag_value(val) for val in make_iter(category)]
             if category is not None
             else []
         )
+        return keys, categories
+
+    @staticmethod
+    def _tag_pairs(keys, categories):
+        """Pair each key with its category: one for all, none for all, or one for each."""
+        n_keys = len(keys)
+        n_categories = len(categories)
+        if n_categories == 0:
+            categories = [None for _ in range(n_keys)]
+        elif n_categories == 1 and n_keys > 1:
+            categories = [categories[0] for _ in range(n_keys)]
+        elif 1 < n_categories < n_keys:
+            raise IndexError(
+                "get_by_tag needs a single category or a list of categories "
+                "the same length as the list of tags."
+            )
+        return list(zip(keys, categories))
+
+    def _get_by_tag_plain(self, pairs, tagtype, dbmodel):
+        """
+        Return the objects that carry a tag for every `(key, category)` pair.
+
+        Each pair is one semi-join (`pk IN (...)`) over the tag table and the table that links
+        tags to objects, so there is nothing to de-duplicate and nothing to count. The result is
+        an ordinary queryset ordered by id, like the one `_get_by_tag_counted` returns.
+
+        Args:
+            pairs (list): `(key, category)` pairs, lower case. A key of `None` matches any key
+                (a search by category alone) and a category of `None` matches a tag with none.
+            tagtype (str or None): The tag type, lower case, or `None` for a normal tag.
+            dbmodel (str): The model name the tags belong to, such as `objectdb`.
+
+        """
+        global _Tag
+        if not _Tag:
+            from evennia.typeclasses.models import Tag as _Tag
+
+        relation = self.model.db_tags
+        through = relation.through
+        holder = relation.field.m2m_field_name()
+        tagged = relation.field.m2m_reverse_field_name()
+
+        queryset = self.all()
+        for tag_key, tag_category in pairs:
+            wanted = {"db_model": dbmodel}
+            if tagtype is None:
+                wanted["db_tagtype__isnull"] = True
+            else:
+                wanted["db_tagtype"] = tagtype
+            if tag_key is not None:
+                wanted["db_key"] = tag_key
+            if tag_category is None:
+                wanted["db_category__isnull"] = True
+            else:
+                wanted["db_category"] = tag_category
+            tag_ids = _Tag.objects.filter(**wanted).values("pk")
+            holders = through.objects.filter(**{f"{tagged}__in": tag_ids}).values(f"{holder}_id")
+            queryset = queryset.filter(pk__in=holders)
+        return queryset.order_by("id")
+
+    def _get_by_tag_counted(self, key=None, category=None, tagtype=None, **kwargs):
+        """
+        The counting join behind `get_by_tag`: every object with a tag of the type, joined to
+        the tags that match, grouped and counted.
+
+        It is the only way to rank a `match="any"` search by how many tags matched, and it is
+        kept as it was for the searches the plain query does not take (see `get_by_tag`).
+        It costs a join over every tagged object, so do not call it from a loop.
+
+        """
+        global _Tag
+        if not _Tag:
+            from evennia.typeclasses.models import Tag as _Tag
+
+        anymatch = "any" == kwargs.get("match", "all").lower().strip()
+
+        keys, categories = self._tag_terms(key, category)
         n_keys = len(keys)
         n_categories = len(categories)
         unique_categories = set(categories)
@@ -315,16 +415,7 @@ class TypedObjectManager(idmapper.manager.SharedMemoryManager):
 
         if n_keys > 0:
             # keys and/or categories given
-            if n_categories == 0:
-                categories = [None for _ in range(n_keys)]
-            elif n_categories == 1 and n_keys > 1:
-                cat = categories[0]
-                categories = [cat for _ in range(n_keys)]
-            elif 1 < n_categories < n_keys:
-                raise IndexError(
-                    "get_by_tag needs a single category or a list of categories "
-                    "the same length as the list of tags."
-                )
+            categories = [category for _key, category in self._tag_pairs(keys, categories)]
             clauses = Q()
             for ikey, key in enumerate(keys):
                 # ANY mode; must match any one of the given tags/categories

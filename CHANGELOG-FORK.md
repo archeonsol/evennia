@@ -25,7 +25,7 @@ matching release procedure.
 
 ---
 
-## 6.0.0+underspire.336: Admin verbs check their own keys
+## Unreleased: Admin verbs check their own keys
 
 `engine.world.build` gated `@force`, `@emit`, `@policy` and `@scope` as well as building, and
 `engine.moderation.manage` gated `@wall` and `@userpassword`. A builder limited to one area
@@ -68,7 +68,7 @@ those verbs now checks a key of its own.
   `@policy`, `@scope` and `@emit`. Every other holder keeps every verb; revoke the new keys
   by hand where a builder should not keep them.
 
-### Fixes to underspire.335
+### Fixes to the default actions
 
 - **The check that refuses a higher target compares world authority**
   (`capabilities_beyond` in [`service.py`](evennia/authorization/service.py), with the new
@@ -93,7 +93,7 @@ those verbs now checks a key of its own.
   its own terms.
 - **A line break in a verb's arguments becomes a space** (`fold_line_breaks` in
   [`parser.py`](evennia/actions/parser.py)): a typed newline, vertical tab, form feed or the
-  `|/` markup. 335 let them through to every verb, so `say hi|/A tall man says...` showed a
+  `|/` markup. The default actions let them through to every verb, so `say hi|/A tall man says...` showed a
   second line as if someone else had spoken it. `||/` stays literal. An action that needs
   line breaks sets `keeps_newlines = True` ([`action.py`](evennia/actions/action.py));
   `@py`, `@sethelp`, `@set`, `@emit` and `@wall` do.
@@ -122,7 +122,7 @@ those verbs now checks a key of its own.
 - **`render_help` folds subtopic case itself**
   ([`renderer.py`](evennia/help/renderer.py)), so `help test/More` works without
   `CmdHelp.parse`.
-- **A password set in-game before 335 with a run of spaces was saved with one space.** The
+- **A password set in-game before this release with a run of spaces was saved with one space.** The
   player must type it with one space, or reset it.
 
 ### Known gaps
@@ -143,11 +143,10 @@ those verbs now checks a key of its own.
 - A game whose verbs need line breaks (multi-line poses, descriptions, notes, code) sets
   `keeps_newlines = True` on those action classes. Without it, `|/` in their text becomes a
   space.
-- `authority_scopes` is replaced by `world_capabilities` and `principal_is_superuser`.
 - Dbref search with `use_dbref` unset checks `engine.world.search`, not
   `engine.world.build`.
 
-## 6.0.0+underspire.335: Default actions match the old commands they replace
+## Unreleased: Default actions match the old commands they replace
 
 A review of every action that replaces a command in `evennia/commands/default/` found
 security holes, silent data loss and behavior lost in the port. This release fixes them, and
@@ -220,6 +219,45 @@ ports the old command tests that had no action test, so that the old tree can be
 - A game that registers its own `ArgAction` subclasses gets lowercased switches with no
   change. To get prefix expansion, declare `switch_options` on the class.
 - A game that relied on arguments with collapsed whitespace must strip or split them itself.
+
+---
+
+## 6.0.0+underspire.335: get_by_tag answers with a plain semi-join
+
+`get_by_tag` joined every object that has a tag of the type to the tags that match, grouped by object
+and counted the matches. That is the only way to rank a `match="any"` search, but a `match="all"` search
+does not need it, and it cost the same however few objects matched. On the live game a search that found
+nothing took about 9 ms, and a search for the list of drop-off rooms took 78 ms. Five systems that ask
+for the objects in some state every few seconds paid the 9 ms on every turn, and about forty other
+searches in game code pay it each time they run.
+
+### Typeclasses
+
+- **A `match="all"` search is one semi-join per key**
+  ([`managers.py`](evennia/typeclasses/managers.py)). The tag ids that match (model, tag type, key,
+  category) feed the through table, whose holder ids feed `pk IN (...)` on the model table. There is no
+  DISTINCT, no GROUP BY and no count, so it costs the same with a million tagged objects as with ten, and
+  it is a queryset ordered by id like before.
+- **The counting join stays as `_get_by_tag_counted`** for the searches the plain query cannot answer the
+  same way: `match="any"`, a search over several categories with no key, and a search that repeats a key.
+  `get_by_tag` hands those to it unchanged. The key and category pairing both paths use moved to
+  `_tag_pairs`, and the lower casing to `_tag_terms`, so the two cannot drift apart.
+- **The tag type is lower-cased and stripped before it is compared**, like the key and the category, so
+  a search for `"ALIAS"` still finds an alias. The tag handler stores the type in lower case, so the
+  compare is exact and uses the index.
+
+### Tests
+
+- `TestGetByTagPlainQuery` compares the plain query with the counting join over more than a hundred key
+  and category shapes, checks the plain SQL has no DISTINCT, GROUP BY or COUNT, that a search is one query
+  whether it finds something or not, that the result chains and is ordered by id, and that a typeclass
+  manager keeps to its own typeclass.
+
+### Migration notes
+
+None. The result set of every search is the same as before.
+
+---
 
 ## 6.0.0+underspire.334: A stall line names the system that held the reactor
 
@@ -4925,58 +4963,3 @@ No migration: no settings, API or wire-format changes.
 
 - No database migration and no downstream game change. The three settings are
   optional overrides; their engine defaults activate the bounded behavior.
-
----
-
-## 6.0.0+underspire.214 -- Two console readouts that were not telling the truth
-
-### Engine
-
-- [`console/panels/moderation.py`](evennia/console/panels/moderation.py): the
-  signal coverage readout sorted connections by an exact match against three
-  protocol names, and treated everything that did not match as a raw socket.
-
-  The list missed the shipped web client, whose `protocol_key` is
-  `webclient/websocket`, so on a stock game every browser connection was filed
-  as a raw socket and the TLS handshake coverage read zero against a population
-  of zero. This panel exists to say when a configured signal is silently
-  absent; it would have reported a correct proxy as a broken one.
-
-  "Everything else" then swept in the connections that are neither web nor
-  telnet. A Discord relay negotiates no telnet option and terminates no TLS,
-  so counting one as a raw socket that failed to negotiate measures nothing. A
-  game whose players all use the web client saw `CLIENT NEGOTIATION 0 / 14
-  ABSENT` in red, where the fourteen were its bot links.
-
-  Protocols are now matched as substrings and sort into three groups: web,
-  telnet, and neither. A connection carrying no identity signal is counted in
-  no population and reported as `other_sessions`, so the sample and the two
-  denominators add up on screen.
-
-- [`console/panels/dangerous.py`](evennia/console/panels/dangerous.py): the
-  session `watch` action refuses instead of pretending. The control, the reason
-  prompt, the presence check and the permanent audit row were all built; the
-  thing they describe was not, because nothing mirrors a session's output
-  anywhere. The action wrote its audit row and returned `"watching": true`
-  while the operator saw nothing.
-
-  The missing feature is the smaller fault. The audit row is permanent, names
-  the watched account, and is readable by that account -- that visibility is
-  why it was designed to be permanent. The console was therefore writing a
-  false statement about a real person into the one record meant to let them
-  find out what was done to them. It now records nothing and says which of the
-  two faults it is. The client control is removed rather than left to raise.
-
-### Interface
-
-- The withheld address on a connection row is labelled as the host rather than
-  the address. The row prints the `/24` beside it and is meant to -- that is
-  the coarse key operators correlate on -- so a chip reading `WITHHELD` next to
-  a visible network read as a mask that was not working.
-
-### Migration
-
-- No migration and no settings change. A game that saw `CLIENT NEGOTIATION`
-  reported as absent, or web coverage reported against a population of zero,
-  needs only this release: the recorded rows were always right and the readout
-  was grouping them wrongly.

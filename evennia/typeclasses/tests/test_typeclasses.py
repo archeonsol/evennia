@@ -9,6 +9,7 @@ from django.test.utils import CaptureQueriesContext
 from mock import patch
 from parameterized import parameterized
 
+from evennia.objects.models import ObjectDB
 from evennia.objects.objects import DefaultObject
 from evennia.utils.idmapper.models import flush_cache
 from evennia.utils.test_resources import BaseEvenniaTest, EvenniaTestCase
@@ -804,3 +805,177 @@ class TestNickHandler(BaseEvenniaTest):
             re.escape("OOC["), "ooc", pattern_is_regex=True
         )
         re.compile(nick_regex, re.I + re.DOTALL + re.U)
+
+
+class TestGetByTagPlainQuery(BaseEvenniaTest):
+    """`get_by_tag` answers the usual searches with a plain semi-join, and agrees with the counting join.
+
+    A sweep that asks every few seconds for the objects carrying one tag used to pay for a join over
+    every tagged object, grouped and counted, whatever it found. The usual search (one key and one
+    category, a list of distinct keys, one category alone) is now a plain queryset; `match="any"`,
+    several categories with no key and a repeated key still take the counting join.
+    """
+
+    evennia_fixtures = {"obj1", "obj2", "char1", "room1", "script"}
+
+    def setUp(self):
+        super().setUp()
+        # Not `DefaultObject.objects`: a typeclass manager keeps to its own typeclass.
+        self.manager = ObjectDB.objects
+        self.obj1.tags.add("red", "color")
+        self.obj1.tags.add("big", "size")
+        self.obj1.tags.add("plain")
+        self.obj2.tags.add("red", "color")
+        self.obj2.tags.add("small", "size")
+        self.obj2.tags.add("plain")
+        self.obj2.tags.add("shiny", "look")
+        self.char1.tags.add("blue", "color")
+        self.char1.tags.add("big", "size")
+        self.char1.tags.add("plain", "look")
+        self.room1.tags.add("shiny", "look")
+        self.room1.tags.add("red")
+        self.char1.aliases.add("hero")
+        self.obj1.permissions.add("wizard")
+
+    def _both(self, *args, **kwargs):
+        """The plain answer and the counting join's answer to the same search, or the error each raised."""
+        answers = []
+        for method in (self.manager.get_by_tag, self.manager._get_by_tag_counted):
+            try:
+                answers.append([obj.id for obj in method(*args, **kwargs)])
+            except Exception as err:
+                answers.append(type(err))
+        return answers
+
+    def test_the_plain_query_agrees_with_the_counting_join(self):
+        keys = (
+            None,
+            "red",
+            "big",
+            "plain",
+            "shiny",
+            "nothere",
+            "RED ",
+            ["red", "big"],
+            ["red", "plain"],
+            ["red", "small"],
+            ["big", "plain", "red"],
+            ["red", "red"],
+        )
+        categories = (
+            None,
+            "color",
+            "size",
+            "look",
+            "nowhere",
+            "COLOR",
+            ["color", "size"],
+            ["color", "look"],
+            ["color", "size", "look"],
+            ["color", "size", "look", "nowhere"],
+        )
+        checked = 0
+        for key in keys:
+            for category in categories:
+                if key is None and category is None:
+                    continue
+                with self.subTest(key=key, category=category):
+                    plain, counted = self._both(key, category)
+                    self.assertEqual(plain, counted)
+                    checked += 1
+        self.assertGreater(checked, 100)
+
+    def test_it_finds_what_the_old_tests_expect_in_each_shape(self):
+        self.assertEqual(self._both("red", "color")[0], sorted([self.obj1.id, self.obj2.id]))
+        self.assertEqual(self._both("red")[0], [self.room1.id])
+        self.assertEqual(self._both(["red", "big"], "color")[0], [])
+        self.assertEqual(self._both(["big", "red"], ["size", "color"])[0], [self.obj1.id])
+        self.assertEqual(
+            self._both(category="look")[0], sorted([self.obj2.id, self.char1.id, self.room1.id])
+        )
+
+    def test_keys_and_categories_are_matched_in_lower_case(self):
+        self.assertEqual(
+            [obj.id for obj in self.manager.get_by_tag(" RED ", "Color")],
+            [obj.id for obj in self.manager.get_by_tag("red", "color")],
+        )
+        self.assertTrue(self.manager.get_by_tag(" RED ", "Color").exists())
+        self.assertEqual(list(self.manager.get_by_tag("hero", tagtype="ALIAS")), [self.char1])
+
+    def test_the_plain_query_has_no_distinct_no_group_by_and_no_count(self):
+        for search in (
+            self.manager.get_by_tag("red", "color"),
+            self.manager.get_by_tag(["red", "big"], ["color", "size"]),
+            self.manager.get_by_tag(category="look"),
+        ):
+            sql = str(search.query).upper()
+            self.assertNotIn("DISTINCT", sql)
+            self.assertNotIn("GROUP BY", sql)
+            self.assertNotIn("COUNT(", sql)
+            self.assertIn("ORDER BY", sql)
+
+    def test_the_counting_join_still_has_them(self):
+        sql = str(self.manager.get_by_tag("red", "color", match="any").query).upper()
+        self.assertIn("GROUP BY", sql)
+
+    def test_one_query_whatever_is_tagged(self):
+        with self.assertNumQueries(1):
+            list(self.manager.get_by_tag("red", "color"))
+        with self.assertNumQueries(1):
+            list(self.manager.get_by_tag("nothere", "nowhere"))
+        with self.assertNumQueries(1):
+            list(self.manager.get_by_tag(["red", "big", "plain"], ["color", "size", None]))
+
+    def test_the_result_is_a_queryset_that_chains(self):
+        search = self.manager.get_by_tag("red", "color")
+        self.assertEqual(search.count(), 2)
+        self.assertEqual(
+            [obj.id for obj in search.order_by("-id")],
+            sorted([self.obj1.id, self.obj2.id], reverse=True),
+        )
+        self.assertEqual(list(search.filter(id=self.obj1.id)), [self.obj1])
+        self.assertEqual(
+            list(search.values_list("id", flat=True)), sorted([self.obj1.id, self.obj2.id])
+        )
+        self.assertTrue(search.exists())
+        self.assertFalse(self.manager.get_by_tag("nothere", "nowhere").exists())
+
+    def test_it_is_ordered_by_id(self):
+        found = [obj.id for obj in self.manager.get_by_tag(category="look")]
+        self.assertEqual(found, sorted(found))
+
+    def test_an_object_with_two_tags_of_a_category_comes_once(self):
+        self.obj1.tags.add("heavy", "size")
+        found = [obj.id for obj in self.manager.get_by_tag(category="size")]
+        self.assertEqual(found.count(self.obj1.id), 1)
+
+    def test_a_typeclass_manager_keeps_to_its_own_typeclass(self):
+        from evennia.objects.objects import DefaultCharacter
+
+        self.assertEqual(list(DefaultCharacter.objects.get_by_tag("big", "size")), [self.char1])
+        self.assertEqual(list(DefaultObject.objects.get_by_tag("big", "size")), [self.obj1])
+        self.assertEqual(set(ObjectDB.objects.get_by_tag("big", "size")), {self.obj1, self.char1})
+        self.assertEqual(
+            list(DefaultCharacter.objects.get_by_tag("big", "size")),
+            list(DefaultCharacter.objects._get_by_tag_counted("big", "size")),
+        )
+
+    def test_it_serves_the_other_typeclassed_models(self):
+        from evennia.scripts.models import ScriptDB
+
+        self.script.tags.add("red", "color")
+        self.assertEqual(list(ScriptDB.objects.get_by_tag("red", "color")), [self.script])
+        self.assertNotIn(self.obj1, list(ScriptDB.objects.get_by_tag("red", "color")))
+
+    def test_a_normal_search_leaves_aliases_and_permissions_alone(self):
+        self.assertEqual(list(self.manager.get_by_tag("hero")), [])
+        self.assertEqual(list(self.manager.get_by_tag("wizard")), [])
+        self.assertEqual(list(self.manager.get_by_alias("hero")), [self.char1])
+        self.assertEqual(list(self.manager.get_by_permission("wizard")), [self.obj1])
+
+    def test_a_search_with_no_key_and_no_category_finds_nothing(self):
+        self.assertEqual(self.manager.get_by_tag(), [])
+
+    def test_a_list_of_keys_with_too_few_categories_still_raises(self):
+        with self.assertRaises(IndexError):
+            self.manager.get_by_tag(["red", "big", "plain"], ["color", "size"])
