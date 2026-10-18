@@ -329,6 +329,26 @@ class DefaultObjectTest(BaseEvenniaTest):
         )
 
 
+class TestDbrefSearchKey(BaseEvenniaTest):
+    """A searcher matches a ``#dbref`` outside its reach only with ``engine.world.search``."""
+
+    def _search_holding(self, capability):
+        far = create.create_object(DefaultObject, key="far thing", location=self.room2)
+        with patch(
+            "evennia.authorization.service.has_capability",
+            side_effect=lambda principal, key, **kwargs: key == capability,
+        ):
+            return self.char1.search_for(f"#{far.id}"), far
+
+    def test_the_search_key_matches_a_far_dbref(self):
+        found, far = self._search_holding("engine.world.search")
+        self.assertEqual(found, Found(obj=far))
+
+    def test_the_build_key_alone_does_not(self):
+        found, _ = self._search_holding("engine.world.build")
+        self.assertIsInstance(found, NotFound)
+
+
 class TestDbrefSearchUsesTheCache(BaseEvenniaTest):
     """``search_object("#id")`` answers from the idmapper before it asks the database."""
 

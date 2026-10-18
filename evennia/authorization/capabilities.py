@@ -337,7 +337,7 @@ def _register_engine_defaults() -> None:
             "World building",
         ),
         "engine.world.search": (
-            "Search the whole database for objects, accounts and scripts.",
+            "Find any object by its #dbref, wherever it is.",
             "World building",
         ),
         "engine.world.announce": (

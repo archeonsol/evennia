@@ -324,7 +324,7 @@ class SearchMixin:
         if use_dbref is None:
             from evennia.authorization.service import has_capability
 
-            use_dbref = has_capability(self, "engine.world.build", resource=self)
+            use_dbref = has_capability(self, "engine.world.search", resource=self)
 
         # convert tags into tag tuples suitable for query
         tags = [
