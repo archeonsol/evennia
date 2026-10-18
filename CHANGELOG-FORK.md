@@ -58,9 +58,11 @@ those verbs now checks a key of its own.
   `engine.world.build` grant (force, authorization, announce, search) or
   `engine.moderation.manage` grant (announce, password). Each new grant copies its source's
   scope, constraints and expiry, and gets a `grant_created` audit event from
-  `system:migration`. Each new grant is a child of its source, so revoking the source revokes
-  it. Where two sources give the same key, the one that lasts longest wins. Reversing the
-  migration deletes only the grants it made.
+  `system:migration`. A key that one source gives is a child of it, so revoking the source
+  revokes the key. A key that two sources give (an admin's build and moderation grants both
+  give announce) is a grant of its own with the expiry of the longer-lasting source, so
+  revoking one source keeps it. Reversing the migration deletes the grants it made and every
+  grant delegated from them.
 - **A delegated `engine.world.build` grant gives only `engine.world.search`.** The other new
   keys cannot be delegated, so a builder who held build by delegation loses `@force`,
   `@policy`, `@scope` and `@emit`. Every other holder keeps every verb; revoke the new keys
@@ -68,32 +70,47 @@ those verbs now checks a key of its own.
 
 ### Fixes to underspire.335
 
-- **The check that refuses a higher target reads all of the target's authority**
+- **The check that refuses a higher target compares world authority**
   (`capabilities_beyond` in [`service.py`](evennia/authorization/service.py), with the new
-  `authority_scopes` in [`storage.py`](evennia/authorization/storage.py)):
+  `world_capabilities` and `principal_is_superuser` in
+  [`storage.py`](evennia/authorization/storage.py)):
+  - Only grants at `world:*` count. A grant for one area or one message gives no rank, so a
+    player who has paged someone, or a builder of one area, no longer blocks `@force`.
   - A character nobody puppets counts its owner account. A builder could `@force` a
     logged-off admin's character, and the command ran with the admin's account grants.
-  - An account counts grants on the characters it owns. A moderator could reset the
-    password of an admin whose grants sat on their character.
-  - The caller covers a grant only by holding the same key at `world:*` or the same scope.
-    An area-scoped `engine.authorization.manage` counted as equal to a world grant.
-  - World break-glass covers everything, so an emergency operator is not refused.
-- **A typed newline becomes a space** ([`parser.py`](evennia/actions/parser.py)). 335 let a
-  newline through to every verb, so `say hi` with a second line could show that line as if
-  someone else had spoken it. An action that needs newlines sets
-  `keeps_newlines = True` ([`action.py`](evennia/actions/action.py)); `@py` and `@sethelp`
-  do.
+  - An account counts grants on the characters it owns, on both sides. A moderator could
+    reset the password of an admin whose grants sat on their character.
+  - The caller counts what it can use when it acts: its live driver, never its body's
+    owner, and only grants without constraints. A world grant limited by a label, a time
+    window or a session counted as a full one.
+  - A Django superuser outranks an account that is not one (`"superuser"` in the result).
+  - World break-glass without constraints covers everything.
+- **Revoking a grant reaches every generation delegated from it**
+  ([`storage.py`](evennia/authorization/storage.py)). It stopped at eight.
+- **A line break in a verb's arguments becomes a space** (`fold_line_breaks` in
+  [`parser.py`](evennia/actions/parser.py)): a typed newline, vertical tab, form feed or the
+  `|/` markup. 335 let them through to every verb, so `say hi|/A tall man says...` showed a
+  second line as if someone else had spoken it. `||/` stays literal. An action that needs
+  line breaks sets `keeps_newlines = True` ([`action.py`](evennia/actions/action.py));
+  `@py`, `@sethelp`, `@set`, `@emit` and `@wall` do.
+- **A prompt answer is one line** ([`menus.py`](evennia/actions/menus.py)). `get_input` and
+  `yield` prompts fold line breaks the same way. The line editor and the pager do not.
 - **`@set` view quotes a string that would paste back as something else**
   (`pasteable` in [`attributes.py`](evennia/actions/default/building/attributes.py)):
   `'123'`, `'None'`, `'$dbref(#1)'`, an empty string, and text with edge spaces or newlines.
-- **String attributes** (`strattr=True`) show in `@set` and `/edit`, and `@cpattr` copies
-  them. Before, each read them as `None`.
+- **String attributes** (`strattr=True`) show in `@set` and `/edit`, `@cpattr` copies them,
+  and `/edit` saves them as string attributes. Before, each read them as `None`.
+- **`@cpattr` reads every source before it writes** (`stored_slot` in
+  [`attributes.py`](evennia/actions/default/building/attributes.py)). A swap
+  (`@cpattr/move Obj/x/y = Obj/y/x`) or a chain (`a/b = b/c`) lost a value.
+- **`@set` shows bytes as `b'...'`**, which pastes back as bytes.
 - **`@cpattr/move` to the same slot in another category case keeps the value.** Categories
   are lowercased when parsed, as the attribute handler stores them.
 - **The `@set/edit` conversion prompt continues only on Enter, `y` or `yes`.**
 - **The `@nick/list` table shows stored markup as typed.**
 - **`@emit/r` means `/room` again.** `/rooms` made the prefix ambiguous.
-- **The audit log masks `@us`, `@user` and `@pas`.**
+- **The audit log masks `@us`, `@user` and `@pas`, with or without a switch.** The
+  typo-tolerant `create` masks need a leading `c`, so `treat` and `trace` are not masked.
 - **`render_help` folds subtopic case itself**
   ([`renderer.py`](evennia/help/renderer.py)), so `help test/More` works without
   `CmdHelp.parse`.
@@ -106,6 +123,12 @@ those verbs now checks a key of its own.
   collapses the escape before MXP runs, so a stored link still renders as a link.
 - With `FUNCPARSER_PARSE_OUTGOING_MESSAGES_ENABLED` on, the outgoing pass eats backslashes in
   a value `as_typed` shows.
+- The `@nick/list` table's right edge is uneven for markup typed in a nick. EvTable sizes a
+  cell one markup parse before the text is shown.
+- `@set` shows `float('inf')` as `inf`, which pastes back as a string.
+- The `create` audit mask also hides the arguments of an in-game `create <something>` verb.
+- Extending a build or moderation grant does not extend the keys the migration split from
+  it. Grant those keys again to extend them.
 
 ### Migration notes
 
@@ -113,8 +136,10 @@ those verbs now checks a key of its own.
   `@policy`, `@scope` or `@emit` must now grant those keys too.
 - A game that grants `engine.moderation.manage` and expects `@wall` or `@userpassword` must
   grant `engine.world.announce` or `engine.account.password`.
-- A game whose verbs need typed newlines (multi-line poses, code) sets
-  `keeps_newlines = True` on those action classes.
+- A game whose verbs need line breaks (multi-line poses, descriptions, notes, code) sets
+  `keeps_newlines = True` on those action classes. Without it, `|/` in their text becomes a
+  space.
+- `authority_scopes` is replaced by `world_capabilities` and `principal_is_superuser`.
 - Dbref search with `use_dbref` unset checks `engine.world.search`, not
   `engine.world.build`.
 
@@ -4951,39 +4976,3 @@ No migration: no settings, API or wire-format changes.
   reported as absent, or web coverage reported against a population of zero,
   needs only this release: the recorded rows were always right and the readout
   was grouping them wrongly.
-
----
-
-## 6.0.0+underspire.213 — Long listings scroll, and a masked value can be asked for
-
-### Frontend
-
-- `DataTable` set a `max-height` on its frame and nothing gave that frame an
-  `overflow`. Two symptoms, one omission: rows past the height drew over
-  whatever followed the table -- the note lines under Actions, Objects and
-  Prototypes, and the second table on Database, all appeared stacked on the
-  rows -- and the frame could not scroll, which froze the virtualized window,
-  since that window is computed from `scrollTop`. One screenful was all anybody
-  could reach of 657 actions or 667 prototypes, so the panels looked unpaged
-  because in effect they were.
-- The virtualizer's spacer rows were `tr` elements with no cells. Such a row
-  collapses to nothing whatever height it is given, so the rows standing in for
-  everything scrolled past held no space and the scrollbar never described the
-  whole listing. They carry a `td` spanning the columns now.
-- `thead th` was already `position: sticky`, which does nothing without a
-  scrolling ancestor and now has one.
-
-### Moderation
-
-- **The reveal control exists.** The audited `reveal` action has been there
-  since the panel shipped -- a reason and a password, recorded permanently --
-  but no client ever called it, so a masked address read as a permission the
-  operator lacked rather than a value they could ask for. It is not a
-  capability and never was: nobody is prevented, everybody is recorded, and the
-  record says why. The revealed value is held in the control and never written
-  back into the row, so it is gone on the next render rather than left on the
-  page.
-
-### Migration
-
-- No migration and no settings change.
