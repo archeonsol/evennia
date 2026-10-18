@@ -14,6 +14,7 @@ from .attributes import (
     as_typed,
     parse_attribute_value,
     search_typed,
+    stored_slot,
     stored_value,
 )
 from .examine import ExamineFormatter, search_examine_target
@@ -215,8 +216,7 @@ class CharacterBuildingRules(AttributeOperations):
                 )
                 return CLAIM
         source_slots = {
-            attr: source.attributes.get(attr, category=source_category, return_obj=True)
-            for attr in source_attrs
+            attr: stored_slot(source, attr, source_category) for attr in source_attrs
         }
         remove_sources = set()
         written = set()
@@ -233,9 +233,7 @@ class CharacterBuildingRules(AttributeOperations):
             target_category = target_def["category"]
             for index, source_attr in enumerate(source_attrs):
                 target_attr = target_attrs[index] if index < len(target_attrs) else source_attr
-                slot = source_slots[source_attr]
-                strattr = slot.value is None and slot.strvalue is not None
-                value = slot.strvalue if strattr else slot.value
+                value, strattr = source_slots[source_attr]
                 target.attributes.add(target_attr, value, category=target_category, strattr=strattr)
                 written.add((target, target_attr, target_category))
                 source_suffix = f"[{source_category}]" if source_category else ""
@@ -300,6 +298,8 @@ class CharacterBuildingRules(AttributeOperations):
                     caller.msg("Aborted edit.")
                     return CLAIM
 
+            strattr = obj.attributes.has(attr, category) and stored_slot(obj, attr, category)[1]
+
             def load(editor_caller):
                 if not obj.attributes.has(attr, category):
                     return ""
@@ -311,7 +311,7 @@ class CharacterBuildingRules(AttributeOperations):
                 ):
                     editor_caller.msg("You no longer have permission to edit this attribute.")
                     return False
-                obj.attributes.add(attr, buffer, category=category)
+                obj.attributes.add(attr, buffer, category=category, strattr=strattr)
                 editor_caller.msg(f"Saved Attribute {attr}.")
                 return True
 

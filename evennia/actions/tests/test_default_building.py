@@ -267,14 +267,6 @@ class TestSetAndAlias(unittest.TestCase):
         dispatch(Wipe.parse("box/nothing", self.actor, verb="@wipe"), self.actor, [self.char])
         self.assertIn("has no attribute nothing", "\n".join(map(str, self.char.messages)))
 
-    def test_cpattr_move_swap_keeps_both_values(self):
-        self.obj.attributes.add("x", "X")
-        self.obj.attributes.add("y", "Y")
-        action = CpAttr.parse("box/x/y = box/y/x", self.actor, switches=("move",), verb="@cpattr")
-        dispatch(action, self.actor, [self.char])
-        self.assertEqual(self.obj.attributes.get("x"), "Y")
-        self.assertEqual(self.obj.attributes.get("y"), "X")
-
     def test_alias_delete_without_name_is_refused(self):
         self.obj.aliases.add(["crate", "chest"])
         dispatch(
@@ -626,6 +618,19 @@ class TestWipeOnTheDatabase(BuildingDBTest):
 class TestSetOnTheDatabase(BuildingDBTest):
     """``@set`` messages and nested index, key and tuple paths on stored attributes."""
 
+    def test_editing_a_string_attribute_keeps_it_a_string_attribute(self):
+        self.obj1.attributes.add("s", "old", strattr=True)
+        with mock.patch.object(rules_module, "EvEditor") as editor:
+            self.run_action(SetAttribute, "Obj/s", switches=("edit",))
+        editor.call_args.kwargs["savefunc"](self.char1, "new")
+        self.assertEqual(self.obj1.attributes.get("s", strattr=True), "new")
+
+    def test_bytes_are_shown_as_typed(self):
+        self.obj1.attributes.add("b", b"x")
+        self.assertEqual(
+            self.run_action(SetAttribute, "Obj/b"), "Attribute Obj/b [category:None] = b'x'"
+        )
+
     def _steps(self, steps):
         for raw, expected in steps:
             with self.subTest(raw=raw):
@@ -880,6 +885,24 @@ class TestCpAttrOnTheDatabase(BuildingDBTest):
         self.obj1.attributes.add("s", "kept text", strattr=True)
         self.run_action(CpAttr, "Obj/s = Obj2/s")
         self.assertEqual(self.obj2.attributes.get("s", strattr=True), "kept text")
+
+    def test_move_swap_keeps_both_values(self):
+        self.obj1.attributes.add("x", "X")
+        self.obj1.attributes.add("y", "Y")
+        self.run_action(CpAttr, "Obj/x/y = Obj/y/x", switches=("move",))
+        self.assertEqual((self.obj1.db.x, self.obj1.db.y), ("Y", "X"))
+
+    def test_copy_swap_keeps_both_values(self):
+        self.obj1.attributes.add("x", "X")
+        self.obj1.attributes.add("y", "Y")
+        self.run_action(CpAttr, "Obj/x/y = Obj/y/x")
+        self.assertEqual((self.obj1.db.x, self.obj1.db.y), ("Y", "X"))
+
+    def test_a_chain_copies_each_value_as_it_was(self):
+        self.obj1.attributes.add("a", "A")
+        self.obj1.attributes.add("b", "B")
+        self.run_action(CpAttr, "Obj/a/b = Obj/b/c")
+        self.assertEqual((self.obj1.db.b, self.obj1.db.c), ("A", "B"))
 
     def test_unknown_switch_changes_nothing(self):
         self.obj2.db.test2 = "value2"

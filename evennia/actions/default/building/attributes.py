@@ -17,6 +17,7 @@ __all__ = [
     "convert_from_string",
     "pasteable",
     "search_typed",
+    "stored_slot",
     "stored_value",
 ]
 
@@ -42,12 +43,21 @@ def as_typed(value):
     return _OUTGOING_FUNCPARSER.parse(text, escape=True)
 
 
-def stored_value(obj, key, category=None):
-    """The value of an attribute that exists, read from ``strvalue`` for a string attribute."""
+def stored_slot(obj, key, category=None):
+    """``(value, strattr)`` of an attribute that exists, as plain data.
+
+    ``strattr`` is True for a string attribute, whose value is read from
+    ``strvalue``. The value is a copy: writing the slot later does not change it.
+    """
     stored = obj.attributes.get(key, category=category, return_obj=True)
     if stored.value is None and stored.strvalue is not None:
-        return stored.strvalue
-    return stored.value
+        return stored.strvalue, True
+    return stored.value, False
+
+
+def stored_value(obj, key, category=None):
+    """The value of an attribute that exists, read from ``strvalue`` for a string attribute."""
+    return stored_slot(obj, key, category)[0]
 
 
 def pasteable(value):
@@ -57,6 +67,8 @@ def pasteable(value):
     literal (``123``, ``None``), a ``$dbref``/``$search`` call, or text that
     loses its edge spaces or newlines on the way in.
     """
+    if isinstance(value, bytes):
+        return repr(value)
     if not isinstance(value, str):
         return value
     if (
