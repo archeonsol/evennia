@@ -300,12 +300,13 @@ def principal_refs(principal) -> tuple[str, ...]:
     return tuple(dict.fromkeys(refs))
 
 
-def authority_scopes(principal) -> frozenset[tuple[str, str, str]]:
-    """Return ``(capability, scope_kind, scope_key)`` for every live grant a principal can use.
+def _authority_refs(principal, *, acting: bool) -> tuple[str, ...]:
+    """Every principal ref whose grants this principal can bring to bear.
 
-    This reaches past :func:`principal_refs`: a character counts its owner
-    account even while nobody puppets it, because a forced command runs with
-    that account, and an account counts the characters it owns.
+    This reaches past :func:`principal_refs`: an account counts the characters
+    it owns. Unless ``acting``, a character also counts its owner account even
+    while nobody puppets it, because a command forced on it runs with that
+    account. A principal that acts uses its live driver, never a body's owner.
     """
 
     from evennia.objects.models import ObjectDB
@@ -317,13 +318,36 @@ def authority_scopes(principal) -> frozenset[tuple[str, str, str]]:
             f"object:{char_pk}"
             for char_pk in ObjectDB.objects.filter(db_account_id=pk).values_list("id", flat=True)
         )
-    elif getattr(principal, "db_account_id", None) is not None:
+    elif not acting and getattr(principal, "db_account_id", None) is not None:
         refs.append(f"account:{principal.db_account_id}")
-    refs = tuple(dict.fromkeys(refs))
-    return frozenset(
-        (row["capability"], row["scope_kind"], row["scope_key"])
-        for row in _grant_rows(refs, _principal_group_refs(refs), timezone.now())
+    return tuple(dict.fromkeys(refs))
+
+
+def world_capabilities(principal, *, acting: bool = False) -> frozenset[str]:
+    """Capabilities a principal holds at ``world:*`` on any grant in :func:`_authority_refs`.
+
+    ``acting`` also leaves out grants with constraints, which hold only some of
+    the time or in some places.
+    """
+
+    refs = _authority_refs(principal, acting=acting)
+    rows = _grant_rows(refs, _principal_group_refs(refs), timezone.now()).filter(
+        scope_kind="world", scope_key="*"
     )
+    return frozenset(row["capability"] for row in rows if not (acting and row["constraints"]))
+
+
+def principal_is_superuser(principal, *, acting: bool = False) -> bool:
+    """Whether any account in :func:`_authority_refs` is a Django superuser."""
+
+    from evennia.accounts.models import AccountDB
+
+    account_ids = [
+        ref.split(":", 1)[1]
+        for ref in _authority_refs(principal, acting=acting)
+        if ref.startswith("account:")
+    ]
+    return AccountDB.objects.filter(id__in=account_ids, is_superuser=True).exists()
 
 
 def _principal_cache_key(refs: tuple[str, ...]) -> str:

@@ -1164,6 +1164,80 @@ class CapabilitiesBeyondTest(TestCase):
         )
 
 
+    def test_a_grant_with_constraints_does_not_cover(self):
+        from evennia.authorization.service import capabilities_beyond
+
+        operator = self._account("beyond-cond-op", "engine.runtime.manage")
+        forcer = self._account("beyond-cond", "engine.object.force")
+        for capability in ("engine.runtime.manage", "engine.authorization.break_glass"):
+            grant_capability(
+                f"account:{forcer.pk}",
+                capability,
+                scope_kind="world",
+                scope_key="*",
+                constraints={"requires_label": "area:nowhere"},
+            )
+        clear_authorization_caches()
+
+        self.assertEqual(capabilities_beyond(operator, forcer), {"engine.runtime.manage"})
+
+    def test_a_grant_below_world_outranks_no_one(self):
+        from evennia.authorization.service import capabilities_beyond
+
+        builder = self._account("beyond-area-builder")
+        grant_capability(
+            f"account:{builder.pk}", "engine.world.build", scope_kind="label", scope_key="area:x"
+        )
+        grant_capability(
+            f"account:{builder.pk}", "engine.message.read", scope_kind="resource", scope_key="msg:1"
+        )
+        staffer = self._account("beyond-area-staff")
+        clear_authorization_caches()
+
+        self.assertEqual(capabilities_beyond(builder, staffer), frozenset())
+
+    def test_the_caller_counts_grants_on_its_characters(self):
+        from evennia.authorization.service import capabilities_beyond
+
+        target = self._account("beyond-peer-target")
+        caller = self._account("beyond-peer-caller")
+        for account in (target, caller):
+            grant_capability(
+                f"object:{self._character(f'{account.username}-char', account).pk}",
+                "engine.runtime.manage",
+                scope_kind="world",
+                scope_key="*",
+            )
+        clear_authorization_caches()
+
+        self.assertEqual(capabilities_beyond(target, caller), frozenset())
+
+    def test_the_caller_does_not_use_its_body_owners_grants(self):
+        from evennia.authorization.service import capabilities_beyond
+
+        owner = self._account("beyond-body-owner", "engine.runtime.manage")
+        body = self._character("beyond-body", owner)
+        target = self._account("beyond-body-target", "engine.runtime.manage")
+        clear_authorization_caches()
+
+        self.assertEqual(capabilities_beyond(target, body), {"engine.runtime.manage"})
+
+    def test_a_superuser_outranks_an_account_that_is_not(self):
+        from evennia.authorization.service import capabilities_beyond
+
+        root = self._account("beyond-root")
+        root.is_superuser = True
+        root.save()
+        moderator = self._account("beyond-root-mod", "engine.account.password")
+        other_root = self._account("beyond-root-2")
+        other_root.is_superuser = True
+        other_root.save()
+        clear_authorization_caches()
+
+        self.assertEqual(capabilities_beyond(root, moderator), {"superuser"})
+        self.assertEqual(capabilities_beyond(root, other_root), frozenset())
+
+
 class ExamineScriptsAndChannelsTest(TestCase):
     """`@examine/script` and `@examine/channel` need an examine policy to pass."""
 

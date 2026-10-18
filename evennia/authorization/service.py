@@ -13,12 +13,13 @@ from evennia.utils import logger
 from .engine import AuthorizationContext, AuthorizationDecision, evaluate
 from .policy import RequiresCapability, validate_policy
 from .storage import (
-    authority_scopes,
     load_grants,
     load_policy,
     load_resource,
+    principal_is_superuser,
     principal_is_suspended,
     resource_ref,
+    world_capabilities,
 )
 
 _DECISION_SCOPE: contextvars.ContextVar = contextvars.ContextVar(
@@ -275,26 +276,23 @@ def has_capability(principal, capability: str, *, resource=None, session=None) -
 
 
 def capabilities_beyond(principal, other) -> frozenset[str]:
-    """Capabilities ``principal`` holds at a scope ``other`` does not cover, quell ignored.
+    """Capabilities ``principal`` holds at world scope that ``other`` does not, quell ignored.
 
-    ``principal`` counts every grant in :func:`authority_scopes`. ``other``
-    covers a grant by holding its capability at ``world:*`` or at the same
-    scope, and covers everything with world break-glass. Use this to refuse
-    acting on someone who outranks the caller.
+    ``principal`` counts every grant in :func:`world_capabilities`. ``other``
+    is the one acting, so it counts what it can use when it acts. A grant
+    below world scope gives authority over one place or record, so it outranks
+    no one. ``"superuser"`` is in the result when ``principal`` is a Django
+    superuser and ``other`` is not. ``other`` covers everything with world
+    break-glass. Use this to refuse acting on someone who outranks the caller.
     """
 
-    held = load_grants(other, ignore_quell=True).by_capability
-
-    def scopes(capability):
-        return {(scope.kind, scope.key) for scope in held.get(capability, ())}
-
-    if ("world", "*") in scopes("engine.authorization.break_glass"):
+    covered = world_capabilities(other, acting=True)
+    if "engine.authorization.break_glass" in covered:
         return frozenset()
-    return frozenset(
-        capability
-        for capability, kind, key in authority_scopes(principal)
-        if not scopes(capability) & {("world", "*"), (kind, key)}
-    )
+    beyond = set(world_capabilities(principal) - covered)
+    if principal_is_superuser(principal) and not principal_is_superuser(other, acting=True):
+        beyond.add("superuser")
+    return frozenset(beyond)
 
 
 def holds_capability(principal, capability: str, *, resource=None) -> bool:
