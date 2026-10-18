@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import ast
+import math
 import re
 
 from django.conf import settings
 
 from evennia.utils import funcparser, search, utils
+from evennia.utils.dbserialize import deserialize
 from evennia.utils.ansi import raw as ansi_raw
 from evennia.utils.utils import variable_from_module
 
@@ -60,17 +62,46 @@ def stored_value(obj, key, category=None):
     return stored_slot(obj, key, category)[0]
 
 
+def _holds_infinity(value):
+    """Whether ``value`` is, or contains, a float infinity."""
+    if isinstance(value, float):
+        return math.isinf(value)
+    if isinstance(value, dict):
+        return any(_holds_infinity(key) or _holds_infinity(item) for key, item in value.items())
+    if isinstance(value, (list, tuple, set, frozenset)):
+        return any(_holds_infinity(item) for item in value)
+    return False
+
+
+def _literal(value):
+    """``repr(value)`` with each infinity as ``1e999``, which ``ast.literal_eval`` reads back."""
+    if isinstance(value, float) and math.isinf(value):
+        return "1e999" if value > 0 else "-1e999"
+    if isinstance(value, dict):
+        return "{%s}" % ", ".join(f"{_literal(key)}: {_literal(item)}" for key, item in value.items())
+    if isinstance(value, list):
+        return "[%s]" % ", ".join(_literal(item) for item in value)
+    if isinstance(value, tuple):
+        items = [_literal(item) for item in value]
+        return f"({items[0]},)" if len(items) == 1 else "(%s)" % ", ".join(items)
+    if isinstance(value, set) and value:
+        return "{%s}" % ", ".join(_literal(item) for item in value)
+    return repr(value)
+
+
 def pasteable(value):
     """``value`` as ``@set`` would need it typed to store it again unchanged.
 
     A string is quoted when its bare text would be read as something else: a
     literal (``123``, ``None``), a ``$dbref``/``$search`` call, or text that
-    loses its edge spaces or newlines on the way in.
+    loses its edge spaces or newlines on the way in. An infinity, which shows
+    as ``inf``, is written ``1e999``.
     """
     if isinstance(value, bytes):
         return repr(value)
     if not isinstance(value, str):
-        return value
+        plain = deserialize(value)
+        return _literal(plain) if _holds_infinity(plain) else value
     if (
         not value
         or value != value.strip()

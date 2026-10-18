@@ -625,6 +625,15 @@ class TestSetOnTheDatabase(BuildingDBTest):
         editor.call_args.kwargs["savefunc"](self.char1, "new")
         self.assertEqual(self.obj1.attributes.get("s", strattr=True), "new")
 
+    def test_an_infinity_pastes_back_as_one(self):
+        for value in (float("inf"), [float("-inf"), {"a": (float("inf"),)}, {1.5}]):
+            with self.subTest(value=value):
+                self.obj1.attributes.add("f", value)
+                shown = self.run_action(SetAttribute, "Obj/f")
+                typed = shown.split(" = ", 1)[1]
+                self.run_action(SetAttribute, f"Obj/f = {typed}")
+                self.assertEqual(self.obj1.attributes.get("f"), value)
+
     def test_bytes_are_shown_as_typed(self):
         self.obj1.attributes.add("b", b"x")
         self.assertEqual(
