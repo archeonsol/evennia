@@ -36,6 +36,7 @@ from .exceptions import AmbiguousTarget, ParseError
 from .registry import action_registry
 
 __all__ = [
+    "fold_line_breaks",
     "ParseResult",
     "ActionParser",
     "parser",
@@ -46,6 +47,16 @@ __all__ = [
     "reachable_actions",
     "iter_reachable_actions",
 ]
+
+#: An escaped pipe (kept), or a run of line breaks: typed ones, vertical tab,
+#: form feed, or the ``|/`` markup, with the spaces around them.
+_LINE_BREAKS = re.compile(r"\|\||(?:[ \t]*(?:[\r\n\v\f]|\|/))+[ \t]*")
+
+
+def fold_line_breaks(text: str) -> str:
+    """``text`` with each run of line breaks made one space, so it shows as one line."""
+    return _LINE_BREAKS.sub(lambda match: "||" if match.group() == "||" else " ", text)
+
 
 #: Maximum suggestions offered on a no-match (prefix candidates + fuzzy).
 _SUGGESTION_LIMIT = 3
@@ -299,7 +310,7 @@ class ActionParser:
             raw_verb = verb
 
         if not action_cls.keeps_newlines:
-            raw_args = re.sub(r"[ \t]*[\r\n]+[ \t]*", " ", raw_args)
+            raw_args = fold_line_breaks(raw_args)
         try:
             built = action_cls.parse(raw_args, actor, context, switches=switches, verb=canonical)
         except ParseError as err:

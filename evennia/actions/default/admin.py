@@ -60,6 +60,8 @@ class Emit(ArgAction):
     while |w@pemit|n forces puppeted accounts.
     """
 
+    keeps_newlines = True
+
     switch_options = ("room", "accounts", "contents")
 
     __primary_handler__ = DefaultCharacter
@@ -73,6 +75,8 @@ class Wall(ArgAction):
     |w@wall <message>|n. Requires |wengine.world.announce|n; recipients see
     the caller name prefixed to the announcement.
     """
+
+    keeps_newlines = True
 
     __primary_handler__ = DefaultCharacter
 

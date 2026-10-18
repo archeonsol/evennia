@@ -130,9 +130,10 @@ class Action:
 
     __primary_handler__: ClassVar[Optional[type]] = None
 
-    #: A newline typed in the arguments reaches ``parse`` only when this is True.
-    #: Otherwise it becomes a space, so text one player sends cannot show as a
-    #: separate line that looks like someone else's.
+    #: A line break in the arguments, typed or as ``|/`` markup, reaches
+    #: ``parse`` only when this is True. Otherwise it becomes a space, so text
+    #: one player sends cannot show as a separate line that looks like someone
+    #: else's. Set it for text written as a block: code, descriptions, notes.
     keeps_newlines: ClassVar[bool] = False
 
     _actor: object = field(default=None, init=False, repr=False, compare=False)

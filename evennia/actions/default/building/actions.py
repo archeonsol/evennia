@@ -78,6 +78,8 @@ class SetAttribute(ObjManipAction):
     |w/edit|n opens the line editor and converts a non-string value after confirmation.
     """
 
+    keeps_newlines = True
+
     switch_options = ("edit", "script", "channel", "account", "room", "exit", "char", "character")
 
     __primary_handler__ = DefaultCharacter

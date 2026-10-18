@@ -820,18 +820,39 @@ class TestArgumentSpacing(unittest.TestCase):
         res = self._p().parse('"hi\nfake line', _actor())
         self.assertEqual(res.action.message, "hi fake line")
 
+    def test_line_break_markup_becomes_a_space(self):
+        res = self._p().parse('say hi |/ |/The guard says, "drop it."', _actor())
+        self.assertEqual(res.action.message, 'hi The guard says, "drop it."')
+
+    def test_an_escaped_pipe_before_a_slash_is_kept(self):
+        res = self._p().parse("say a||/b and |||/c", _actor())
+        self.assertEqual(res.action.message, "a||/b and || c")
+
+    def test_vertical_tab_and_form_feed_become_a_space(self):
+        res = self._p().parse("say a\vb\fc", _actor())
+        self.assertEqual(res.action.message, "a b c")
+
+    def test_an_action_that_keeps_newlines_keeps_line_break_markup(self):
+        reg = _symbol_registry()
+        reg.register(_Code, ("code",))
+        res = ActionParser(registry=reg).parse("code one|/two", _actor())
+        self.assertEqual(res.action.message, "one|/two")
+
     def test_an_action_that_keeps_newlines_gets_them_with_indentation(self):
         reg = _symbol_registry()
         reg.register(_Code, ("code",))
         res = ActionParser(registry=reg).parse("code for i in x:\n    print(i)", _actor())
         self.assertEqual(res.action.message, "for i in x:\n    print(i)")
 
-    def test_code_and_help_text_keep_newlines(self):
+    def test_code_help_attributes_and_staff_emits_keep_newlines(self):
         from evennia.actions.default.general import SetHelp
         from evennia.actions.default.system import Py
 
-        self.assertTrue(Py.keeps_newlines)
-        self.assertTrue(SetHelp.keeps_newlines)
+        from evennia.actions.default.admin import Emit, Wall
+        from evennia.actions.default.building.actions import SetAttribute
+
+        for action_cls in (Py, SetHelp, SetAttribute, Emit, Wall):
+            self.assertTrue(action_cls.keeps_newlines, action_cls)
 
     def test_space_after_the_verb_is_dropped(self):
         res = self._p().parse("say/loud    hello  there", _actor())
