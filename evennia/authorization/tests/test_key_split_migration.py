@@ -147,3 +147,43 @@ class SplitEngineKeysTest(TestCase):
         delegate_grant(search.grant_id, "account:14", scope_kind="world", scope_key="*")
         migration.unsplit_keys(apps, None)
         self.assertEqual(_active("account:14"), set())
+
+    def test_extending_a_source_extends_the_keys_split_from_it(self):
+        grant_capability(
+            "account:15",
+            "engine.world.build",
+            scope_kind="world",
+            scope_key="*",
+            expires_at=timezone.now() + timedelta(days=1),
+        )
+        migration.split_keys(apps, None)
+        grant_capability("account:15", "engine.world.build", scope_kind="world", scope_key="*")
+        self.assertEqual({expiry for *_, expiry in _active("account:15")}, {None})
+
+    def test_narrowing_a_source_narrows_the_keys_split_from_it(self):
+        grant_capability("account:16", "engine.world.build", scope_kind="world", scope_key="*")
+        migration.split_keys(apps, None)
+        grant_capability(
+            "account:16",
+            "engine.world.build",
+            scope_kind="world",
+            scope_key="*",
+            constraints={"requires_label": "area:docks"},
+        )
+        rows = AuthorizationGrant.objects.filter(
+            principal_ref="account:16", revoked_at__isnull=True
+        )
+        build = rows.get(capability="engine.world.build")
+        self.assertTrue(build.constraints)
+        self.assertEqual([row.constraints for row in rows], [build.constraints] * 5)
+
+    def test_a_grant_delegated_to_someone_else_keeps_its_terms(self):
+        build = grant_capability(
+            "account:17", "engine.world.build", scope_kind="world", scope_key="*"
+        )
+        expires = timezone.now() + timedelta(days=2)
+        delegate_grant(
+            build.grant_id, "account:18", scope_kind="world", scope_key="*", expires_at=expires
+        )
+        grant_capability("account:17", "engine.world.build", scope_kind="world", scope_key="*")
+        self.assertEqual({expiry for *_, expiry in _active("account:18")}, {expires})

@@ -698,6 +698,38 @@ def _validated_grant_constraints(constraints: dict | None) -> dict:
     return validate_grant_constraints(constraints)
 
 
+def _carry_terms_to_split_keys(principal_ref, parents, now):
+    """Give each live descendant the principal holds the expiry and constraints of its parent.
+
+    A child grant held by its parent's own principal is that authority split
+    into another key, so extending or narrowing the parent changes it too. A
+    child delegated to someone else keeps its own terms.
+    """
+
+    frontier = {grant.grant_id: grant for grant in parents}
+    seen = set(frontier)
+    while frontier:
+        children = [
+            child
+            for child in AuthorizationGrant.objects.filter(
+                principal_ref=principal_ref,
+                parent_grant_id__in=frontier,
+                revoked_at__isnull=True,
+            )
+            if child.grant_id not in seen
+        ]
+        for child in children:
+            parent = frontier[child.parent_grant_id]
+            child.expires_at = parent.expires_at
+            child.constraints = parent.constraints
+            child.updated_at = now
+        AuthorizationGrant.objects.bulk_update(
+            children, ["expires_at", "constraints", "updated_at"]
+        )
+        frontier = {child.grant_id: child for child in children}
+        seen |= set(frontier)
+
+
 def _apply_grants(
     principal_ref: str,
     keys: list[str],
@@ -779,6 +811,7 @@ def _apply_grants(
                     "updated_at",
                 ],
             )
+            _carry_terms_to_split_keys(principal_ref, refreshed, now)
         AuthorizationAuditEvent.objects.bulk_create(
             [
                 AuthorizationAuditEvent(
