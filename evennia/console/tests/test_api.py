@@ -37,6 +37,8 @@ from evennia.web.utils.io import (
 )
 
 HEADERS = {"HTTP_X_EVENNIA_CONSOLE": "1", "secure": True}
+#: A bodyless action posts "{}" as JSON, the one body type the console parses.
+JSON_POST = {**HEADERS, "content_type": "application/json"}
 
 
 class PlainPanel(Panel):
@@ -192,7 +194,7 @@ class TestModerationBoundary(ConsoleAPITestCase):
                 )
             self.assertEqual(
                 self.client.post(
-                    reverse("console:panel-action", args=[key, "rows"]), **HEADERS
+                    reverse("console:panel-action", args=[key, "rows"]), **JSON_POST
                 ).status_code,
                 403,
             )
@@ -216,7 +218,7 @@ class TestPanelRoutes(ConsoleAPITestCase):
 
     def test_private_method_is_not_an_action(self):
         response = self.client.post(
-            reverse("console:panel-action", args=["plain", "_secret"]), **HEADERS
+            reverse("console:panel-action", args=["plain", "_secret"]), **JSON_POST
         )
         self.assertIn(response.status_code, (403, 404))
 
@@ -225,7 +227,9 @@ class TestOutcomeMapping(ConsoleAPITestCase):
     """Five outcomes, each distinguishable without reading prose."""
 
     def _post(self):
-        return self.client.post(reverse("console:panel-action", args=["plain", "rows"]), **HEADERS)
+        return self.client.post(
+            reverse("console:panel-action", args=["plain", "rows"]), **JSON_POST
+        )
 
     def test_success_is_retryable_false_and_labelled(self):
         response = self._post()
@@ -261,7 +265,7 @@ class TestOutcomeMapping(ConsoleAPITestCase):
 
     def test_panel_validation_is_a_bounded_bad_request(self):
         response = self.client.post(
-            reverse("console:panel-action", args=["plain", "invalid"]), **HEADERS
+            reverse("console:panel-action", args=["plain", "invalid"]), **JSON_POST
         )
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response["X-Console-Outcome"], "conflict")
@@ -270,7 +274,7 @@ class TestOutcomeMapping(ConsoleAPITestCase):
 
     def test_service_conflict_is_not_labeled_as_success(self):
         response = self.client.post(
-            reverse("console:panel-action", args=["plain", "conflict_result"]), **HEADERS
+            reverse("console:panel-action", args=["plain", "conflict_result"]), **JSON_POST
         )
         self.assertEqual(response.status_code, 409)
         self.assertEqual(response["X-Console-Outcome"], "conflict")
@@ -278,7 +282,7 @@ class TestOutcomeMapping(ConsoleAPITestCase):
 
     def test_partial_service_result_is_indeterminate_and_not_retryable(self):
         response = self.client.post(
-            reverse("console:panel-action", args=["plain", "partial_result"]), **HEADERS
+            reverse("console:panel-action", args=["plain", "partial_result"]), **JSON_POST
         )
         self.assertEqual(response.status_code, 202)
         self.assertEqual(response["X-Console-Outcome"], "indeterminate")
@@ -315,7 +319,7 @@ class TestDegradedMode(ConsoleAPITestCase):
 
     def test_an_action_that_needs_the_io_owner_is_disabled(self):
         response = self.client.post(
-            reverse("console:panel-action", args=["plain", "touch"]), **HEADERS
+            reverse("console:panel-action", args=["plain", "touch"]), **JSON_POST
         )
         self.assertEqual(response.status_code, 503)
 
@@ -569,7 +573,7 @@ class TestDangerousActionsNeedPresence(ConsoleAPITestCase):
         self.client.force_login(self.account)
 
     def _post(self, panel, action):
-        return self.client.post(reverse("console:panel-action", args=[panel, action]), **HEADERS)
+        return self.client.post(reverse("console:panel-action", args=[panel, action]), **JSON_POST)
 
     def test_the_repl_refuses_without_a_confirmation(self):
         response = self._post("repl", "execute")
@@ -589,7 +593,7 @@ class TestDangerousActionsNeedPresence(ConsoleAPITestCase):
 
     def test_an_ordinary_action_does_not_demand_it(self):
         response = self.client.post(
-            reverse("console:panel-action", args=["records", "models"]), **HEADERS
+            reverse("console:panel-action", args=["records", "models"]), **JSON_POST
         )
         self.assertEqual(response.status_code, 200)
 

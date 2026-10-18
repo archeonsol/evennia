@@ -30,6 +30,7 @@ from django.views.generic import TemplateView
 from rest_framework import status
 from rest_framework.authentication import SessionAuthentication
 from rest_framework.exceptions import NotFound, PermissionDenied, ValidationError
+from rest_framework.parsers import JSONParser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -178,6 +179,9 @@ class ConsoleView(APIView):
     # business in front of a REPL: it would let credentials reach this surface
     # on every request instead of once at sign-in.
     authentication_classes = [SessionAuthentication]
+    # Declared for the same reason. The client posts only JSON, and the console
+    # accepts that same body under any game's DEFAULT_PARSER_CLASSES.
+    parser_classes = [JSONParser]
     # A leaked console session is bounded by the live capability re-check and
     # by session expiry, not by a rate limit; the console's own reads are
     # bounded by row caps in each panel.
