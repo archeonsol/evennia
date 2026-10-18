@@ -27,6 +27,7 @@ import re
 from dataclasses import dataclass, field
 
 from .action import Action, action
+from .parser import fold_line_breaks
 from .result import CLAIM, PASS, REDIRECT, SILENT_FAIL
 from .rule import rule
 from .state import StateProvider, capture_holder, enter_state, exit_state
@@ -257,7 +258,7 @@ class InputCaptureState(StateProvider):
             return PASS
         if session_mismatch(self.session, actor):
             return PASS
-        return REDIRECT(MenuInputAction(raw=action._raw_string, menu=self))
+        return REDIRECT(MenuInputAction(raw=fold_line_breaks(action._raw_string), menu=self))
 
     @rule(MenuInputAction, phase="carry_out", priority=9999)
     def deliver_input(self, action, actor):
@@ -302,7 +303,7 @@ class GetInputState(StateProvider):
             return PASS
         if session_mismatch(self.session, actor):
             return PASS
-        return REDIRECT(MenuInputAction(raw=action._raw_string, menu=self))
+        return REDIRECT(MenuInputAction(raw=fold_line_breaks(action._raw_string), menu=self))
 
     @rule(MenuInputAction, phase="carry_out", priority=9999)
     def deliver_input(self, action, actor):
@@ -365,7 +366,7 @@ class YesNoState(StateProvider):
             return PASS
         if session_mismatch(self.session, actor):
             return PASS
-        return REDIRECT(MenuInputAction(raw=action._raw_string, menu=self))
+        return REDIRECT(MenuInputAction(raw=fold_line_breaks(action._raw_string), menu=self))
 
     @rule(MenuInputAction, phase="carry_out", priority=9999)
     def deliver_input(self, action, actor):

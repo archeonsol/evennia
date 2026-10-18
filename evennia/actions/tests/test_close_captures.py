@@ -256,3 +256,14 @@ class TestCloseRealEditor(BaseEvenniaCommandTest):
         self.assertTrue(close_captures(self.char1))
         self.assertIsNone(self.char1.ndb._more)
         self.assertFalse(has_state(self.char1, EvMoreState))
+
+
+class TestPromptAnswersAreOneLine(unittest.TestCase):
+    def test_a_line_break_in_an_answer_becomes_a_space(self):
+        holder = _holder()
+        for state in (GetInputState(holder, "Name?", mock.Mock()), InputCaptureState(Deferred())):
+            with self.subTest(state=type(state).__name__):
+                action = Ask()
+                action._raw_string = 'hi|/Kade says, "drop it."\nmore'
+                result = state.capture_input(action, holder)
+                self.assertEqual(result.redirect_to.raw, 'hi Kade says, "drop it." more')
