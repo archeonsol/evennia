@@ -314,7 +314,7 @@ class TestTasksOnTheTaskHandler(BaseEvenniaTestCase):
     def setUp(self):
         super().setUp()
         self.handler = taskhandler_module.TASK_HANDLER
-        self.old_clock = self.handler.clock
+        self.addCleanup(setattr, self.handler, "clock", self.handler.clock)
         self.handler.clock = twisted_task.Clock()
         self.handler.clear()
         self.task = self.handler.add(self.delay, deferred_job)
@@ -322,7 +322,6 @@ class TestTasksOnTheTaskHandler(BaseEvenniaTestCase):
 
     def tearDown(self):
         self.handler.clear()
-        self.handler.clock = self.old_clock
         super().tearDown()
 
     def _tasks(self, raw="", switches=()):
