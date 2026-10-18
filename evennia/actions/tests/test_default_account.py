@@ -187,20 +187,19 @@ class TestPassword(unittest.TestCase):
 class TestUserPassword(unittest.TestCase):
     def _userpassword(self, account, actor, raw, matches=(), beyond=frozenset()):
         action = UserPassword.parse(raw, actor, verb="@userpassword")
-        with mock.patch(
-            "evennia.utils.search.search_account", return_value=list(matches)
-        ), mock.patch(
-            "evennia.authorization.service.capabilities_beyond", return_value=beyond
+        with (
+            mock.patch("evennia.utils.search.search_account", return_value=list(matches)),
+            mock.patch("evennia.authorization.service.capabilities_beyond", return_value=beyond),
         ):
             return dispatch(action, actor, [account])
 
     def test_usage_without_rhs(self):
-        account, _, actor = _setup(capabilities=("engine.moderation.manage",))
+        account, _, actor = _setup(capabilities=("engine.account.password",))
         self._userpassword(account, actor, "bob")
         self.assertTrue(any("Usage" in m for m in account.messages))
 
     def test_sets_target_password(self):
-        account, _, actor = _setup(capabilities=("engine.moderation.manage",))
+        account, _, actor = _setup(capabilities=("engine.account.password",))
         target = FakeAccount(key="bob", password="old")
         self._userpassword(account, actor, "bob = newpass", matches=[target])
         self.assertEqual(target.password, "newpass")
@@ -209,12 +208,14 @@ class TestUserPassword(unittest.TestCase):
         self.assertTrue(any("changed your password" in m for m in target.messages))
 
     def test_unknown_account_reported(self):
-        account, _, actor = _setup(capabilities=("engine.moderation.manage",))
+        account, _, actor = _setup(capabilities=("engine.account.password",))
         self._userpassword(account, actor, "*nobody = newpass")
-        self.assertTrue(any("Could not find an account named 'nobody'" in m for m in account.messages))
+        self.assertTrue(
+            any("Could not find an account named 'nobody'" in m for m in account.messages)
+        )
 
     def test_ambiguous_account_reported(self):
-        account, _, actor = _setup(capabilities=("engine.moderation.manage",))
+        account, _, actor = _setup(capabilities=("engine.account.password",))
         first, second = FakeAccount(key="bob"), FakeAccount(key="bobby")
         first.id, second.id = 1, 2
         self._userpassword(account, actor, "bob = newpass", matches=[first, second])
@@ -222,7 +223,7 @@ class TestUserPassword(unittest.TestCase):
         self.assertTrue(any("More than one account" in m for m in account.messages))
 
     def test_refuses_target_with_more_capabilities(self):
-        account, _, actor = _setup(capabilities=("engine.moderation.manage",))
+        account, _, actor = _setup(capabilities=("engine.account.password",))
         target = FakeAccount(key="op", password="old")
         self._userpassword(
             account, actor, "op = newpass", matches=[target], beyond={"engine.runtime.manage"}
@@ -231,16 +232,23 @@ class TestUserPassword(unittest.TestCase):
         self.assertTrue(any("holds capabilities you don't" in m for m in account.messages))
 
     def test_invalid_password_reported(self):
-        account, _, actor = _setup(capabilities=("engine.moderation.manage",))
+        account, _, actor = _setup(capabilities=("engine.account.password",))
         target = FakeAccount(key="bob", valid_password=False)
         self._userpassword(account, actor, "bob = x", matches=[target])
         self.assertEqual(target.password, "secret")
         self.assertEqual(
-            [m for m in account.messages if "failed validation" in m], ["Password failed validation."]
+            [m for m in account.messages if "failed validation" in m],
+            ["Password failed validation."],
         )
 
     def test_gated_for_builder(self):
         account, _, actor = _setup(capabilities=("engine.world.build",))
+        trace = self._userpassword(account, actor, "bob = newpass")
+        self.assertFalse(account.messages)
+        self.assertGreaterEqual(trace.carry_out_gated, 1)
+
+    def test_gated_for_moderator_without_password_key(self):
+        account, _, actor = _setup(capabilities=("engine.moderation.manage",))
         trace = self._userpassword(account, actor, "bob = newpass")
         self.assertFalse(account.messages)
         self.assertGreaterEqual(trace.carry_out_gated, 1)

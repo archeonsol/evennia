@@ -48,12 +48,12 @@ class TestEmit(unittest.TestCase):
         return dispatch(action, actor, [char])
 
     def test_usage_without_args(self):
-        char, actor = _setup()
+        char, actor = _setup(capabilities=("engine.world.announce",))
         self._emit(char, actor, "")
         self.assertTrue(any("Usage" in m for m in char.messages))
 
     def test_emit_to_named_target(self):
-        char, actor = _setup()
+        char, actor = _setup(capabilities=("engine.world.announce",))
         bob = FakeObj(key="bob", location=FakeObj(key="room"))
         char.search_map["bob"] = bob
         self._emit(char, actor, "bob = hello there")
@@ -61,7 +61,7 @@ class TestEmit(unittest.TestCase):
         self.assertTrue(any("Emitted to bob" in m for m in char.messages))
 
     def test_emit_without_rhs_targets_location(self):
-        char, actor = _setup()
+        char, actor = _setup(capabilities=("engine.world.announce",))
         room = FakeObj(key="here")
         char.location = room
         char.search_map["here"] = room
@@ -70,7 +70,7 @@ class TestEmit(unittest.TestCase):
 
     def test_emit_to_a_room_reaches_its_contents(self):
         """A room has no sessions, so a bare @emit must fan out or reach nobody."""
-        char, actor = _setup()
+        char, actor = _setup(capabilities=("engine.world.announce",))
         room = FakeObj(key="here")  # rooms have no location
         char.location = room
         char.search_map["here"] = room
@@ -79,7 +79,7 @@ class TestEmit(unittest.TestCase):
         self.assertTrue(any("and contents" in m for m in char.messages))
 
     def test_emit_to_a_non_room_does_not_fan_out(self):
-        char, actor = _setup()
+        char, actor = _setup(capabilities=("engine.world.announce",))
         bob = FakeObj(key="bob", location=FakeObj(key="room"))
         char.search_map["bob"] = bob
         self._emit(char, actor, "bob = hello there")
@@ -87,7 +87,7 @@ class TestEmit(unittest.TestCase):
         self.assertEqual([], bob.contents_messages)
 
     def test_remit_forces_rooms_and_contents(self):
-        char, actor = _setup()
+        char, actor = _setup(capabilities=("engine.world.announce",))
         room = FakeObj(key="plaza")  # rooms have no location
         char.search_map["plaza"] = room
         self._emit(char, actor, "plaza = a wind blows", verb="@remit")
@@ -95,7 +95,7 @@ class TestEmit(unittest.TestCase):
         self.assertIn("a wind blows", room.contents_messages)
 
     def test_remit_ignores_non_room(self):
-        char, actor = _setup()
+        char, actor = _setup(capabilities=("engine.world.announce",))
         bob = FakeObj(key="bob", location=FakeObj(key="room"))
         char.search_map["bob"] = bob
         self._emit(char, actor, "bob = hi", verb="@remit")
@@ -103,7 +103,7 @@ class TestEmit(unittest.TestCase):
         self.assertTrue(any("not a room" in m for m in char.messages))
 
     def test_pemit_ignores_unpuppeted(self):
-        char, actor = _setup()
+        char, actor = _setup(capabilities=("engine.world.announce",))
         bob = FakeObj(key="bob", puppeted=False)
         char.search_map["bob"] = bob
         self._emit(char, actor, "bob = psst", verb="@pemit")
@@ -111,15 +111,15 @@ class TestEmit(unittest.TestCase):
         self.assertTrue(any("no active account" in m for m in char.messages))
 
     def test_tell_access_required(self):
-        char, actor = _setup()
+        char, actor = _setup(capabilities=("engine.world.announce",))
         bob = FakeObj(key="bob", access={"tell": False})
         char.search_map["bob"] = bob
         self._emit(char, actor, "bob = hi")
         self.assertNotIn("hi", bob.messages)
         self.assertTrue(any("not allowed to emit" in m for m in char.messages))
 
-    def test_gated_for_non_builder(self):
-        char, actor = _setup(capabilities=())
+    def test_gated_for_builder_without_announce(self):
+        char, actor = _setup(capabilities=("engine.world.build",))
         trace = self._emit(char, actor, "bob = hi")
         self.assertFalse(char.messages)
         self.assertEqual(trace.carry_out_fired, 0)
@@ -133,12 +133,12 @@ class TestWall(unittest.TestCase):
         return dispatch(action, actor, [char])
 
     def test_usage_without_args(self):
-        char, actor = _setup(capabilities=("engine.moderation.manage",))
+        char, actor = _setup(capabilities=("engine.world.announce",))
         self._wall(char, actor, "")
         self.assertTrue(any("Usage" in m for m in char.messages))
 
     def test_announces_to_all_sessions(self):
-        char, actor = _setup(capabilities=("engine.moderation.manage",))
+        char, actor = _setup(capabilities=("engine.world.announce",))
         handler = FakeSessionHandler()
         with mock.patch.object(admin_module.evennia, "SESSION_HANDLER", handler):
             self._wall(char, actor, "server restart soon")
@@ -159,12 +159,12 @@ class TestForce(unittest.TestCase):
         return dispatch(action, actor, [char])
 
     def test_usage_without_target_or_command(self):
-        char, actor = _setup()
+        char, actor = _setup(capabilities=("engine.object.force",))
         self._force(char, actor, "bob")
         self.assertTrue(any("target and a command" in m for m in char.messages))
 
     def test_edit_access_required(self):
-        char, actor = _setup()
+        char, actor = _setup(capabilities=("engine.object.force",))
         bob = FakeObj(key="bob", access={"edit": False})
         char.search_map["bob"] = bob
         self._force(char, actor, "bob = get stick")
@@ -172,7 +172,7 @@ class TestForce(unittest.TestCase):
         self.assertTrue(any("permission" in m for m in char.messages))
 
     def test_refuses_target_with_more_capabilities(self):
-        char, actor = _setup()
+        char, actor = _setup(capabilities=("engine.object.force",))
         bob = FakeObj(key="bob")
         char.search_map["bob"] = bob
         with mock.patch(
@@ -184,7 +184,7 @@ class TestForce(unittest.TestCase):
         self.assertTrue(any("holds capabilities you don't" in m for m in char.messages))
 
     def test_forces_command_execution(self):
-        char, actor = _setup()
+        char, actor = _setup(capabilities=("engine.object.force",))
         bob = FakeObj(key="bob")
         char.search_map["bob"] = bob
         with mock.patch(
@@ -194,8 +194,8 @@ class TestForce(unittest.TestCase):
         self.assertEqual(bob.executed, ["get stick"])
         self.assertTrue(any("You have forced bob to: get stick" in m for m in char.messages))
 
-    def test_gated_for_non_builder(self):
-        char, actor = _setup(capabilities=())
+    def test_gated_for_builder_without_force(self):
+        char, actor = _setup(capabilities=("engine.world.build",))
         trace = self._force(char, actor, "bob = get stick")
         self.assertFalse(char.messages)
         self.assertGreaterEqual(trace.carry_out_gated, 1)
@@ -330,7 +330,7 @@ class TestPolicy(unittest.TestCase):
         return dispatch(action, actor, [char])
 
     def test_sets_typed_policy(self):
-        char, actor = _setup()
+        char, actor = _setup(capabilities=("engine.authorization.manage",))
         target = FakeObj(key="bob")
         target.policies = FakePolicies()
         char.search_map["bob"] = target
@@ -339,14 +339,14 @@ class TestPolicy(unittest.TestCase):
         self.assertTrue(any("bob/view" in message for message in char.messages))
 
     def test_bare_usage(self):
-        char, actor = _setup()
+        char, actor = _setup(capabilities=("engine.authorization.manage",))
         self._policy(char, actor, "")
         self.assertEqual(
             char.messages, ["Usage: @policy[/set|del] <object>/<operation> [= policy]"]
         )
 
     def test_reads_back_a_set_policy(self):
-        char, actor = _setup()
+        char, actor = _setup(capabilities=("engine.authorization.manage",))
         target = FakeObj(key="bob")
         target.policies = FakePolicies()
         char.search_map["bob"] = target
@@ -361,7 +361,7 @@ class TestPolicy(unittest.TestCase):
         )
 
     def test_control_required(self):
-        char, actor = _setup()
+        char, actor = _setup(capabilities=("engine.authorization.manage",))
         target = FakeObj(key="bob", access={"control": False, "edit": False})
         target.policies = FakePolicies()
         char.search_map["bob"] = target
@@ -369,15 +369,21 @@ class TestPolicy(unittest.TestCase):
         self.assertIsNone(target.policies.get("view"))
         self.assertTrue(any("not allowed" in message for message in char.messages))
 
+    # --- @scope --------------------------------------------------------------------
+    def test_gated_for_builder_without_authorization_key(self):
+        char, actor = _setup(capabilities=("engine.world.build",))
+        trace = self._policy(char, actor, "box/edit = public", switches=("set",))
+        self.assertFalse(char.messages)
+        self.assertGreaterEqual(trace.carry_out_gated, 1)
 
-# --- @scope --------------------------------------------------------------------
+
 class TestScope(unittest.TestCase):
     def _scope(self, char, actor, raw, switches=()):
         action = Scope.parse(raw, actor, switches=switches, verb="@scope")
         return dispatch(action, actor, [char])
 
     def test_sets_scope_labels(self):
-        char, actor = _setup()
+        char, actor = _setup(capabilities=("engine.authorization.manage",))
         target = FakeObj(key="bob")
         char.search_map["bob"] = target
         with mock.patch("evennia.authorization.storage.set_scope_labels") as setter:
@@ -390,8 +396,14 @@ class TestScope(unittest.TestCase):
         setter.assert_called_once_with(target, {"zone:market", "project:renovation"})
         self.assertTrue(any("project:renovation" in message for message in char.messages))
 
+    # --- @access -------------------------------------------------------------------
+    def test_gated_for_builder_without_authorization_key(self):
+        char, actor = _setup(capabilities=("engine.world.build",))
+        trace = self._scope(char, actor, "box = area:docks", switches=("set",))
+        self.assertFalse(char.messages)
+        self.assertGreaterEqual(trace.carry_out_gated, 1)
 
-# --- @access -------------------------------------------------------------------
+
 class TestAccess(unittest.TestCase):
     def _access(self, char, actor):
         action = Access.parse("", actor, verb="@access")

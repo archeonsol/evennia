@@ -40,7 +40,7 @@ __all__ = [
     "DefaultAccountRules",
 ]
 
-AccountAdminCap = HasCapability("engine.moderation.manage")
+AccountPasswordCap = HasCapability("engine.account.password")
 
 
 @action("@option", "@options")
@@ -75,7 +75,7 @@ class Password(ArgAction):
 @action("@userpassword")
 @dataclass
 class UserPassword(ArgAction):
-    """Set another account's password (requires |wengine.moderation.manage|n).
+    """Set another account's password (requires |wengine.account.password|n).
 
     |w@userpassword <account> = <new password>|n. The change takes effect
     immediately.
@@ -297,7 +297,7 @@ class DefaultAccountRules(NickRules):
 
     # --- @userpassword ---------------------------------------------------------------
 
-    @rule(UserPassword, phase="carry_out", requires=AccountAdminCap)
+    @rule(UserPassword, phase="carry_out", requires=AccountPasswordCap)
     def carry_out_userpassword(self, action, actor):
         if not self._is_account(actor):
             return SKIP

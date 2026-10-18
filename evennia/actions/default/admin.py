@@ -54,7 +54,7 @@ class Emit(ArgAction):
 
     |w@emit[/room|/rooms|/accounts|/contents] [<obj>, <obj>, ... =] <message>|n
     / |w@remit [<room>, ... =] <message>|n / |w@pemit [<account>, ... =]
-    <message>|n. Requires |wengine.world.build|n and |wtell|n access to each
+    <message>|n. Requires |wengine.world.announce|n and |wtell|n access to each
     target. A room target always reaches everyone inside it; |w/contents|n
     adds a non-room target's contents. |w@remit|n forces rooms plus contents,
     while |w@pemit|n forces puppeted accounts.
@@ -70,7 +70,7 @@ class Emit(ArgAction):
 class Wall(ArgAction):
     """Announce a message to every connected session.
 
-    |w@wall <message>|n. Requires |wengine.moderation.manage|n; recipients see
+    |w@wall <message>|n. Requires |wengine.world.announce|n; recipients see
     the caller name prefixed to the announcement.
     """
 
@@ -82,7 +82,7 @@ class Wall(ArgAction):
 class Force(ArgAction):
     """Make an editable local object execute a command.
 
-    |w@force <object> = <command>|n. Requires |wengine.world.build|n and
+    |w@force <object> = <command>|n. Requires |wengine.object.force|n and
     |wedit|n access to the target; it executes the command as that object.
     """
 
@@ -114,8 +114,8 @@ class Policy(ArgAction):
 
     |w@policy <resource>[/<operation>]|n / |w@policy/set <resource>/<operation>
     = <public|disabled|capability>|n / |w@policy/del <resource>/<operation>|n.
-    A leading |w*|n selects an account. Requires |wengine.world.build|n plus
-    control or edit access; |w/set|n replaces an override and |w/del|n removes it.
+    A leading |w*|n selects an account. Requires |wengine.authorization.manage|n
+    plus control or edit access; |w/set|n replaces an override and |w/del|n removes it.
     """
 
     switch_options = ("set", "del")
@@ -130,7 +130,7 @@ class Scope(ArgAction):
 
     |w@scope <resource>|n / |w@scope/set <resource> = <kind:key>, ...|n /
     |w@scope/clear <resource>|n. A leading |w*|n selects an account. Requires
-    |wengine.world.build|n plus control or edit access; |w/set|n replaces all
+    |wengine.authorization.manage|n plus control or edit access; |w/set|n replaces all
     labels and |w/clear|n removes all of them.
     """
 
@@ -161,7 +161,7 @@ class CharacterAdminRules:
 
     # --- @emit / @remit / @pemit ---------------------------------------------
 
-    @rule(Emit, phase="carry_out", requires=HasCapability("engine.world.build"))
+    @rule(Emit, phase="carry_out", requires=HasCapability("engine.world.announce"))
     def carry_out_emit(self, action, actor):
         if not self._is_actor(actor):
             return SKIP
@@ -224,7 +224,7 @@ class CharacterAdminRules:
 
     # --- @wall -----------------------------------------------------------------
 
-    @rule(Wall, phase="carry_out", requires=HasCapability("engine.moderation.manage"))
+    @rule(Wall, phase="carry_out", requires=HasCapability("engine.world.announce"))
     def carry_out_wall(self, action, actor):
         if not self._is_actor(actor):
             return SKIP
@@ -239,7 +239,7 @@ class CharacterAdminRules:
 
     # --- @force ----------------------------------------------------------------
 
-    @rule(Force, phase="carry_out", requires=HasCapability("engine.world.build"))
+    @rule(Force, phase="carry_out", requires=HasCapability("engine.object.force"))
     def carry_out_force(self, action, actor):
         if not self._is_actor(actor):
             return SKIP
@@ -363,7 +363,7 @@ class CharacterAdminRules:
 
     # --- @policy ---------------------------------------------------------------
 
-    @rule(Policy, phase="carry_out", requires=HasCapability("engine.world.build"))
+    @rule(Policy, phase="carry_out", requires=HasCapability("engine.authorization.manage"))
     def carry_out_policy(self, action, actor):
         if not self._is_actor(actor):
             return SKIP
@@ -434,7 +434,7 @@ class CharacterAdminRules:
 
     # --- @scope ----------------------------------------------------------------
 
-    @rule(Scope, phase="carry_out", requires=HasCapability("engine.world.build"))
+    @rule(Scope, phase="carry_out", requires=HasCapability("engine.authorization.manage"))
     def carry_out_scope(self, action, actor):
         if not self._is_actor(actor):
             return SKIP

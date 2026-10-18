@@ -233,8 +233,14 @@ def _register_engine_defaults() -> None:
         "engine.character.puppet": (False, True),
         "engine.command.execute": (True, False),
         "engine.world.build": (True, True),
+        "engine.world.search": (True, False),
+        "engine.world.announce": (False, True),
         "engine.help.manage": (True, False),
         "engine.moderation.manage": (False, True),
+        "engine.account.password": (False, True),
+        "engine.object.force": (False, True),
+        # Rewrites who may do what, so it never rides along with building.
+        "engine.authorization.manage": (False, True),
         "engine.runtime.manage": (False, True),
         # The engine console. Holding this is equivalent to shell access on the
         # game server: it carries a REPL, a SQL console, and process control.
@@ -327,8 +333,28 @@ def _register_engine_defaults() -> None:
         ),
         "engine.command.execute": ("Execute a protected command.", "Commands"),
         "engine.world.build": (
-            "Use the engine's unrestricted world-building tools.",
+            "Use the building verbs; each object's own policy decides which objects.",
             "World building",
+        ),
+        "engine.world.search": (
+            "Search the whole database for objects, accounts and scripts.",
+            "World building",
+        ),
+        "engine.world.announce": (
+            "Send a message to a room, an object or every connected session.",
+            "World building",
+        ),
+        "engine.account.password": (
+            "Set another account's password.",
+            "Moderation",
+        ),
+        "engine.object.force": (
+            "Make an object or character run a command.",
+            "Objects",
+        ),
+        "engine.authorization.manage": (
+            "Change an object's access policy and authorization scope labels.",
+            "Authorization",
         ),
         "engine.help.manage": (
             "Create, inspect, and edit protected help entries.",
@@ -397,6 +423,8 @@ def _register_engine_defaults() -> None:
         "world_builder",
         (
             "engine.world.build",
+            "engine.world.search",
+            "engine.world.announce",
             "engine.object.view",
             "engine.object.edit",
             "engine.object.move",
@@ -409,6 +437,8 @@ def _register_engine_defaults() -> None:
         "moderator",
         (
             "engine.moderation.manage",
+            "engine.account.password",
+            "engine.world.announce",
             "engine.channel.listen",
             "engine.channel.send",
             "engine.channel.control",
@@ -427,7 +457,12 @@ def _register_engine_defaults() -> None:
         (
             "engine.runtime.manage",
             "engine.moderation.manage",
+            "engine.account.password",
+            "engine.authorization.manage",
             "engine.world.build",
+            "engine.world.search",
+            "engine.world.announce",
+            "engine.object.force",
             "engine.object.view",
             "engine.object.edit",
             "engine.object.delete",
