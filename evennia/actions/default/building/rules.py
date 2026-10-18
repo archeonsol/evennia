@@ -215,9 +215,7 @@ class CharacterBuildingRules(AttributeOperations):
                     f"{f'[{source_category}]' if source_category else ''}."
                 )
                 return CLAIM
-        source_slots = {
-            attr: stored_slot(source, attr, source_category) for attr in source_attrs
-        }
+        source_slots = {attr: stored_slot(source, attr, source_category) for attr in source_attrs}
         remove_sources = set()
         written = set()
         output = []

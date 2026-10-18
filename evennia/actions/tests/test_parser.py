@@ -845,11 +845,10 @@ class TestArgumentSpacing(unittest.TestCase):
         self.assertEqual(res.action.message, "for i in x:\n    print(i)")
 
     def test_code_help_attributes_and_staff_emits_keep_newlines(self):
-        from evennia.actions.default.general import SetHelp
-        from evennia.actions.default.system import Py
-
         from evennia.actions.default.admin import Emit, Wall
         from evennia.actions.default.building.actions import SetAttribute
+        from evennia.actions.default.general import SetHelp
+        from evennia.actions.default.system import Py
 
         for action_cls in (Py, SetHelp, SetAttribute, Emit, Wall):
             self.assertTrue(action_cls.keeps_newlines, action_cls)

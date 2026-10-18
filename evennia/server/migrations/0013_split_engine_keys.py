@@ -99,11 +99,14 @@ def unsplit_keys(apps, schema_editor):
     )
     while frontier:
         removed |= frontier
-        frontier = set(
-            AuthorizationGrant.objects.filter(parent_grant_id__in=frontier).values_list(
-                "grant_id", flat=True
+        frontier = (
+            set(
+                AuthorizationGrant.objects.filter(parent_grant_id__in=frontier).values_list(
+                    "grant_id", flat=True
+                )
             )
-        ) - removed
+            - removed
+        )
     AuthorizationGrant.objects.filter(grant_id__in=removed).delete()
 
 

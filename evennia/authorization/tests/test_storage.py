@@ -1180,7 +1180,6 @@ class CapabilitiesBeyondTest(TestCase):
             capabilities_beyond(responder, operator), {"engine.authorization.break_glass"}
         )
 
-
     def test_a_grant_with_constraints_does_not_cover(self):
         from evennia.authorization.service import capabilities_beyond
 
