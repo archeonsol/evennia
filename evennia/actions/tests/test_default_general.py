@@ -173,6 +173,16 @@ class TestNick(unittest.TestCase):
             self.assertIn("say |rHello|n", shown)
             self.assertNotIn(ansi.ANSI_RED, shown)
 
+    def test_the_list_table_lines_up_with_typed_markup(self):
+        char, actor = _setup()
+        char.nicks.add("hi", "say |rHello|n || done")
+        char.nicks.add("bye", "say plain words")
+        self._nick(char, actor, "", switches=("list",))
+        (message,) = char.messages
+        table = ansi.parse_ansi(message, strip_ansi=True).splitlines()[1:]
+        self.assertIn("say |rHello|n || done", "\n".join(table))
+        self.assertEqual(len({len(line) for line in table}), 1, table)
+
     def test_show_unknown_nick(self):
         char, actor = _setup()
         self._nick(char, actor, "zzz")

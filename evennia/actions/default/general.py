@@ -38,7 +38,6 @@ from evennia.authorization.policy import (
     RequiresCapability,
 )
 from evennia.objects.character import DefaultCharacter
-from evennia.utils.ansi import raw as ansi_raw
 
 from ..action import action
 from ..muxargs import ArgAction, normalize_switches
@@ -66,9 +65,19 @@ def _help_policy(declaration):
     return Always() if value == "public" else RequiresCapability(value)
 
 
+#: Stands in for each typed pipe while EvTable sizes a cell, so the pipe counts as the one
+#: character it shows as. :func:`_table_text` puts the escaped pipe back.
+_TABLE_PIPE = "\ue000"
+
+
 def _as_typed_in_table(value):
-    """``value`` as typed inside an EvTable cell, which parses markup twice more."""
-    return ansi_raw(ansi_raw(as_typed(value)))
+    """``value`` as typed, for an EvTable cell that :func:`_table_text` renders."""
+    return as_typed(value).replace("||", _TABLE_PIPE)
+
+
+def _table_text(table):
+    """The text of an EvTable whose cells came from :func:`_as_typed_in_table`."""
+    return str(table).replace(_TABLE_PIPE, "||")
 
 
 def _cy(string):
@@ -226,7 +235,7 @@ class NickRules:
                         _cy(_as_typed_in_table(nickvalue)),
                         _cy(_as_typed_in_table(replacement)),
                     )
-                string = "|wDefined Nicks:|n\n%s" % table
+                string = "|wDefined Nicks:|n\n%s" % _table_text(table)
             caller.msg(string)
             return CLAIM
 
