@@ -85,6 +85,20 @@ class TestMaskSensitiveInput(unittest.TestCase):
         self.assertNotIn("Hunter2!", mask_sensitive_input("@user bob = Hunter2!"))
         self.assertNotIn("new!pw", mask_sensitive_input("@pas old = new!pw"))
 
+    def test_a_switch_on_the_verb_is_masked_too(self):
+        for line in (
+            "@userpassword/x bob = Hunter2!",
+            "@us/x bob = Hunter2!",
+            "@password/x old = Hunter2!",
+        ):
+            with self.subTest(line=line):
+                self.assertNotIn("Hunter2!", mask_sensitive_input(line))
+
+    def test_words_spelled_from_create_letters_are_not_masked(self):
+        for line in ("treat bob arm", "trace bob", "treat bob"):
+            with self.subTest(line=line):
+                self.assertEqual(mask_sensitive_input(line), line)
+
     def test_non_sensitive(self):
         safe = "say connect johnny password123"
         self.assertEqual(mask_sensitive_input(safe), safe)

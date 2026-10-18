@@ -499,15 +499,15 @@ IN_GAME_ERRORS = True
 AUDIT_MASKS = [
     {"connect": r'^\s*(?:connect|conn|con|co)\s+("[^"]+"|[^\s]+)\s+(?P<secret>.+)$'},
     {"create": r'^\s*(?:create|cre|cr)\s+("[^"]+"|[^\s]+)\s+(?P<secret>.+)$'},
-    {"userpassword": r'^(?:\s*@us\w*|[@\s]*userp\w*)\s+(".+?"|[^=]+?)\s*=\s*(?P<secret>.+)$'},
+    {"userpassword": r'^(?:\s*@us\w*|[@\s]*userp\w*)(?:/\S*)?\s+(".+?"|[^=]+?)\s*=\s*(?P<secret>.+)$'},
     {"userpassword": r"^.*new password set to '(?P<secret>[^']+)'\."},
     {"userpassword": r"^.* has changed your password to '(?P<secret>[^']+)'\."},
-    {"password": r"^(?:\s*@pas\w*|[@\s]*pass\w*)\s+(?P<secret>.*)$"},
+    {"password": r"^(?:\s*@pas\w*|[@\s]*pass\w*)(?:/\S*)?\s+(?P<secret>.*)$"},
     # Legacy typo-tolerant variants (kept for backwards compatibility with auditing behavior).
     {"connect": r'^[@\s]*[connect]{5,8}\s+(".+?"|[^\s]+)\s+(?P<secret>.+)$'},
     {"connect": r"^[@\s]*[connect]{5,8}\s+(?P<secret>[\w]+)$"},
-    {"create": r'^[^@]?[create]{5,6}\s+(\w+|".+?")\s+(?P<secret>[\w]+)$'},
-    {"create": r"^[^@]?[create]{5,6}\s+(?P<secret>[\w]+)$"},
+    {"create": r'^[^@]?c[create]{4,5}\s+(\w+|".+?")\s+(?P<secret>[\w]+)$'},
+    {"create": r"^[^@]?c[create]{4,5}\s+(?P<secret>[\w]+)$"},
 ]
 # Broadcast "Server restart"-like messages to all sessions.
 BROADCAST_SERVER_RESTART_MESSAGES = True
