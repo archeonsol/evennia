@@ -189,7 +189,9 @@ class TestUserPassword(unittest.TestCase):
         action = UserPassword.parse(raw, actor, verb="@userpassword")
         with (
             mock.patch("evennia.utils.search.search_account", return_value=list(matches)),
-            mock.patch("evennia.authorization.service.capabilities_beyond", return_value=beyond),
+            mock.patch(
+                "evennia.authorization.service.capabilities_beyond", return_value=beyond
+            ) as self.beyond,
         ):
             return dispatch(action, actor, [account])
 
@@ -228,6 +230,7 @@ class TestUserPassword(unittest.TestCase):
         self._userpassword(
             account, actor, "op = newpass", matches=[target], beyond={"engine.runtime.manage"}
         )
+        self.beyond.assert_called_once_with(target, account)
         self.assertEqual(target.password, "old")
         self.assertTrue(any("holds capabilities you don't" in m for m in account.messages))
 

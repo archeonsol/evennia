@@ -178,8 +178,9 @@ class TestForce(unittest.TestCase):
         with mock.patch(
             "evennia.authorization.service.capabilities_beyond",
             return_value=frozenset({"engine.runtime.manage"}),
-        ):
+        ) as beyond:
             self._force(char, actor, "bob = @grant me = bundle:runtime_operator")
+        beyond.assert_called_once_with(bob, char)
         self.assertEqual(bob.executed, [])
         self.assertTrue(any("holds capabilities you don't" in m for m in char.messages))
 

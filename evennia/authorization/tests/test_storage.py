@@ -1047,7 +1047,9 @@ class HoldsCapabilityTest(TestCase):
         from evennia.authorization.service import has_capability, holds_capability
 
         account = self._account("holds-quelled")
-        grant_capability(f"account:{account.pk}", "engine.object.view", scope_kind="world", scope_key="*")
+        grant_capability(
+            f"account:{account.pk}", "engine.object.view", scope_kind="world", scope_key="*"
+        )
         account.attributes.add("_quell", True)
         clear_authorization_caches()
 
@@ -1099,6 +1101,67 @@ class CapabilitiesBeyondTest(TestCase):
         clear_authorization_caches()
 
         self.assertEqual(capabilities_beyond(operator, builder), {"engine.runtime.manage"})
+
+    def _character(self, key, owner):
+        from evennia.utils import create
+
+        character = create.create_object(
+            "evennia.objects.objects.DefaultCharacter", key=key, nohome=True
+        )
+        character.db_account = owner
+        character.save()
+        return character
+
+    def test_unpuppeted_character_counts_its_owner_account(self):
+        from evennia.authorization.service import capabilities_beyond
+
+        operator = self._account("beyond-owner", "engine.runtime.manage")
+        character = self._character("beyond-offline", operator)
+        builder = self._account("beyond-forcer", "engine.object.force")
+        clear_authorization_caches()
+
+        self.assertEqual(capabilities_beyond(character, builder), {"engine.runtime.manage"})
+
+    def test_account_counts_grants_on_its_characters(self):
+        from evennia.authorization.service import capabilities_beyond
+
+        operator = self._account("beyond-char-op")
+        character = self._character("beyond-char", operator)
+        grant_capability(
+            f"object:{character.pk}", "engine.runtime.manage", scope_kind="world", scope_key="*"
+        )
+        moderator = self._account("beyond-char-mod", "engine.account.password")
+        clear_authorization_caches()
+
+        self.assertEqual(capabilities_beyond(operator, moderator), {"engine.runtime.manage"})
+
+    def test_a_narrower_scope_does_not_cover_world(self):
+        from evennia.authorization.service import capabilities_beyond
+
+        world = self._account("beyond-world", "engine.authorization.manage")
+        area = self._account("beyond-area")
+        grant_capability(
+            f"account:{area.pk}",
+            "engine.authorization.manage",
+            scope_kind="label",
+            scope_key="area:docks",
+        )
+        clear_authorization_caches()
+
+        self.assertEqual(capabilities_beyond(world, area), {"engine.authorization.manage"})
+        self.assertEqual(capabilities_beyond(area, world), frozenset())
+
+    def test_world_break_glass_covers_everything(self):
+        from evennia.authorization.service import capabilities_beyond
+
+        operator = self._account("beyond-glass-op", "engine.runtime.manage")
+        responder = self._account("beyond-glass", "engine.authorization.break_glass")
+        clear_authorization_caches()
+
+        self.assertEqual(capabilities_beyond(operator, responder), frozenset())
+        self.assertEqual(
+            capabilities_beyond(responder, operator), {"engine.authorization.break_glass"}
+        )
 
 
 class ExamineScriptsAndChannelsTest(TestCase):

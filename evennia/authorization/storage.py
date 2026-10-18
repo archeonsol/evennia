@@ -300,6 +300,32 @@ def principal_refs(principal) -> tuple[str, ...]:
     return tuple(dict.fromkeys(refs))
 
 
+def authority_scopes(principal) -> frozenset[tuple[str, str, str]]:
+    """Return ``(capability, scope_kind, scope_key)`` for every live grant a principal can use.
+
+    This reaches past :func:`principal_refs`: a character counts its owner
+    account even while nobody puppets it, because a forced command runs with
+    that account, and an account counts the characters it owns.
+    """
+
+    from evennia.objects.models import ObjectDB
+
+    refs = list(principal_refs(principal))
+    pk = getattr(principal, "pk", None)
+    if pk is not None and "account" in principal.__class__.__module__.lower():
+        refs.extend(
+            f"object:{char_pk}"
+            for char_pk in ObjectDB.objects.filter(db_account_id=pk).values_list("id", flat=True)
+        )
+    elif getattr(principal, "db_account_id", None) is not None:
+        refs.append(f"account:{principal.db_account_id}")
+    refs = tuple(dict.fromkeys(refs))
+    return frozenset(
+        (row["capability"], row["scope_kind"], row["scope_key"])
+        for row in _grant_rows(refs, _principal_group_refs(refs), timezone.now())
+    )
+
+
 def _principal_cache_key(refs: tuple[str, ...]) -> str:
     """Return the shared cache key for one principal's reference set."""
 
@@ -483,7 +509,11 @@ def load_grants(principal, *, ignore_quell: bool = False) -> GrantSnapshot:
     if ignore_quell and _authority_suppressed(principal):
         group_refs = _principal_group_refs(refs)
         return _grant_snapshot(
-            _principal_cache_key(refs), _grant_rows(refs, group_refs, timezone.now()), 0, False, group_refs
+            _principal_cache_key(refs),
+            _grant_rows(refs, group_refs, timezone.now()),
+            0,
+            False,
+            group_refs,
         )
     cache_key = _principal_cache_key(refs)
     cached = _principal_cache.get(cache_key)

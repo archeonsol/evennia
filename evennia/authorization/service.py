@@ -12,7 +12,14 @@ from evennia.utils import logger
 
 from .engine import AuthorizationContext, AuthorizationDecision, evaluate
 from .policy import RequiresCapability, validate_policy
-from .storage import load_grants, load_policy, load_resource, principal_is_suspended, resource_ref
+from .storage import (
+    authority_scopes,
+    load_grants,
+    load_policy,
+    load_resource,
+    principal_is_suspended,
+    resource_ref,
+)
 
 _DECISION_SCOPE: contextvars.ContextVar = contextvars.ContextVar(
     "authorization_decision_scope", default=None
@@ -268,17 +275,25 @@ def has_capability(principal, capability: str, *, resource=None, session=None) -
 
 
 def capabilities_beyond(principal, other) -> frozenset[str]:
-    """Capabilities ``principal`` is granted that ``other`` is not, quell ignored.
+    """Capabilities ``principal`` holds at a scope ``other`` does not cover, quell ignored.
 
-    A capability granted at any scope counts as held, and break-glass is not
-    counted. Use this to refuse acting on someone who outranks the caller.
+    ``principal`` counts every grant in :func:`authority_scopes`. ``other``
+    covers a grant by holding its capability at ``world:*`` or at the same
+    scope, and covers everything with world break-glass. Use this to refuse
+    acting on someone who outranks the caller.
     """
 
     held = load_grants(other, ignore_quell=True).by_capability
+
+    def scopes(capability):
+        return {(scope.kind, scope.key) for scope in held.get(capability, ())}
+
+    if ("world", "*") in scopes("engine.authorization.break_glass"):
+        return frozenset()
     return frozenset(
         capability
-        for capability in load_grants(principal, ignore_quell=True).by_capability
-        if capability not in held
+        for capability, kind, key in authority_scopes(principal)
+        if not scopes(capability) & {("world", "*"), (kind, key)}
     )
 
 
@@ -299,7 +314,9 @@ def holds_capability(principal, capability: str, *, resource=None) -> bool:
         suspended=principal_is_suspended(principal),
     )
     grants = load_grants(principal, ignore_quell=True)
-    return evaluate(RequiresCapability(capability), grants, load_resource(resource), context).allowed
+    return evaluate(
+        RequiresCapability(capability), grants, load_resource(resource), context
+    ).allowed
 
 
 def authorized_affordances(principal, resource, access_types) -> tuple[str, ...]:
