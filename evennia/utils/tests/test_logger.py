@@ -99,6 +99,16 @@ class TestMaskSensitiveInput(unittest.TestCase):
             with self.subTest(line=line):
                 self.assertEqual(mask_sensitive_input(line), line)
 
+    def test_a_logged_in_line_skips_the_login_masks(self):
+        self.assertEqual(
+            mask_sensitive_input("create place The Hotel", logged_in=True),
+            "create place The Hotel",
+        )
+        self.assertNotIn("Hotel", mask_sensitive_input("create place The Hotel"))
+        self.assertNotIn(
+            "Hunter2!", mask_sensitive_input("@password old = Hunter2!", logged_in=True)
+        )
+
     def test_non_sensitive(self):
         safe = "say connect johnny password123"
         self.assertEqual(mask_sensitive_input(safe), safe)

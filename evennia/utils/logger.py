@@ -53,11 +53,13 @@ _TIME_FORMAT = "%Y-%m-%d %H:%M:%S"
 
 _SENSITIVE_INPUT_PATTERNS = None
 _SENSITIVE_INPUT_PATTERNS_SIGNATURE = None
+#: AUDIT_MASKS labels for verbs that exist only before login.
+_LOGIN_MASK_LABELS = frozenset({"connect", "create"})
 
 
 def _compile_sensitive_input_patterns():
     """
-    Compile masking regexes from settings.AUDIT_MASKS.
+    Compile masking regexes from settings.AUDIT_MASKS, as ``(label, pattern)`` pairs.
     """
     patterns = []
     masks = getattr(settings, "AUDIT_MASKS", [])
@@ -67,24 +69,27 @@ def _compile_sensitive_input_patterns():
         # auditing format is list[dict[label -> regex]], but we also
         # support plain regex strings as a convenience.
         if isinstance(mask, dict):
-            regexes = mask.values()
+            regexes = mask.items()
         else:
-            regexes = [mask]
-        for regex in regexes:
+            regexes = [("", mask)]
+        for label, regex in regexes:
             try:
-                patterns.append(re.compile(regex, re.IGNORECASE))
+                patterns.append((label, re.compile(regex, re.IGNORECASE)))
             except re.error as err:
                 log_err(f"Invalid AUDIT_MASKS regex '{regex}': {err}")
 
     return patterns, signature
 
 
-def mask_sensitive_input(msg):
+def mask_sensitive_input(msg, *, logged_in=False):
     """
     Mask sensitive command arguments in a raw command string.
 
     Args:
         msg (str): Raw command line.
+        logged_in (bool): The line came from a logged-in session, where the
+            ``connect`` and ``create`` masks are skipped: those verbs log in, so
+            the same words in game are an ordinary verb such as ``create place``.
 
     Returns:
         str: Same string, with sensitive segments replaced by ``*``.
@@ -104,7 +109,9 @@ def mask_sensitive_input(msg):
                 _compile_sensitive_input_patterns()
             )
 
-    for pattern in _SENSITIVE_INPUT_PATTERNS:
+    for label, pattern in _SENSITIVE_INPUT_PATTERNS:
+        if logged_in and label in _LOGIN_MASK_LABELS:
+            continue
         match = pattern.match(msg)
         if match:
             if "secret" not in pattern.groupindex:
