@@ -80,6 +80,11 @@ class TestMaskSensitiveInput(unittest.TestCase):
     def test_password_abbreviated(self):
         self.assertNotIn("new!pw", mask_sensitive_input("@pass old = new!pw"))
 
+    def test_shortest_verb_prefixes(self):
+        self.assertNotIn("Hunter2!", mask_sensitive_input("@us bob = Hunter2!"))
+        self.assertNotIn("Hunter2!", mask_sensitive_input("@user bob = Hunter2!"))
+        self.assertNotIn("new!pw", mask_sensitive_input("@pas old = new!pw"))
+
     def test_non_sensitive(self):
         safe = "say connect johnny password123"
         self.assertEqual(mask_sensitive_input(safe), safe)
