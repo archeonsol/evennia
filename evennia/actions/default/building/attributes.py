@@ -9,8 +9,8 @@ import re
 from django.conf import settings
 
 from evennia.utils import funcparser, search, utils
-from evennia.utils.dbserialize import deserialize
 from evennia.utils.ansi import raw as ansi_raw
+from evennia.utils.dbserialize import deserialize
 from evennia.utils.utils import variable_from_module
 
 __all__ = [
@@ -78,7 +78,9 @@ def _literal(value):
     if isinstance(value, float) and math.isinf(value):
         return "1e999" if value > 0 else "-1e999"
     if isinstance(value, dict):
-        return "{%s}" % ", ".join(f"{_literal(key)}: {_literal(item)}" for key, item in value.items())
+        return "{%s}" % ", ".join(
+            f"{_literal(key)}: {_literal(item)}" for key, item in value.items()
+        )
     if isinstance(value, list):
         return "[%s]" % ", ".join(_literal(item) for item in value)
     if isinstance(value, tuple):
