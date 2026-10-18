@@ -25,6 +25,49 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.336: Admin verbs check their own keys
+
+`engine.world.build` gated `@force`, `@emit`, `@policy` and `@scope` as well as building, and
+`engine.moderation.manage` gated `@wall` and `@userpassword`. A builder limited to one area
+could still rewrite who may edit what, and every moderator could reset passwords. Each of
+those verbs now checks a key of its own.
+
+### Authorization
+
+- **New keys** ([`capabilities.py`](evennia/authorization/capabilities.py)):
+
+  | Key | Gates |
+  |---|---|
+  | `engine.object.force` | `@force` |
+  | `engine.authorization.manage` | `@policy`, `@scope` |
+  | `engine.world.announce` | `@emit`, `@remit`, `@pemit`, `@wall` |
+  | `engine.account.password` | `@userpassword` |
+  | `engine.world.search` | nothing yet; reserved for database search |
+
+- **`engine.world.build` admits the building verbs only.** Each object's own policy
+  (`edit`, `delete` and the rest) still decides which objects a builder may change, so a
+  builder can be limited to an area with label-scoped object grants.
+- **Bundles:** `world_builder` adds `engine.world.announce` and `engine.world.search`.
+  `moderator` adds `engine.world.announce` and `engine.account.password`.
+  `runtime_operator` adds all five. `engine.object.force` and `engine.authorization.manage`
+  are in `runtime_operator` only.
+
+### Migration
+
+- **`server.0013_split_engine_keys`** grants the new keys to every principal with an active
+  `engine.world.build` grant (force, authorization, announce, search) or
+  `engine.moderation.manage` grant (announce, password). Each new grant copies its source's
+  scope, constraints and expiry, and gets a `grant_created` audit event from
+  `system:migration`. Reversing it deletes only the grants it made. No current holder loses a
+  verb; revoke the new keys by hand where a builder should not keep them.
+
+### Migration notes
+
+- A game that grants `engine.world.build` to new staff and expects them to `@force`,
+  `@policy`, `@scope` or `@emit` must now grant those keys too.
+- A game that grants `engine.moderation.manage` and expects `@wall` or `@userpassword` must
+  grant `engine.world.announce` or `engine.account.password`.
+
 ## 6.0.0+underspire.335: Default actions match the old commands they replace
 
 A review of every action that replaces a command in `evennia/commands/default/` found
