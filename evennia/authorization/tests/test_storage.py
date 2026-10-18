@@ -35,6 +35,7 @@ from evennia.authorization.storage import (
     prewarm_authorization,
     principal_is_suspended,
     principal_refs,
+    revoke_grant,
     set_principal_suspended,
     set_scope_labels,
 )
@@ -850,6 +851,22 @@ class AuthorizationStorageTest(TestCase):
                 scope_kind="world",
                 scope_key="*",
             )
+
+    def test_revoking_a_grant_reaches_every_generation_below_it(self):
+        parent = grant_capability(
+            "object:7", "engine.object.edit", scope_kind="world", scope_key="*"
+        )
+        for depth in range(10):
+            parent = grant_capability(
+                f"object:{100 + depth}",
+                "engine.object.edit",
+                scope_kind="world",
+                scope_key="*",
+                parent_grant_id=parent.grant_id,
+            )
+        root = AuthorizationGrant.objects.get(principal_ref="object:7")
+        revoke_grant(root.grant_id, actor_ref="account:1", reason="test")
+        self.assertFalse(AuthorizationGrant.objects.filter(revoked_at__isnull=True).exists())
 
     def test_cached_temporary_grant_expires_without_mutation(self):
         principal = FakePrincipal()

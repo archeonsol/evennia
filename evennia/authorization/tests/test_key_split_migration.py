@@ -123,3 +123,27 @@ class SplitEngineKeysTest(TestCase):
         )
         migration.split_keys(apps, None)
         self.assertIn(("engine.world.announce", "world", "*", None), _active("account:11"))
+
+    def test_a_key_two_sources_give_survives_revoking_one(self):
+        build = grant_capability(
+            "account:12", "engine.world.build", scope_kind="world", scope_key="*"
+        )
+        grant_capability(
+            "account:12", "engine.moderation.manage", scope_kind="world", scope_key="*"
+        )
+        migration.split_keys(apps, None)
+        revoke_grant(build.grant_id, actor_ref="account:1", reason="test")
+        self.assertEqual(
+            {cap for cap, *_ in _active("account:12")},
+            {"engine.moderation.manage", "engine.world.announce", "engine.account.password"},
+        )
+
+    def test_reverse_removes_grants_delegated_from_migration_grants(self):
+        grant_capability("account:13", "engine.world.build", scope_kind="world", scope_key="*")
+        migration.split_keys(apps, None)
+        search = AuthorizationGrant.objects.get(
+            principal_ref="account:13", capability="engine.world.search"
+        )
+        delegate_grant(search.grant_id, "account:14", scope_kind="world", scope_key="*")
+        migration.unsplit_keys(apps, None)
+        self.assertEqual(_active("account:14"), set())

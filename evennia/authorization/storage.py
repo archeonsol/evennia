@@ -957,7 +957,7 @@ def delegate_grant(
 
 
 def revoke_grant(grant_id: str, *, actor_ref: str = "", reason: str = "") -> bool:
-    """Revoke a grant and invalidate its immediate delegated children."""
+    """Revoke a grant and every live grant delegated from it, however deep."""
 
     with transaction.atomic():
         grant = AuthorizationGrant.objects.select_for_update().filter(grant_id=grant_id).first()
@@ -968,14 +968,12 @@ def revoke_grant(grant_id: str, *, actor_ref: str = "", reason: str = "") -> boo
         grant.save(update_fields=["revoked_at", "updated_at"])
         frontier = [grant_id]
         affected_principals = {grant.principal_ref}
-        for _ in range(8):
+        while frontier:
             children = list(
                 AuthorizationGrant.objects.filter(
                     parent_grant_id__in=frontier, revoked_at__isnull=True
                 ).values_list("grant_id", "principal_ref")
             )
-            if not children:
-                break
             frontier = [child_id for child_id, _ in children]
             affected_principals.update(principal for _, principal in children)
             AuthorizationGrant.objects.filter(grant_id__in=frontier).update(revoked_at=now)

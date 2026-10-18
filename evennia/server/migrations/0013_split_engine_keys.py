@@ -30,8 +30,10 @@ PROVENANCE = "migration:server.0013_split_engine_keys"
 def split_keys(apps, schema_editor):
     """Grant each split-out key wherever its broad key is held, scope for scope.
 
-    Each new grant is a child of its source, so revoking the source revokes it.
-    Where two sources give the same key, the one that lasts longest wins.
+    A key that one source gives is a child of it, so revoking the source
+    revokes the key. A key that two sources give is a grant of its own, so
+    revoking one source does not take what the other still gives. It keeps the
+    expiry of the source that lasts longest.
     """
 
     from django.db.models import F
@@ -42,7 +44,7 @@ def split_keys(apps, schema_editor):
         (grant.principal_ref, grant.capability, grant.scope_kind, grant.scope_key)
         for grant in AuthorizationGrant.objects.filter(revoked_at__isnull=True)
     }
-    grants, events = [], []
+    planned = {}
     sources = AuthorizationGrant.objects.filter(
         capability__in=SPLIT_KEYS, revoked_at__isnull=True
     ).order_by(F("expires_at").desc(nulls_first=True), "id")
@@ -51,41 +53,58 @@ def split_keys(apps, schema_editor):
             if source.parent_grant_id and capability not in DELEGABLE:
                 continue
             slot = (source.principal_ref, capability, source.scope_kind, source.scope_key)
-            if slot in held:
-                continue
-            held.add(slot)
-            grants.append(
-                AuthorizationGrant(
-                    grant_id=uuid.uuid4().hex,
-                    principal_ref=source.principal_ref,
-                    capability=capability,
-                    scope_kind=source.scope_kind,
-                    scope_key=source.scope_key,
-                    constraints=source.constraints,
-                    expires_at=source.expires_at,
-                    provenance=PROVENANCE,
-                    parent_grant_id=source.grant_id,
-                )
+            if slot not in held:
+                planned.setdefault(slot, []).append(source)
+    grants, events = [], []
+    for (principal_ref, capability, scope_kind, scope_key), slot_sources in planned.items():
+        longest = slot_sources[0]
+        grants.append(
+            AuthorizationGrant(
+                grant_id=uuid.uuid4().hex,
+                principal_ref=principal_ref,
+                capability=capability,
+                scope_kind=scope_kind,
+                scope_key=scope_key,
+                constraints=longest.constraints,
+                expires_at=longest.expires_at,
+                provenance=PROVENANCE,
+                parent_grant_id=longest.grant_id if len(slot_sources) == 1 else "",
             )
-            events.append(
-                AuthorizationAuditEvent(
-                    event_id=uuid.uuid4().hex,
-                    kind="grant_created",
-                    principal_ref=source.principal_ref,
-                    capability=capability,
-                    resource_ref=source.scope_key if source.scope_kind == "resource" else "",
-                    actor_ref="system:migration",
-                    reason=f"Split from {source.capability} (grant {source.grant_id}).",
-                )
+        )
+        split_from = ", ".join(
+            f"{source.capability} (grant {source.grant_id})" for source in slot_sources
+        )
+        events.append(
+            AuthorizationAuditEvent(
+                event_id=uuid.uuid4().hex,
+                kind="grant_created",
+                principal_ref=principal_ref,
+                capability=capability,
+                resource_ref=scope_key if scope_kind == "resource" else "",
+                actor_ref="system:migration",
+                reason=f"Split from {split_from}."[:255],
             )
+        )
     AuthorizationGrant.objects.bulk_create(grants)
     AuthorizationAuditEvent.objects.bulk_create(events)
 
 
 def unsplit_keys(apps, schema_editor):
-    """Remove only the grants this migration made."""
+    """Remove the grants this migration made and every grant delegated from them."""
 
-    apps.get_model("server", "AuthorizationGrant").objects.filter(provenance=PROVENANCE).delete()
+    AuthorizationGrant = apps.get_model("server", "AuthorizationGrant")
+    removed = set()
+    frontier = set(
+        AuthorizationGrant.objects.filter(provenance=PROVENANCE).values_list("grant_id", flat=True)
+    )
+    while frontier:
+        removed |= frontier
+        frontier = set(
+            AuthorizationGrant.objects.filter(parent_grant_id__in=frontier).values_list(
+                "grant_id", flat=True
+            )
+        ) - removed
+    AuthorizationGrant.objects.filter(grant_id__in=removed).delete()
 
 
 class Migration(migrations.Migration):
