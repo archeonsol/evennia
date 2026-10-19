@@ -555,6 +555,8 @@ class TestAliasOnTheDatabase(BuildingDBTest):
         self.assertEqual(self._alias("NotFound ="), "Could not find 'NotFound'.")
 
     def test_set_show_and_clear(self):
+        # A stock object already holds its plural forms as aliases (category "plural_key").
+        self.obj1.aliases.clear()
         self.assertEqual(self._alias("Obj = TestObj1b"), "Alias(es) for 'Obj' set to 'testobj1b'.")
         self.assertEqual(self._alias("Obj"), "Aliases for Obj: 'testobj1b'")
         self.assertEqual(self._alias("Obj ="), "Cleared aliases from Obj: testobj1b")
@@ -565,7 +567,9 @@ class TestAliasOnTheDatabase(BuildingDBTest):
         self.obj1.aliases.add("testobj1b")
         self.obj1.aliases.add("testobj1b", category="other")
         self.run_action(SetObjAlias, "Obj = testobj1b", switches=("delete",))
-        self.assertEqual(self.obj1.aliases.all(return_key_and_category=True), [])
+        self.assertNotIn(
+            "testobj1b", [key for key, _ in self.obj1.aliases.all(return_key_and_category=True)]
+        )
 
 
 class TestCopyOnTheDatabase(BuildingDBTest):
