@@ -25,12 +25,16 @@ matching release procedure.
 
 ---
 
-## Unreleased: Admin verbs check their own keys
+## 6.0.0+underspire.336: Admin verbs check their own keys, and default actions match the old commands
 
 `engine.world.build` gated `@force`, `@emit`, `@policy` and `@scope` as well as building, and
 `engine.moderation.manage` gated `@wall` and `@userpassword`. A builder limited to one area
 could still rewrite who may edit what, and every moderator could reset passwords. Each of
 those verbs now checks a key of its own.
+
+A review of every action that replaces a command in `evennia/commands/default/` found
+security holes, silent data loss and behavior lost in the port. This release fixes them, and
+ports the old command tests that had no action test, so that the old tree can be deleted.
 
 ### Authorization
 
@@ -140,31 +144,6 @@ those verbs now checks a key of its own.
 - **A password set in-game before this release with a run of spaces was saved with one space.** The
   player must type it with one space, or reset it.
 
-### Known gaps
-
-- `as_typed` escapes MXP links (`|lc...|lt...|le`) at the ANSI level only. The ANSI parser
-  collapses the escape before MXP runs, so a stored link still renders as a link.
-- With `FUNCPARSER_PARSE_OUTGOING_MESSAGES_ENABLED` on, the outgoing pass eats backslashes in
-  a value `as_typed` shows.
-
-### Migration notes
-
-- A game that grants `engine.world.build` to new staff and expects them to `@force`,
-  `@policy`, `@scope` or `@emit` must now grant those keys too.
-- A game that grants `engine.moderation.manage` and expects `@wall` or `@userpassword` must
-  grant `engine.world.announce` or `engine.account.password`.
-- A game whose verbs need line breaks (multi-line poses, descriptions, notes, code) sets
-  `keeps_newlines = True` on those action classes. Without it, `|/` in their text becomes a
-  space.
-- Dbref search with `use_dbref` unset checks `engine.world.search`, not
-  `engine.world.build`.
-
-## Unreleased: Default actions match the old commands they replace
-
-A review of every action that replaces a command in `evennia/commands/default/` found
-security holes, silent data loss and behavior lost in the port. This release fixes them, and
-ports the old command tests that had no action test, so that the old tree can be deleted.
-
 ### Security
 
 - **`@force` and `@userpassword` refuse a target with more authority than the caller**
@@ -227,8 +206,31 @@ ports the old command tests that had no action test, so that the old tree can be
   `@alias`, `@copy`, `@wipe`, `@set`, `@cpattr`, `@link`, `@sethome` and help
   ([`help/tests/test_renderer.py`](evennia/help/tests/test_renderer.py)).
 
+### Console
+
+- **Console views parse JSON only** (`ConsoleView.parser_classes` in
+  [`views.py`](evennia/web/console/views.py)). They used the game's
+  `DEFAULT_PARSER_CLASSES`, so under a game that narrows it a post without a JSON body got 415.
+  The client posts only JSON, so the console accepts the same body under any game's setting.
+
+### Known gaps
+
+- `as_typed` escapes MXP links (`|lc...|lt...|le`) at the ANSI level only. The ANSI parser
+  collapses the escape before MXP runs, so a stored link still renders as a link.
+- With `FUNCPARSER_PARSE_OUTGOING_MESSAGES_ENABLED` on, the outgoing pass eats backslashes in
+  a value `as_typed` shows.
+
 ### Migration notes
 
+- A game that grants `engine.world.build` to new staff and expects them to `@force`,
+  `@policy`, `@scope` or `@emit` must now grant those keys too.
+- A game that grants `engine.moderation.manage` and expects `@wall` or `@userpassword` must
+  grant `engine.world.announce` or `engine.account.password`.
+- A game whose verbs need line breaks (multi-line poses, descriptions, notes, code) sets
+  `keeps_newlines = True` on those action classes. Without it, `|/` in their text becomes a
+  space.
+- Dbref search with `use_dbref` unset checks `engine.world.search`, not
+  `engine.world.build`.
 - A game that registers its own `ArgAction` subclasses gets lowercased switches with no
   change. To get prefix expansion, declare `switch_options` on the class.
 - A game that relied on arguments with collapsed whitespace must strip or split them itself.
