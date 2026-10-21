@@ -243,3 +243,56 @@ class TestPruneRotatedLogs(unittest.TestCase):
 
         self.assertEqual(deleted, 1)
         self.assertIn("server.log.2026_05_02__1", self._names())
+
+
+class TestWeeklyLogFileRecovery(unittest.TestCase):
+    """A failed rotation or a closed handle never stops the log file taking writes."""
+
+    def setUp(self):
+        import shutil
+        import tempfile
+
+        self.tmpdir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.tmpdir, ignore_errors=True)
+        prune = patch.object(logger, "prune_rotated_logs")
+        prune.start()
+        self.addCleanup(prune.stop)
+        self.logfile = logger.WeeklyLogFile("server.log", self.tmpdir, max_size=10)
+        self.addCleanup(self.logfile.close)
+
+    def _read(self, name="server.log"):
+        import os
+
+        with open(os.path.join(self.tmpdir, name)) as fil:
+            return fil.read()
+
+    def test_failed_rename_reopens_and_backs_off(self):
+        from twisted.python import logfile
+
+        self.logfile.write("0123456789\n")
+        # the traceback goes through write again, as the server log observer does
+        with (
+            patch.object(logfile.os, "rename", side_effect=OSError("busy")) as rename,
+            patch.object(logger, "log_trace", side_effect=self.logfile.write) as trace,
+        ):
+            self.logfile.write("after\n")
+            self.logfile.write("again\n")
+
+        self.assertEqual(rename.call_count, 1)
+        trace.assert_called_once()
+        self.assertEqual(
+            self._read(), "0123456789\nCould not rotate the log file server.log.after\nagain\n"
+        )
+
+        self.logfile.retry_rotate_at = 0
+        self.logfile.write("rotated\n")
+        self.assertEqual(self._read(), "rotated\n")
+
+    def test_closed_handle_reopens_on_write(self):
+        self.logfile.write("one\n")
+        self.logfile._file.close()
+
+        self.logfile.write("two\n")
+
+        self.assertEqual(self._read(), "one\ntwo\n")
+

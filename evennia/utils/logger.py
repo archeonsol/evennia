@@ -15,6 +15,7 @@ log_typemsg(). This is for historical, back-compatible reasons.
 
 import os
 import re
+import threading
 import time
 from datetime import datetime
 from traceback import format_exc
@@ -369,6 +370,10 @@ def timeformat(when=None):
     )
 
 
+# a rotate that keeps failing retries once per interval, not on every write
+_LOG_ROTATE_RETRY_SECONDS = 60
+
+
 class WeeklyLogFile(logfile.DailyLogFile):
     """
     Log file that rotates once per week by default. Overrides key methods to change format.
@@ -387,9 +392,12 @@ class WeeklyLogFile(logfile.DailyLogFile):
                 time). Defaults to 1M.
 
         """
+        # reentrant: a failed rotate logs its traceback through write
+        self._lock = threading.RLock()
         self.day_rotation = day_rotation
         self.max_size = max_size
         self.size = 0
+        self.retry_rotate_at = 0.0
         logfile.DailyLogFile.__init__(self, name, directory, defaultMode=defaultMode)
 
     def _openFile(self):
@@ -399,6 +407,8 @@ class WeeklyLogFile(logfile.DailyLogFile):
     def shouldRotate(self):
         """Rotate when the date has changed since last write"""
         # all dates here are tuples (year, month, day)
+        if time.time() < self.retry_rotate_at:
+            return False
         now = self.toDate()
         then = self.lastDate
         return (
@@ -441,20 +451,28 @@ class WeeklyLogFile(logfile.DailyLogFile):
         return suffix
 
     def rotate(self):
-        try:
-            super().rotate()
-            prune_rotated_logs()
-        except Exception:
-            log_trace(f"Could not rotate the log file {self.name}.")
+        with self._lock:
+            try:
+                super().rotate()
+                prune_rotated_logs()
+            except Exception:
+                # Twisted closes the file before the rename, so a failed rename leaves it closed
+                if self._file.closed:
+                    self._openFile()
+                self.retry_rotate_at = time.time() + _LOG_ROTATE_RETRY_SECONDS
+                log_trace(f"Could not rotate the log file {self.name}.")
 
     def write(self, data):
         """
         Write data to log file
 
         """
-        logfile.BaseLogFile.write(self, data)
-        self.lastDate = max(self.lastDate, self.toDate())
-        self.size += len(data)
+        with self._lock:
+            if self._file.closed:
+                self._openFile()
+            logfile.BaseLogFile.write(self, data)
+            self.lastDate = max(self.lastDate, self.toDate())
+            self.size += len(data)
 
 
 # Arbitrary file logger
