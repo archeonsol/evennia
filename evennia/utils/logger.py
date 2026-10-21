@@ -15,6 +15,7 @@ log_typemsg(). This is for historical, back-compatible reasons.
 
 import os
 import re
+import sys
 import threading
 import time
 from datetime import datetime
@@ -310,7 +311,42 @@ class GetLogObserver:
         return f"{component_prefix}{log_msg}"
 
     def __call__(self, outfile):
-        return twisted_logger.FileLogObserver(outfile, self.format_log_event)
+        return ThrottledLogObserver(twisted_logger.FileLogObserver(outfile, self.format_log_event))
+
+
+# Twisted prints a full traceback to stderr for every event a broken observer drops,
+# and the Server's stderr is a file nothing rotates.
+_OBSERVER_FAILURE_REPORT_SECONDS = 60
+
+
+class ThrottledLogObserver:
+    """
+    Wraps a log observer so that, while it keeps failing, its traceback reaches
+    stderr at most once per `_OBSERVER_FAILURE_REPORT_SECONDS`, with a count of
+    the events it dropped since the last report.
+
+    """
+
+    def __init__(self, observer):
+        self.observer = observer
+        self.dropped = 0
+        self.report_at = 0.0
+
+    def __call__(self, event):
+        try:
+            self.observer(event)
+        except Exception:
+            self.dropped += 1
+            now = time.time()
+            if now < self.report_at:
+                return
+            self.report_at = now + _OBSERVER_FAILURE_REPORT_SECONDS
+            sys.stderr.write(
+                f"Log observer {self.observer!r} dropped {self.dropped} event(s); "
+                f"next report in {_OBSERVER_FAILURE_REPORT_SECONDS}s at most:\n{format_exc()}"
+            )
+            sys.stderr.flush()
+            self.dropped = 0
 
 
 # Called by server/portal on startup

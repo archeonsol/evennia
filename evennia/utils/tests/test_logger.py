@@ -296,3 +296,47 @@ class TestWeeklyLogFileRecovery(unittest.TestCase):
 
         self.assertEqual(self._read(), "one\ntwo\n")
 
+
+class TestThrottledLogObserver(unittest.TestCase):
+    """A failing observer reports to stderr once per interval and never raises."""
+
+    def setUp(self):
+        import io
+
+        self.events = []
+        self.failing = True
+        self.observer = logger.ThrottledLogObserver(self._observe)
+        stderr = patch("sys.stderr", new_callable=io.StringIO)
+        self.stderr = stderr.start()
+        self.addCleanup(stderr.stop)
+
+    def _observe(self, event):
+        if self.failing:
+            raise ValueError("I/O operation on closed file.")
+        self.events.append(event)
+
+    def test_repeated_failures_report_once_per_interval(self):
+        for _ in range(3):
+            self.observer({"n": 1})
+
+        report = self.stderr.getvalue()
+        self.assertEqual(report.count("ValueError: I/O operation on closed file."), 1)
+        self.assertIn("dropped 1 event(s)", report)
+
+        self.observer.report_at = 0
+        self.observer({"n": 2})
+        self.assertIn("dropped 3 event(s)", self.stderr.getvalue())
+
+    def test_working_observer_gets_every_event(self):
+        self.failing = False
+
+        self.observer({"n": 1})
+        self.observer({"n": 2})
+
+        self.assertEqual(self.events, [{"n": 1}, {"n": 2}])
+        self.assertEqual(self.stderr.getvalue(), "")
+
+    def test_server_log_observer_is_throttled(self):
+        observer = logger.GetServerLogObserver()(MagicMock())
+
+        self.assertIsInstance(observer, logger.ThrottledLogObserver)
