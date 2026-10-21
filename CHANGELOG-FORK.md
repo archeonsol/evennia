@@ -25,6 +25,36 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.337: A log file that fails to rotate keeps logging
+
+A Server log rotation failed, and Twisted had already closed the file before the rename. Every
+later write raised `ValueError: I/O operation on closed file`, and Twisted printed a traceback
+to the Server's stderr for each dropped event. The Portal points that stderr at the log file
+the Server starts with, and nothing rotates it, so one rotated log grew to 7.6 GB in two days.
+
+### Logging
+
+- **A closed log file reopens on the next write** (`WeeklyLogFile.write` in
+  [`logger.py`](evennia/utils/logger.py)). A failed rotate reopens the file before it logs its
+  traceback, so the cause reaches the log.
+- **A failed rotate retries after 60 seconds**, not on every write
+  (`_LOG_ROTATE_RETRY_SECONDS`).
+- **`write` and `rotate` share a reentrant lock.** `WeeklyLogFile` overrides both, so Twisted's
+  own lock never covered them.
+- **A failing observer reports to stderr at most once a minute** (`ThrottledLogObserver`,
+  returned by `GetLogObserver`). The report holds the traceback and the number of events the
+  observer dropped since the last report.
+- **Importing `server.py` or `portal.py` attaches no log observer**
+  ([`server.py`](evennia/server/server.py), [`portal.py`](evennia/server/portal/portal.py)).
+  The twistd-era block ran on any import outside a test run and added a second observer on the
+  same file. Both processes run these files as scripts, which set up logging through
+  `asyncio_bootstrap._setup_process_logging`.
+
+### Migration notes
+
+- `GetLogObserver()(logfile)` returns a `ThrottledLogObserver`. Code that needs the
+  `FileLogObserver` under it reads `.observer`.
+
 ## 6.0.0+underspire.336: Admin verbs check their own keys, and default actions match the old commands
 
 `engine.world.build` gated `@force`, `@emit`, `@policy` and `@scope` as well as building, and
