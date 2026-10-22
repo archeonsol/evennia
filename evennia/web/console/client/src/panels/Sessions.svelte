@@ -44,15 +44,20 @@
   let watching = $state<WatchRow[]>([]);
 
   /** Refresh the list of running watches, whoever started them. */
-  async function refreshWatches() {
+  async function refreshWatches(): Promise<boolean> {
     const found = await call<{
       result?: { rows?: WatchRow[] };
       rows?: WatchRow[];
     }>("panels/sessions/actions/watches/", { body: {} });
     const payload = found.payload?.result ?? found.payload;
-    if (!found.ok) return;
+    // A refused request stays refused: the login or CSRF cookie is gone, and
+    // asking again every few seconds only fills the server's logs and trips
+    // its intrusion bans. Tell the poller to stop.
+    if (found.status === 401 || found.status === 403) return false;
+    if (!found.ok) return true;
     watching = Array.isArray(payload?.rows) ? payload.rows : [];
     retainWatches(watching.filter((entry) => entry.mine).map((entry) => entry.watch_id));
+    return true;
   }
 
   $effect(() => {
@@ -102,8 +107,11 @@
 
   $effect(() => {
     void reload;
-    void refreshWatches();
-    const timer = window.setInterval(() => void refreshWatches(), 5000);
+    const poll = async () => {
+      if (!(await refreshWatches())) window.clearInterval(timer);
+    };
+    const timer = window.setInterval(() => void poll(), 5000);
+    void poll();
     return () => window.clearInterval(timer);
   });
 
