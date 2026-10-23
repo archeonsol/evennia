@@ -5,6 +5,7 @@
 //   ?panel=assist   opens Assist; ?theme=<id> picks a theme.
 //   ?help=<query>   opens the help panel on a recorded page ("" is the index).
 //   ?settings=<view>  opens Settings, on a page when one is named (reading).
+//   ?vista=<scene>  puts what lies ahead in the room panel (dusk, noon, night, rain, dawn).
 //
 // Nothing here is under test; the browser suites live beside it.
 
@@ -27,6 +28,7 @@ import { help, type HelpPage } from "../src/lib/help.svelte";
 import { lore } from "../src/lib/lore.svelte";
 import helpFixtures from "./help-fixtures.json";
 import loreFixtures from "./lore-tips.json";
+import vistaFixtures from "./vista-fixtures.json";
 
 const params = new URLSearchParams(location.search);
 try {
@@ -119,6 +121,16 @@ document.documentElement.toggleAttribute("data-lore-tips", settings.loreTips);
 
 scene.room = { name: "Kettle's Noodle Counter" } as any;
 scene.present = true;
+// What lies ahead on open ground: the game's picture and its words, one place and hour
+// each (tests/vista-fixtures.json is written from the game's own map).
+const vistaPick = params.get("vista");
+if (vistaPick !== null) {
+  const fixture = (vistaFixtures as Record<string, { vista: unknown; words: string }>)[vistaPick || "dusk"];
+  if (fixture) {
+    scene.room = { name: "Brush Flat", vista: fixture.words } as any;
+    scene.fields = { vista: fixture.vista };
+  }
+}
 
 chat.handleOob("channels_list", [
   { key: "public", name: "Public", color: "#7fd3a8" },

@@ -25,6 +25,8 @@ export interface SceneRoom {
   name?: string;
   desc?: string;
   atmosphere?: string;
+  /** What lies ahead, in words, on open ground (HTML like the rest). The picture is the scene field `vista`. */
+  vista?: string;
 }
 export interface SceneExit {
   key: string;

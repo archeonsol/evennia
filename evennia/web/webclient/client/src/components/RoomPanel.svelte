@@ -1,11 +1,17 @@
 <script lang="ts">
   import { scene } from "../lib/scene.svelte";
+  import { settings } from "../lib/settings.svelte";
+  import { parseVista } from "../lib/vista";
+  import VistaView from "./VistaView.svelte";
 
   // Live scene fields are a generic bag, so read defensively: a game that emits
   // none of them should render the panel exactly as before.
   const poseLine = $derived(
     typeof scene.fields.pose_line === "string" ? scene.fields.pose_line : "",
   );
+  // What lies ahead on open ground, as a picture the game drew. A viewer who reads by screen
+  // reader gets the words only: they are always sent, and say the same.
+  const vista = $derived(settings.screenreader ? null : parseVista(scene.fields.vista));
 </script>
 
 <section class="room-panel" aria-label="Scene" data-focus-region="scene" tabindex="-1">
@@ -13,11 +19,17 @@
     {#if scene.room.name}
       <div class="panel-title glow-text" role="heading" aria-level="2">{@html scene.room.name}</div>
     {/if}
+    {#if vista}
+      <VistaView {vista} />
+    {/if}
     {#if scene.room.atmosphere}
       <div class="atmo">{@html scene.room.atmosphere}</div>
     {/if}
     {#if scene.room.desc}
       <div class="desc">{@html scene.room.desc}</div>
+    {/if}
+    {#if scene.room.vista}
+      <div class="desc ahead">{@html scene.room.vista}</div>
     {/if}
     {#if poseLine}
       <p class="pose-line">{poseLine}</p>
