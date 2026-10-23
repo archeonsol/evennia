@@ -280,15 +280,17 @@ class TextToHTMLparser(object):
             elif substr in self.ansi_color_codes + self.xterm_fg_codes:
                 # erase ANSI code from output
                 str_list[i] = ""
-                # set new color
+                # set new color; a palette colour replaces a truecolor one, as it does on a terminal
                 fg = substr
+                truecolor_fg = ""
 
             # change bg color
             elif substr in self.ansi_bg_codes + self.xterm_bg_codes:
                 # erase ANSI code from output
                 str_list[i] = ""
-                # set new bg
+                # set new bg, replacing a truecolor one
                 bg = substr
+                truecolor_bg = ""
 
             elif re.match(hex_colors.TRUECOLOR_FG, substr):
                 str_list[i] = ""

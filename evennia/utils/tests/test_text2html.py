@@ -81,6 +81,19 @@ class TestText2Html(SimpleTestCase):
             parser.format_styles(f"\x1b[38;2;255;0;0m" + "red" + ansi.ANSI_NORMAL + "foo"),
         )
 
+    def test_a_palette_colour_after_a_truecolor_one_replaces_it(self):
+        """A terminal paints the later code, so the web does too: the truecolor style must not outlive a palette colour."""
+        parser = text2html.HTML_PARSER
+        out = parser.format_styles("\x1b[38;2;233;185;76mgold " + ansi.ANSI_HILITE + ansi.ANSI_CYAN + "cyan" + ansi.ANSI_NORMAL + " plain")
+        self.assertIn('style="color: #e9b94c;">gold </span>', out)
+        cyan = out.split("cyan")[0].rsplit("<span", 1)[1]
+        self.assertNotIn("style=", cyan)
+        self.assertIn("color-", cyan)
+        # the same for a background
+        out = parser.format_styles("\x1b[48;2;1;2;3mdark " + ansi.ANSI_BACK_RED + "red" + ansi.ANSI_NORMAL)
+        red = out.split("red")[0].rsplit("<span", 1)[1]
+        self.assertNotIn("style=", red)
+
     def test_remove_bells(self):
         parser = text2html.HTML_PARSER
         self.assertEqual("foo", parser.remove_bells("foo"))
