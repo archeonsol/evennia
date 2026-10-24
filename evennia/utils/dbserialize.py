@@ -100,6 +100,15 @@ else:
     _DATESTRING = "%Y:%m:%d-%H:%M:%S:%f"
 
 
+#: The types of a value that stands for itself in a stored structure: there is nothing inside it to convert. The walks below pass
+#: one over with a single check and not a call, which is most of what a row of a few dozen numbers and strings is made of.
+_PLAIN_TYPES = frozenset({str, int, float, bool, bytes, SafeString})
+
+#: The types of a value that ``_convert_tree`` hands back as it got it: the plain ones, a tuple (which it does not look inside)
+#: and None.
+_UNCHANGED_TYPES = _PLAIN_TYPES | {tuple, type(None)}
+
+
 def _TO_DATESTRING(obj):
     """
     Creates datestring hash.
@@ -495,11 +504,18 @@ def _convert_tree(item, parent):
         return item
     elif dtype == list:
         dat = _SaverList(_parent=parent)
-        dat._data.extend(_convert_tree(val, dat) for val in item)
+        dat._data.extend(
+            [val if type(val) in _UNCHANGED_TYPES else _convert_tree(val, dat) for val in item]
+        )
         return dat
     elif dtype == dict:
         dat = _SaverDict(_parent=parent)
-        dat._data.update((key, _convert_tree(val, dat)) for key, val in item.items())
+        dat._data.update(
+            {
+                key: (val if type(val) in _UNCHANGED_TYPES else _convert_tree(val, dat))
+                for key, val in item.items()
+            }
+        )
         return dat
     elif dtype == defaultdict:
         dat = _SaverDefaultDict(item.default_factory, _parent=parent)
@@ -684,10 +700,19 @@ def _to_pickle_item(item):
         return item.value
     elif dtype == tuple:
         return tuple(_to_pickle_item(val) for val in item)
-    elif dtype in (list, _SaverList):
-        return [_to_pickle_item(val) for val in item]
-    elif dtype in (dict, _SaverDict):
-        return dict((_to_pickle_item(key), _to_pickle_item(val)) for key, val in item.items())
+    elif dtype is list or dtype is _SaverList:
+        # A saver keeps the list it stands for in ``_data``; walking the saver itself is a Python call for each item.
+        return [
+            val if type(val) in _PLAIN_TYPES else _to_pickle_item(val)
+            for val in (item if dtype is list else item._data)
+        ]
+    elif dtype is dict or dtype is _SaverDict:
+        return {
+            (key if type(key) in _PLAIN_TYPES else _to_pickle_item(key)): (
+                val if type(val) in _PLAIN_TYPES else _to_pickle_item(val)
+            )
+            for key, val in (item if dtype is dict else item._data).items()
+        }
     elif dtype in (defaultdict, _SaverDefaultDict):
         return defaultdict(
             item.default_factory,
@@ -774,8 +799,15 @@ def _from_pickle_item(item):
         return unpack_session(item)
     elif dtype == tuple:
         return tuple(_from_pickle_item(val) for val in item)
+    elif dtype == list:
+        return [val if type(val) in _PLAIN_TYPES else _from_pickle_item(val) for val in item]
     elif dtype == dict:
-        return dict((_from_pickle_item(key), _from_pickle_item(val)) for key, val in item.items())
+        return {
+            (key if type(key) in _PLAIN_TYPES else _from_pickle_item(key)): (
+                val if type(val) in _PLAIN_TYPES else _from_pickle_item(val)
+            )
+            for key, val in item.items()
+        }
     elif dtype == defaultdict:
         return defaultdict(
             item.default_factory,
@@ -829,21 +861,28 @@ def _from_pickle_tree(item, parent):
     dtype = type(item)
     if dtype in (str, int, float, bool, bytes, SafeString):
         return item
+    elif dtype == list:
+        dat = _SaverList(_parent=parent)
+        dat._data.extend(
+            [val if type(val) in _PLAIN_TYPES else _from_pickle_tree(val, dat) for val in item]
+        )
+        return dat
+    elif dtype == dict:
+        dat = _SaverDict(_parent=parent)
+        dat._data.update(
+            {
+                (key if type(key) in _PLAIN_TYPES else _from_pickle_item(key)): (
+                    val if type(val) in _PLAIN_TYPES else _from_pickle_tree(val, dat)
+                )
+                for key, val in item.items()
+            }
+        )
+        return dat
     elif _IS_PACKED_DBOBJ(item):
         # this must be checked before tuple
         return unpack_dbobj(item)
     elif dtype == tuple:
         return tuple(_from_pickle_tree(val, item) for val in item)
-    elif dtype == list:
-        dat = _SaverList(_parent=parent)
-        dat._data.extend(_from_pickle_tree(val, dat) for val in item)
-        return dat
-    elif dtype == dict:
-        dat = _SaverDict(_parent=parent)
-        dat._data.update(
-            (_from_pickle_item(key), _from_pickle_tree(val, dat)) for key, val in item.items()
-        )
-        return dat
     elif dtype == defaultdict:
         dat = _SaverDefaultDict(item.default_factory, _parent=parent)
         dat._data.update(
@@ -933,12 +972,19 @@ def from_pickle(data, db_obj=None):
             return _from_pickle_item(data)
         elif dtype == list:
             dat = _SaverList(_db_obj=db_obj)
-            dat._data.extend(_from_pickle_tree(val, dat) for val in data)
+            dat._data.extend(
+                [val if type(val) in _PLAIN_TYPES else _from_pickle_tree(val, dat) for val in data]
+            )
             return dat
         elif dtype == dict:
             dat = _SaverDict(_db_obj=db_obj)
             dat._data.update(
-                (_from_pickle_item(key), _from_pickle_tree(val, dat)) for key, val in data.items()
+                {
+                    (key if type(key) in _PLAIN_TYPES else _from_pickle_item(key)): (
+                        val if type(val) in _PLAIN_TYPES else _from_pickle_tree(val, dat)
+                    )
+                    for key, val in data.items()
+                }
             )
             return dat
         elif dtype == defaultdict:
