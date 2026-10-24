@@ -44,22 +44,37 @@ def _restore_dbobjs(item, _seen):
             _restore_dbobjs(val, _seen)
 
 
+#: The exact types of a value that is JSON-safe on its own, with nothing inside it to look at.
+_SCALARS = frozenset({bool, type(None), str, int, float})
+
+
 def _is_json_safe(val) -> bool:
     """
     True iff *val* can be losslessly round-tripped through json.dumps/loads.
 
     Explicit type check rather than calling json.dumps so that subclasses
     (e.g. _SaverDict) and coercible types (e.g. tuple → list) are rejected.
+
+    A scalar inside a list or a dict is passed over in the loop that walks it, with one type
+    check and no call, so a document of a few hundred values is a few hundred checks and not a
+    few hundred calls and generators. The answer is the one the recursive form gave, and a
+    structure that contains itself still fails by recursing too deep.
     """
     t = type(val)
-    if t in (bool, type(None), str):
-        return True
-    if t is int or t is float:
+    if t in _SCALARS:
         return True
     if t is list:
-        return all(_is_json_safe(v) for v in val)
+        for item in val:
+            if type(item) not in _SCALARS and not _is_json_safe(item):
+                return False
+        return True
     if t is dict:
-        return all(isinstance(k, str) and _is_json_safe(v) for k, v in val.items())
+        for key, item in val.items():
+            if type(key) is not str and not isinstance(key, str):
+                return False
+            if type(item) not in _SCALARS and not _is_json_safe(item):
+                return False
+        return True
     return False
 
 
