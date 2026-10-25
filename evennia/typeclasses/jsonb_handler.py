@@ -2539,6 +2539,43 @@ class _FlushClaim:
 #: A flush preparation at least this long (seconds) logs its row count and slowest row.
 _SLOW_FLUSH_PREPARATION = 0.1
 
+#: A row that cannot be flushed for the same reason is logged at most this often (seconds).
+_FLUSH_REFUSAL_LOG_EVERY = 600.0
+_flush_refusal_logged: dict = {}
+
+
+def _note_flush_refusal(model, pk, reason, detail=""):
+    """
+    Say why one row did not flush, once in a while.
+
+    The flush tally only counts rows that failed, so a log line that reads "1
+    undurable rows" cannot say which row or why. This names it. A row that stays
+    stuck (a quarantined one is tried again every second) is named once every
+    ``_FLUSH_REFUSAL_LOG_EVERY`` seconds, not once a second.
+
+    Args:
+        model (type or None): The model of the row, if known.
+        pk (int): The primary key of the row.
+        reason (str): A short word for the cause, such as ``prepare`` or ``row_missing``.
+        detail (str, optional): The error text.
+
+    """
+    from evennia.utils import logger
+
+    now = time.monotonic()
+    key = (getattr(getattr(model, "_meta", None), "label", None), pk, reason)
+    last = _flush_refusal_logged.get(key)
+    if last is not None and now - last < _FLUSH_REFUSAL_LOG_EVERY:
+        return
+    if len(_flush_refusal_logged) > 512:
+        _flush_refusal_logged.clear()
+    _flush_refusal_logged[key] = now
+    label = key[0] or "unknown model"
+    logger.log_warn(
+        f"JsonbAttributeBackend: could not flush {label} #{pk} ({reason})"
+        + (f": {detail}" if detail else ".")
+    )
+
 
 def _log_slow_flush_preparation(seconds, copy_seconds, rows, slowest_seconds, slowest_state):
     """Name a slow preparation's size and costliest row; serializes only that row."""
@@ -2582,8 +2619,9 @@ def _prepare_async_row_flushes():
                 raise AttributeUpdateUnavailable(
                     "JSONB Attribute state is quarantined until recovery or process restart."
                 )
-        except AttributeUpdateError:
+        except AttributeUpdateError as err:
             failed += 1
+            _note_flush_refusal(state.model, state.pk, "prepare", f"{type(err).__name__}: {err}")
             continue
         copy_started = time.perf_counter()
         snapshots.append(
@@ -2809,7 +2847,18 @@ def _adopt_async_row_flushes(snapshots, outcomes, preparation_failures=0):
                 flushed += 1
             elif outcome.status == "spooled":
                 spooled += 1
+            elif outcome.status == "row_missing":
+                # delete() drops the row's state when it commits, so a state that
+                # is gone and a row that is gone mean the object was deleted while
+                # its write was with the worker. There is nothing left to save.
+                continue
             else:
+                _note_flush_refusal(
+                    snapshot.model,
+                    snapshot.pk,
+                    outcome.status,
+                    outcome.error_message or "",
+                )
                 failed += 1
             continue
         if outcome.status == "ok":
@@ -2824,8 +2873,19 @@ def _adopt_async_row_flushes(snapshots, outcomes, preparation_failures=0):
             spooled += 1
         elif outcome.status == "row_missing":
             _mark_row_missing(state)
+            _note_flush_refusal(
+                snapshot.model,
+                snapshot.pk,
+                "row_missing",
+                "the row is gone and was not deleted here",
+            )
             failed += 1
         elif outcome.status == "conflict":
+            if state.durable_document != snapshot.durable:
+                # A synchronous flush or a protected update wrote this row after the
+                # snapshot was taken. The worker's older copy lost to the newer one,
+                # which is already durable, so nothing was lost.
+                continue
             logger.log_warn(
                 f"JsonbAttributeBackend: refusing stale conflicting write for pk={state.pk}."
             )

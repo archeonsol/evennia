@@ -735,6 +735,105 @@ class TestRowOwnedPersistence(BaseEvenniaTest):
         flush_all_dirty()
         self.assertEqual(self._database_attrs()["~"]["_d"], {"captured": 1, "barrier": 2})
 
+    def test_a_write_beaten_by_a_newer_flush_is_not_a_failure(self):
+        # The worker holds an old copy of an attribute. The game changes it again and a
+        # query barrier flushes the new value first. The worker's copy then conflicts
+        # with the row, and refusing it is right: the newer value is already saved.
+        jsonb_handler._flush_refusal_logged.clear()
+        handler = AttributeHandler(self.obj1, JsonbAttributeBackend)
+        handler.add("contested", 1)
+        flush_all_dirty()
+        handler.add("contested", 2)
+        snapshots = self._capture_async_snapshot(handler)
+
+        handler.add("contested", 3)
+        flush_all_dirty()
+        outcomes = jsonb_handler._persist_row_snapshots_worker(snapshots)
+        self.assertEqual(outcomes[0].status, "conflict")
+        with patch("evennia.utils.logger.log_warn") as warn:
+            tallies = jsonb_handler._adopt_async_row_flushes(snapshots, outcomes)
+
+        self.assertEqual(tallies["failed"], 0)
+        warn.assert_not_called()
+        self.assertEqual(handler.get("contested"), 3)
+        self.assertEqual(self._database_attrs()["~"]["_d"]["contested"], 3)
+
+    def test_a_write_beaten_by_another_writer_is_still_a_failure(self):
+        jsonb_handler._flush_refusal_logged.clear()
+        handler = AttributeHandler(self.obj1, JsonbAttributeBackend)
+        handler.add("contested", 1)
+        flush_all_dirty()
+        handler.add("contested", 2)
+        snapshots = self._capture_async_snapshot(handler)
+
+        remote = deepcopy(self._database_attrs())
+        remote["~"]["_d"]["contested"] = to_jsonb(999)
+        type(self.obj1).objects.filter(pk=self.obj1.pk).update(db_attrs=remote)
+        outcomes = jsonb_handler._persist_row_snapshots_worker(snapshots)
+        self.assertEqual(outcomes[0].status, "conflict")
+        with patch("evennia.utils.logger.log_warn") as warn:
+            tallies = jsonb_handler._adopt_async_row_flushes(snapshots, outcomes)
+
+        self.assertEqual(tallies["failed"], 1)
+        self.assertIn("refusing stale conflicting write", warn.call_args.args[0])
+        self.assertTrue(handler.backend._dirty)
+
+    def test_a_row_deleted_while_its_write_is_in_flight_is_not_a_failure(self):
+        # delete() retires the row's state. A worker that then finds no row has nothing
+        # left to save, so the flush does not report an undurable row.
+        jsonb_handler._flush_refusal_logged.clear()
+        handler = AttributeHandler(self.obj1, JsonbAttributeBackend)
+        handler.add("captured", 1)
+        snapshots = self._capture_async_snapshot(handler)
+        key = snapshots[0].key
+
+        self.obj1.delete()
+        self.assertIsNone(jsonb_handler._existing_row_state(key))
+        outcomes = jsonb_handler._persist_row_snapshots_worker(snapshots)
+        self.assertEqual(outcomes[0].status, "row_missing")
+        with patch("evennia.utils.logger.log_warn") as warn:
+            tallies = jsonb_handler._adopt_async_row_flushes(snapshots, outcomes)
+
+        self.assertEqual(tallies["failed"], 0)
+        warn.assert_not_called()
+
+    def test_a_row_that_vanished_without_a_delete_is_named_in_the_log(self):
+        jsonb_handler._flush_refusal_logged.clear()
+        handler = AttributeHandler(self.obj1, JsonbAttributeBackend)
+        handler.add("captured", 1)
+        snapshots = self._capture_async_snapshot(handler)
+        pk = self.obj1.pk
+
+        type(self.obj1)._base_manager.filter(pk=pk).delete()
+        outcomes = jsonb_handler._persist_row_snapshots_worker(snapshots)
+        self.assertEqual(outcomes[0].status, "row_missing")
+        with patch("evennia.utils.logger.log_warn") as warn:
+            tallies = jsonb_handler._adopt_async_row_flushes(snapshots, outcomes)
+
+        self.assertEqual(tallies["failed"], 1)
+        message = warn.call_args.args[0]
+        self.assertIn(f"#{pk}", message)
+        self.assertIn("row_missing", message)
+
+    def test_a_row_refused_at_preparation_is_named_once(self):
+        jsonb_handler._flush_refusal_logged.clear()
+        handler = AttributeHandler(self.obj1, JsonbAttributeBackend)
+        handler.add("captured", 1)
+        state = handler.backend._row_state
+        state.pending_checked = True
+        state.pending_blocked = True
+
+        with patch("evennia.utils.logger.log_warn") as warn:
+            _snapshots, first = jsonb_handler._prepare_async_row_flushes()
+            _snapshots, second = jsonb_handler._prepare_async_row_flushes()
+
+        self.assertGreaterEqual(first, 1)
+        self.assertGreaterEqual(second, 1)
+        named = [call.args[0] for call in warn.call_args_list if "could not flush" in call.args[0]]
+        self.assertEqual(len(named), 1)
+        self.assertIn(f"#{self.obj1.pk}", named[0])
+        self.assertIn("(prepare)", named[0])
+
     def test_async_adoption_keeps_row_strong_when_spool_intent_remains(self):
         handler = AttributeHandler(self.obj1, JsonbAttributeBackend)
         handler.add("captured", 1)
