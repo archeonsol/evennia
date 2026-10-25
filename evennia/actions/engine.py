@@ -491,6 +491,11 @@ class RuleEngine:
         stop_on_claim = phase == "carry_out"
         guard = getattr(actor, "focus_still_valid", None)
         for provider, spec in plan[phase]:
+            if getattr(provider, "pk", True) is None:
+                # An earlier rule in this dispatch deleted the provider (``go light``
+                # deletes the character who typed it). Its rows are gone and reading
+                # them raises, so it takes no further part.
+                continue
             result, suspended = await self._eval_rule_async(
                 provider, spec, action, actor, memo, trace, phase, dry_run
             )

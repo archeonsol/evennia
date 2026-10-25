@@ -181,6 +181,38 @@ class Dying:
         return PASS
 
 
+class Deleted:
+    """A provider that is deleted in the middle of a dispatch, as ``go light`` does to a character."""
+
+    def __init__(self, fired):
+        self.fired = fired
+        self.pk = 7
+
+    @rule(Kick, phase="carry_out", priority=10)
+    def delete_me(self, action, actor):
+        self.fired.append("delete")
+        self.pk = None  # Django clears the key of an instance it has deleted
+        return PASS
+
+    @rule(Kick, phase="report")
+    def afterglow(self, action, actor):
+        self.fired.append("afterglow")
+        return PASS
+
+
+class Saved:
+    """A provider with a key that is never cleared; its report rule must still run."""
+
+    def __init__(self, fired):
+        self.fired = fired
+        self.pk = 8
+
+    @rule(Kick, phase="report")
+    def afterglow(self, action, actor):
+        self.fired.append("afterglow")
+        return PASS
+
+
 class Redirector:
     def __init__(self, fired):
         self.fired = fired
@@ -387,6 +419,27 @@ class TestCarryOutPhase(unittest.TestCase):
         self.assertEqual(fired, ["die"])  # the report rule never ran, and was not an error
         log_trace.assert_not_called()
         self.assertEqual(trace.outcome, "succeeded")
+
+
+class TestDeletedProvider(unittest.TestCase):
+    def test_a_provider_deleted_by_an_earlier_rule_takes_no_report_rule(self):
+        fired = []
+        with mock.patch.object(logger, "log_trace") as log_trace:
+            trace = _sync(ENGINE.dispatch(Kick(), _actor(), _ctx(Deleted(fired))))
+        self.assertEqual(fired, ["delete"])
+        log_trace.assert_not_called()
+        self.assertEqual(trace.outcome, "succeeded")
+
+    def test_a_provider_with_a_key_still_takes_its_report_rule(self):
+        fired = []
+        _sync(ENGINE.dispatch(Kick(), _actor(), _ctx(Saved(fired))))
+        self.assertEqual(fired, ["afterglow"])
+
+    def test_the_deletion_does_not_stop_other_providers_report_rules(self):
+        fired, others = [], []
+        _sync(ENGINE.dispatch(Kick(), _actor(), _ctx(Deleted(fired), Saved(others))))
+        self.assertEqual(fired, ["delete"])
+        self.assertEqual(others, ["afterglow"])
 
 
 class TestBeforePhaseRedirect(unittest.TestCase):
