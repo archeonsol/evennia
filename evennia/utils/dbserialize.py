@@ -38,7 +38,14 @@ import evennia
 from evennia.utils import logger
 from evennia.utils.utils import is_iter, to_bytes, uses_database
 
-__all__ = ("to_pickle", "from_pickle", "do_pickle", "do_unpickle", "dbserialize", "dbunserialize")
+__all__ = (
+    "to_pickle",
+    "from_pickle",
+    "do_pickle",
+    "do_unpickle",
+    "dbserialize",
+    "dbunserialize",
+)
 
 PICKLE_PROTOCOL = 5  # Python 3.8+; protocol 5 supports out-of-band buffers and is faster than 2
 
@@ -193,32 +200,7 @@ class _SaverMutable:
     def _convert_mutables(self, data):
         """converts mutables to Saver* variants and assigns ._parent property"""
 
-        def process_tree(item, parent):
-            """recursively populate the tree, storing parents"""
-            dtype = type(item)
-            if dtype in (str, int, float, bool, tuple):
-                return item
-            elif dtype == list:
-                dat = _SaverList(_parent=parent)
-                dat._data.extend(process_tree(val, dat) for val in item)
-                return dat
-            elif dtype == dict:
-                dat = _SaverDict(_parent=parent)
-                dat._data.update((key, process_tree(val, dat)) for key, val in item.items())
-                return dat
-            elif dtype == defaultdict:
-                dat = _SaverDefaultDict(item.default_factory, _parent=parent)
-                dat._data.update((key, process_tree(val, dat)) for key, val in item.items())
-                return dat
-            elif dtype == deque:
-                dat = _SaverDeque(_parent=parent, maxlen=item.maxlen)
-            elif dtype == set:
-                dat = _SaverSet(_parent=parent)
-                dat._data.update(process_tree(val, dat) for val in item)
-                return dat
-            return item
-
-        return process_tree(data, self)
+        return _convert_tree(data, self)
 
     def __repr__(self):
         return self._data.__repr__()
@@ -499,6 +481,64 @@ _DESERIALIZE_MAPPING = {
 }
 
 
+# The recursive helpers below are module-level on purpose. A function defined inside
+# another function that calls itself holds a reference to itself, so every call of
+# the outer function left a function, a cell and a tuple behind for the cycle
+# collector. Reading or writing one attribute did that two or three times, and
+# the pile was most of what a full collection had to free.
+
+
+def _convert_tree(item, parent):
+    """recursively populate the tree, storing parents"""
+    dtype = type(item)
+    if dtype in (str, int, float, bool, tuple):
+        return item
+    elif dtype == list:
+        dat = _SaverList(_parent=parent)
+        dat._data.extend(_convert_tree(val, dat) for val in item)
+        return dat
+    elif dtype == dict:
+        dat = _SaverDict(_parent=parent)
+        dat._data.update((key, _convert_tree(val, dat)) for key, val in item.items())
+        return dat
+    elif dtype == defaultdict:
+        dat = _SaverDefaultDict(item.default_factory, _parent=parent)
+        dat._data.update((key, _convert_tree(val, dat)) for key, val in item.items())
+        return dat
+    elif dtype == deque:
+        dat = _SaverDeque(_parent=parent, maxlen=item.maxlen)
+        dat._data.extend(_convert_tree(val, dat) for val in item)
+        return dat
+    elif dtype == set:
+        dat = _SaverSet(_parent=parent)
+        dat._data.update(_convert_tree(val, dat) for val in item)
+        return dat
+    return item
+
+
+def _deserialize_iter(obj):
+    typ = type(obj)
+    tname = typ.__name__
+    if tname in ("_SaverDict", "dict"):
+        return {_deserialize_iter(key): _deserialize_iter(val) for key, val in obj.items()}
+    elif tname in ("_SaverOrderedDict", "OrderedDict"):
+        return OrderedDict(
+            [(_deserialize_iter(key), _deserialize_iter(val)) for key, val in obj.items()]
+        )
+    elif tname in ("_SaverDefaultDict", "defaultdict"):
+        return defaultdict(
+            obj.default_factory,
+            {_deserialize_iter(key): _deserialize_iter(val) for key, val in obj.items()},
+        )
+    elif tname in ("_SaverDeque", deque):
+        return deque((_deserialize_iter(val) for val in obj), maxlen=obj.maxlen)
+    elif tname in _DESERIALIZE_MAPPING:
+        return _DESERIALIZE_MAPPING[tname](_deserialize_iter(val) for val in obj)
+    elif is_iter(obj):
+        return typ(_deserialize_iter(val) for val in obj)
+    return obj
+
+
 def deserialize(obj):
     """
     Make sure to *fully* decouple a structure from the database, by turning all _Saver*-mutables
@@ -506,27 +546,7 @@ def deserialize(obj):
 
     """
 
-    def _iter(obj):
-        # breakpoint()
-        typ = type(obj)
-        tname = typ.__name__
-        if tname in ("_SaverDict", "dict"):
-            return {_iter(key): _iter(val) for key, val in obj.items()}
-        elif tname in ("_SaverOrderedDict", "OrderedDict"):
-            return OrderedDict([(_iter(key), _iter(val)) for key, val in obj.items()])
-        elif tname in ("_SaverDefaultDict", "defaultdict"):
-            return defaultdict(
-                obj.default_factory, {_iter(key): _iter(val) for key, val in obj.items()}
-            )
-        elif tname in ("_SaverDeque", deque):
-            return deque((_iter(val) for val in obj), maxlen=obj.maxlen)
-        elif tname in _DESERIALIZE_MAPPING:
-            return _DESERIALIZE_MAPPING[tname](_iter(val) for val in obj)
-        elif is_iter(obj):
-            return typ(_iter(val) for val in obj)
-        return obj
-
-    return _iter(obj)
+    return _deserialize_iter(obj)
 
 
 #
@@ -653,6 +673,76 @@ def unpack_session(item):
 # Access methods
 
 
+def _to_pickle_item(item):
+    """Recursive processor and identification of data"""
+
+    dtype = type(item)
+
+    if dtype in (str, int, float, bool, bytes, SafeString):
+        return item
+    elif isinstance(item, IntFlag):
+        return item.value
+    elif dtype == tuple:
+        return tuple(_to_pickle_item(val) for val in item)
+    elif dtype in (list, _SaverList):
+        return [_to_pickle_item(val) for val in item]
+    elif dtype in (dict, _SaverDict):
+        return dict((_to_pickle_item(key), _to_pickle_item(val)) for key, val in item.items())
+    elif dtype in (defaultdict, _SaverDefaultDict):
+        return defaultdict(
+            item.default_factory,
+            ((_to_pickle_item(key), _to_pickle_item(val)) for key, val in item.items()),
+        )
+    elif dtype in (deque, _SaverDeque):
+        return deque((_to_pickle_item(val) for val in item), maxlen=item.maxlen)
+    elif dtype in (set, _SaverSet):
+        return set(_to_pickle_item(val) for val in item)
+    elif dtype in (OrderedDict, _SaverOrderedDict):
+        return OrderedDict(
+            (_to_pickle_item(key), _to_pickle_item(val)) for key, val in item.items()
+        )
+    elif dtype in (deque, _SaverDeque):
+        return deque(_to_pickle_item(val) for val in item)
+
+    # not one of the base types
+    if hasattr(item, "__serialize_dbobjs__"):
+        # Allows custom serialization of any dbobjects embedded in
+        # the item that Evennia will otherwise not find (these would
+        # otherwise lead to an error). Use the dbserialize helper from
+        # this method.
+        try:
+            item.__serialize_dbobjs__()
+        except TypeError as err:
+            # we catch typerrors so we can handle both classes (requiring
+            # classmethods) and instances
+            pass
+
+    if hasattr(item, "__iter__"):
+        try:
+            # we try to conserve the iterable class, if not convert to dict
+            try:
+                return item.__class__(
+                    (_to_pickle_item(key), _to_pickle_item(val)) for key, val in item.items()
+                )
+            except (AttributeError, TypeError):
+                return {_to_pickle_item(key): _to_pickle_item(val) for key, val in item.items()}
+        except Exception:
+            # we try to conserve the iterable class, if not convert to list
+            try:
+                return item.__class__([_to_pickle_item(val) for val in item])
+            except (AttributeError, TypeError):
+                return [_to_pickle_item(val) for val in item]
+    elif hasattr(item, "sessid") and hasattr(item, "conn_time"):
+        return pack_session(item)
+    try:
+        return pack_dbobj(item)
+    except TypeError:
+        return item
+    except Exception:
+        logger.log_err(f"The object {item} of type {type(item)} could not be stored.")
+        raise
+
+
 def to_pickle(data):
     """
     This prepares data on arbitrary form to be pickled. It handles any
@@ -669,74 +759,147 @@ def to_pickle(data):
 
     """
 
-    def process_item(item):
-        """Recursive processor and identification of data"""
+    return _to_pickle_item(data)
 
-        dtype = type(item)
 
-        if dtype in (str, int, float, bool, bytes, SafeString):
-            return item
-        elif isinstance(item, IntFlag):
-            return item.value
-        elif dtype == tuple:
-            return tuple(process_item(val) for val in item)
-        elif dtype in (list, _SaverList):
-            return [process_item(val) for val in item]
-        elif dtype in (dict, _SaverDict):
-            return dict((process_item(key), process_item(val)) for key, val in item.items())
-        elif dtype in (defaultdict, _SaverDefaultDict):
-            return defaultdict(
-                item.default_factory,
-                ((process_item(key), process_item(val)) for key, val in item.items()),
-            )
-        elif dtype in (deque, _SaverDeque):
-            return deque((process_item(val) for val in item), maxlen=item.maxlen)
-        elif dtype in (set, _SaverSet):
-            return set(process_item(val) for val in item)
-        elif dtype in (OrderedDict, _SaverOrderedDict):
-            return OrderedDict((process_item(key), process_item(val)) for key, val in item.items())
-        elif dtype in (deque, _SaverDeque):
-            return deque(process_item(val) for val in item)
-
-        # not one of the base types
-        if hasattr(item, "__serialize_dbobjs__"):
-            # Allows custom serialization of any dbobjects embedded in
-            # the item that Evennia will otherwise not find (these would
-            # otherwise lead to an error). Use the dbserialize helper from
-            # this method.
-            try:
-                item.__serialize_dbobjs__()
-            except TypeError as err:
-                # we catch typerrors so we can handle both classes (requiring
-                # classmethods) and instances
-                pass
-
-        if hasattr(item, "__iter__"):
-            try:
-                # we try to conserve the iterable class, if not convert to dict
-                try:
-                    return item.__class__(
-                        (process_item(key), process_item(val)) for key, val in item.items()
-                    )
-                except (AttributeError, TypeError):
-                    return {process_item(key): process_item(val) for key, val in item.items()}
-            except Exception:
-                # we try to conserve the iterable class, if not convert to list
-                try:
-                    return item.__class__([process_item(val) for val in item])
-                except (AttributeError, TypeError):
-                    return [process_item(val) for val in item]
-        elif hasattr(item, "sessid") and hasattr(item, "conn_time"):
-            return pack_session(item)
+def _from_pickle_item(item):
+    """Recursive processor and identification of data"""
+    dtype = type(item)
+    if dtype in (str, int, float, bool, bytes, SafeString):
+        return item
+    elif _IS_PACKED_DBOBJ(item):
+        # this must be checked before tuple
+        return unpack_dbobj(item)
+    elif _IS_PACKED_SESSION(item):
+        return unpack_session(item)
+    elif dtype == tuple:
+        return tuple(_from_pickle_item(val) for val in item)
+    elif dtype == dict:
+        return dict((_from_pickle_item(key), _from_pickle_item(val)) for key, val in item.items())
+    elif dtype == defaultdict:
+        return defaultdict(
+            item.default_factory,
+            ((_from_pickle_item(key), _from_pickle_item(val)) for key, val in item.items()),
+        )
+    elif dtype == set:
+        return set(_from_pickle_item(val) for val in item)
+    elif dtype == OrderedDict:
+        return OrderedDict(
+            (_from_pickle_item(key), _from_pickle_item(val)) for key, val in item.items()
+        )
+    elif dtype == deque:
+        return deque((_from_pickle_item(val) for val in item), maxlen=item.maxlen)
+    elif hasattr(item, "__iter__"):
         try:
-            return pack_dbobj(item)
-        except TypeError:
-            return item
+            # we try to conserve the iterable class, if not convert to dict
+            try:
+                return item.__class__(
+                    (_from_pickle_item(key), _from_pickle_item(val)) for key, val in item.items()
+                )
+            except (AttributeError, TypeError):
+                return {_from_pickle_item(key): _from_pickle_item(val) for key, val in item.items()}
         except Exception:
-            logger.log_err(f"The object {item} of type {type(item)} could not be stored.")
-            raise
+            try:
+                # we try to conserve the iterable class if
+                # it accepts an iterator
+                return item.__class__(_from_pickle_item(val) for val in item)
+            except (AttributeError, TypeError):
+                return [_from_pickle_item(val) for val in item]
 
-    return process_item(data)
+    if hasattr(item, "__deserialize_dbobjs__"):
+        # this allows the object to custom-deserialize any embedded dbobjs
+        # that we previously serialized with __serialize_dbobjs__.
+        # use the dbunserialize helper in this module.
+        try:
+            item.__deserialize_dbobjs__()
+        except (TypeError, UnpicklingError):
+            # handle recoveries both of classes (requiring classmethods
+            # or instances. Unpickling errors can happen when re-loading the
+            # data from cache (because the hidden entity was already
+            # deserialized and stored back on the object, unpickling it
+            # again fails). TODO: Maybe one could avoid this retry in a
+            # more graceful way?
+            pass
+
+    return item
+
+
+def _from_pickle_tree(item, parent):
+    """Recursive processor, building a parent-tree from iterable data"""
+    dtype = type(item)
+    if dtype in (str, int, float, bool, bytes, SafeString):
+        return item
+    elif _IS_PACKED_DBOBJ(item):
+        # this must be checked before tuple
+        return unpack_dbobj(item)
+    elif dtype == tuple:
+        return tuple(_from_pickle_tree(val, item) for val in item)
+    elif dtype == list:
+        dat = _SaverList(_parent=parent)
+        dat._data.extend(_from_pickle_tree(val, dat) for val in item)
+        return dat
+    elif dtype == dict:
+        dat = _SaverDict(_parent=parent)
+        dat._data.update(
+            (_from_pickle_item(key), _from_pickle_tree(val, dat)) for key, val in item.items()
+        )
+        return dat
+    elif dtype == defaultdict:
+        dat = _SaverDefaultDict(item.default_factory, _parent=parent)
+        dat._data.update(
+            (_from_pickle_item(key), _from_pickle_tree(val, dat)) for key, val in item.items()
+        )
+        return dat
+    elif dtype == set:
+        dat = _SaverSet(_parent=parent)
+        dat._data.update(set(_from_pickle_tree(val, dat) for val in item))
+        return dat
+    elif dtype == OrderedDict:
+        dat = _SaverOrderedDict(_parent=parent)
+        dat._data.update(
+            (_from_pickle_item(key), _from_pickle_tree(val, dat)) for key, val in item.items()
+        )
+        return dat
+    elif dtype == deque:
+        dat = _SaverDeque(_parent=parent, maxlen=item.maxlen)
+        dat._data.extend(_from_pickle_item(val) for val in item)
+        return dat
+    elif hasattr(item, "__iter__"):
+        try:
+            # we try to conserve the iterable class, if not convert to dict
+            try:
+                dat = _SaverDict(_parent=parent, _class=item.__class__)
+                dat._data.update(
+                    (_from_pickle_item(key), _from_pickle_tree(val, dat))
+                    for key, val in item.items()
+                )
+                return dat
+            except (AttributeError, TypeError):
+                dat = _SaverDict(_parent=parent)
+                dat._data.update(
+                    (_from_pickle_item(key), _from_pickle_tree(val, dat))
+                    for key, val in item.items()
+                )
+                return dat
+        except Exception:
+            try:
+                # we try to conserve the iterable class if it
+                # accepts an iterator
+                dat = _SaverList(_parent=parent, _class=item.__class__)
+                dat._data.extend(_from_pickle_tree(val, dat) for val in item)
+                return dat
+            except (AttributeError, TypeError):
+                dat = _SaverList(_parent=parent)
+                dat._data.extend(_from_pickle_tree(val, dat) for val in item)
+                return dat
+
+    if hasattr(item, "__deserialize_dbobjs__"):
+        try:
+            item.__deserialize_dbobjs__()
+        except (TypeError, UnpicklingError):
+            pass
+
+    return item
 
 
 # @transaction.autocommit
@@ -762,177 +925,41 @@ def from_pickle(data, db_obj=None):
 
     """
 
-    def process_item(item):
-        """Recursive processor and identification of data"""
-        # breakpoint()
-        dtype = type(item)
-        if dtype in (str, int, float, bool, bytes, SafeString):
-            return item
-        elif _IS_PACKED_DBOBJ(item):
-            # this must be checked before tuple
-            return unpack_dbobj(item)
-        elif _IS_PACKED_SESSION(item):
-            return unpack_session(item)
-        elif dtype == tuple:
-            return tuple(process_item(val) for val in item)
-        elif dtype == dict:
-            return dict((process_item(key), process_item(val)) for key, val in item.items())
-        elif dtype == defaultdict:
-            return defaultdict(
-                item.default_factory,
-                ((process_item(key), process_item(val)) for key, val in item.items()),
-            )
-        elif dtype == set:
-            return set(process_item(val) for val in item)
-        elif dtype == OrderedDict:
-            return OrderedDict((process_item(key), process_item(val)) for key, val in item.items())
-        elif dtype == deque:
-            return deque((process_item(val) for val in item), maxlen=item.maxlen)
-        elif hasattr(item, "__iter__"):
-            try:
-                # we try to conserve the iterable class, if not convert to dict
-                try:
-                    return item.__class__(
-                        (process_item(key), process_item(val)) for key, val in item.items()
-                    )
-                except (AttributeError, TypeError):
-                    return {process_item(key): process_item(val) for key, val in item.items()}
-            except Exception:
-                try:
-                    # we try to conserve the iterable class if
-                    # it accepts an iterator
-                    return item.__class__(process_item(val) for val in item)
-                except (AttributeError, TypeError):
-                    return [process_item(val) for val in item]
-
-        if hasattr(item, "__deserialize_dbobjs__"):
-            # this allows the object to custom-deserialize any embedded dbobjs
-            # that we previously serialized with __serialize_dbobjs__.
-            # use the dbunserialize helper in this module.
-            try:
-                item.__deserialize_dbobjs__()
-            except (TypeError, UnpicklingError):
-                # handle recoveries both of classes (requiring classmethods
-                # or instances. Unpickling errors can happen when re-loading the
-                # data from cache (because the hidden entity was already
-                # deserialized and stored back on the object, unpickling it
-                # again fails). TODO: Maybe one could avoid this retry in a
-                # more graceful way?
-                pass
-
-        return item
-
-    def process_tree(item, parent):
-        """Recursive processor, building a parent-tree from iterable data"""
-        # breakpoint()
-        dtype = type(item)
-        if dtype in (str, int, float, bool, bytes, SafeString):
-            return item
-        elif _IS_PACKED_DBOBJ(item):
-            # this must be checked before tuple
-            return unpack_dbobj(item)
-        elif dtype == tuple:
-            return tuple(process_tree(val, item) for val in item)
-        elif dtype == list:
-            dat = _SaverList(_parent=parent)
-            dat._data.extend(process_tree(val, dat) for val in item)
-            return dat
-        elif dtype == dict:
-            dat = _SaverDict(_parent=parent)
-            dat._data.update(
-                (process_item(key), process_tree(val, dat)) for key, val in item.items()
-            )
-            return dat
-        elif dtype == defaultdict:
-            dat = _SaverDefaultDict(item.default_factory, _parent=parent)
-            dat._data.update(
-                (process_item(key), process_tree(val, dat)) for key, val in item.items()
-            )
-            return dat
-        elif dtype == set:
-            dat = _SaverSet(_parent=parent)
-            dat._data.update(set(process_tree(val, dat) for val in item))
-            return dat
-        elif dtype == OrderedDict:
-            dat = _SaverOrderedDict(_parent=parent)
-            dat._data.update(
-                (process_item(key), process_tree(val, dat)) for key, val in item.items()
-            )
-            return dat
-        elif dtype == deque:
-            dat = _SaverDeque(_parent=parent, maxlen=item.maxlen)
-            dat._data.extend(process_item(val) for val in item)
-            return dat
-        elif hasattr(item, "__iter__"):
-            try:
-                # we try to conserve the iterable class, if not convert to dict
-                try:
-                    dat = _SaverDict(_parent=parent, _class=item.__class__)
-                    dat._data.update(
-                        (process_item(key), process_tree(val, dat)) for key, val in item.items()
-                    )
-                    return dat
-                except (AttributeError, TypeError):
-                    dat = _SaverDict(_parent=parent)
-                    dat._data.update(
-                        (process_item(key), process_tree(val, dat)) for key, val in item.items()
-                    )
-                    return dat
-            except Exception:
-                try:
-                    # we try to conserve the iterable class if it
-                    # accepts an iterator
-                    dat = _SaverList(_parent=parent, _class=item.__class__)
-                    dat._data.extend(process_tree(val, dat) for val in item)
-                    return dat
-                except (AttributeError, TypeError):
-                    dat = _SaverList(_parent=parent)
-                    dat._data.extend(process_tree(val, dat) for val in item)
-                    return dat
-
-        if hasattr(item, "__deserialize_dbobjs__"):
-            try:
-                item.__deserialize_dbobjs__()
-            except (TypeError, UnpicklingError):
-                pass
-
-        return item
-
     if db_obj:
         # convert lists, dicts and sets to their Saved* counterparts. It
         # is only relevant if the "root" is an iterable of the right type.
         dtype = type(data)
         if dtype in (str, int, float, bool, bytes, SafeString, tuple):
-            return process_item(data)
+            return _from_pickle_item(data)
         elif dtype == list:
             dat = _SaverList(_db_obj=db_obj)
-            dat._data.extend(process_tree(val, dat) for val in data)
+            dat._data.extend(_from_pickle_tree(val, dat) for val in data)
             return dat
         elif dtype == dict:
             dat = _SaverDict(_db_obj=db_obj)
             dat._data.update(
-                (process_item(key), process_tree(val, dat)) for key, val in data.items()
+                (_from_pickle_item(key), _from_pickle_tree(val, dat)) for key, val in data.items()
             )
             return dat
         elif dtype == defaultdict:
             dat = _SaverDefaultDict(data.default_factory, _db_obj=db_obj)
             dat._data.update(
-                (process_item(key), process_tree(val, dat)) for key, val in data.items()
+                (_from_pickle_item(key), _from_pickle_tree(val, dat)) for key, val in data.items()
             )
             return dat
         elif dtype == set:
             dat = _SaverSet(_db_obj=db_obj)
-            dat._data.update(process_tree(val, dat) for val in data)
+            dat._data.update(_from_pickle_tree(val, dat) for val in data)
             return dat
         elif dtype == OrderedDict:
             dat = _SaverOrderedDict(_db_obj=db_obj)
             dat._data.update(
-                (process_item(key), process_tree(val, dat)) for key, val in data.items()
+                (_from_pickle_item(key), _from_pickle_tree(val, dat)) for key, val in data.items()
             )
             return dat
         elif dtype == deque:
             dat = _SaverDeque(_db_obj=db_obj, maxlen=data.maxlen)
-            dat._data.extend(process_item(val) for val in data)
+            dat._data.extend(_from_pickle_item(val) for val in data)
             return dat
         elif hasattr(data, "__iter__"):
             try:
@@ -940,13 +967,15 @@ def from_pickle(data, db_obj=None):
                 try:
                     dat = _SaverDict(_db_obj=db_obj, _class=data.__class__)
                     dat._data.update(
-                        (process_item(key), process_tree(val, dat)) for key, val in data.items()
+                        (_from_pickle_item(key), _from_pickle_tree(val, dat))
+                        for key, val in data.items()
                     )
                     return dat
                 except (AttributeError, TypeError):
                     dat = _SaverDict(_db_obj=db_obj)
                     dat._data.update(
-                        (process_item(key), process_tree(val, dat)) for key, val in data.items()
+                        (_from_pickle_item(key), _from_pickle_tree(val, dat))
+                        for key, val in data.items()
                     )
                     return dat
             except Exception:
@@ -954,15 +983,15 @@ def from_pickle(data, db_obj=None):
                     # we try to conserve the iterable class if it
                     # accepts an iterator
                     dat = _SaverList(_db_obj=db_obj, _class=data.__class__)
-                    dat._data.extend(process_tree(val, dat) for val in data)
+                    dat._data.extend(_from_pickle_tree(val, dat) for val in data)
                     return dat
 
                 except (AttributeError, TypeError):
                     dat = _SaverList(_db_obj=db_obj)
-                    dat._data.extend(process_tree(val, dat) for val in data)
+                    dat._data.extend(_from_pickle_tree(val, dat) for val in data)
                     return dat
 
-    return process_item(data)
+    return _from_pickle_item(data)
 
 
 def do_pickle(data):

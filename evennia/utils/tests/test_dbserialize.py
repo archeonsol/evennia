@@ -2,8 +2,11 @@
 Tests for dbserialize module
 """
 
+import gc
+import types
 from collections import defaultdict, deque
 from enum import IntFlag, auto
+from unittest import mock
 
 from django.test import TestCase
 from parameterized import parameterized
@@ -247,3 +250,85 @@ class DbObjWrappers(TestCase):
         self.assertEqual(self.dbobj1.db.dfdict["key"]["con1"].hidden_obj, self.dbobj2)
         self.assertEqual(self.dbobj1.db.dfdict["key"]["con2"].hidden_obj, self.dbobj2)
         self.assertEqual(self.dbobj1.db.dfdict["key"]["con2"].hidden_obj, self.dbobj2)
+
+
+def _closure_garbage(work, rounds=25):
+    """
+    Run ``work`` several times and return the functions and cells the cycle collector had to free.
+
+    A helper defined inside a function that calls itself holds a reference to itself,
+    so each call leaves a function and a cell for the collector. Only those are counted:
+    a nested list and the list that holds it also refer to each other, and that is meant.
+    """
+    work()
+    gc.collect()
+    gc.set_debug(gc.DEBUG_SAVEALL)
+    try:
+        gc.garbage.clear()
+        for _ in range(rounds):
+            work()
+        gc.collect()
+        found = list(gc.garbage)
+    finally:
+        gc.set_debug(0)
+        gc.garbage.clear()
+    return [obj for obj in found if isinstance(obj, (types.FunctionType, types.CellType))]
+
+
+_NESTED = {"a": [1, 2, {"b": (3, 4)}], "c": {"d": {"e": 5}}, "f": {6, 7}}
+
+
+class TestNoLeftoverClosures(TestCase):
+    """Converting a value to or from its stored form leaves nothing for the collector to free."""
+
+    def test_to_pickle(self):
+        self.assertEqual(_closure_garbage(lambda: dbserialize.to_pickle(_NESTED)), [])
+
+    def test_from_pickle_without_a_saver(self):
+        self.assertEqual(_closure_garbage(lambda: dbserialize.from_pickle(_NESTED)), [])
+
+    def test_from_pickle_into_savers(self):
+        db_obj = mock.Mock()
+        self.assertEqual(_closure_garbage(lambda: dbserialize.from_pickle(_NESTED, db_obj)), [])
+
+    def test_deserialize(self):
+        saver = dbserialize.from_pickle(_NESTED, mock.Mock())
+        self.assertEqual(_closure_garbage(lambda: dbserialize.deserialize(saver)), [])
+
+    def test_assigning_a_nested_value_into_a_saver(self):
+        saver = dbserialize.from_pickle({"x": 1}, mock.Mock())
+
+        def assign():
+            saver["y"] = {"p": [1, 2, {"q": 3}]}
+
+        self.assertEqual(_closure_garbage(assign), [])
+
+    def test_results_are_unchanged(self):
+        packed = dbserialize.to_pickle(_NESTED)
+        self.assertEqual(packed, _NESTED)
+        saver = dbserialize.from_pickle(packed, mock.Mock())
+        self.assertEqual(dbserialize.deserialize(saver), _NESTED)
+        self.assertIsInstance(saver["a"], dbserialize._SaverList)
+        self.assertIsInstance(saver["a"][2], dbserialize._SaverDict)
+        self.assertIsInstance(saver["c"]["d"], dbserialize._SaverDict)
+
+
+class TestAssignedDeque(TestCase):
+    """A deque put into a stored dict becomes a saver, so changing it is saved."""
+
+    def test_assigned_deque_is_converted_and_keeps_its_limit(self):
+        db_obj = mock.Mock()
+        saver = dbserialize.from_pickle({"x": 1}, db_obj)
+        saver["d"] = deque([1, 2], maxlen=3)
+        self.assertIsInstance(saver["d"], dbserialize._SaverDeque)
+        self.assertEqual(list(saver["d"]), [1, 2])
+        self.assertEqual(saver["d"].maxlen, 3)
+
+    def test_changing_the_assigned_deque_saves(self):
+        db_obj = mock.Mock()
+        saver = dbserialize.from_pickle({"x": 1}, db_obj)
+        saver["d"] = deque([1], maxlen=3)
+        db_obj.reset_mock()
+        saver["d"].append(2)
+        self.assertEqual(list(saver["d"]), [1, 2])
+        self.assertIs(db_obj.value, saver)
