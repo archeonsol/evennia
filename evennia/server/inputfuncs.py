@@ -661,6 +661,33 @@ supports_set = client_options
 # not gated on current usage.
 
 
+def _msdp_words(args):
+    """
+    The names an MSDP command asked for, as plain strings.
+
+    A client may send `LIST COMMANDS` or `LIST [COMMANDS, LISTS]`, and the array
+    arrives as a nested list. A table arrives as a dict and a lone number as an
+    int. Nested lists are flattened and anything that is not text is dropped, so an
+    odd argument cannot crash the command.
+
+    Args:
+        args (iterable): The arguments the protocol handed to the inputfunc.
+
+    Returns:
+        list[str]: Every string found, in order.
+
+    """
+    words = []
+    stack = list(reversed(list(args)))
+    while stack:
+        item = stack.pop()
+        if isinstance(item, str):
+            words.append(item)
+        elif isinstance(item, (list, tuple)):
+            stack.extend(reversed(item))
+    return words
+
+
 def msdp_list(session, *args, **kwargs):
     """
     MSDP LIST command
@@ -668,7 +695,7 @@ def msdp_list(session, *args, **kwargs):
     """
     from evennia.scripts.monitorhandler import MONITOR_HANDLER
 
-    args_lower = [arg.lower() for arg in args]
+    args_lower = [arg.lower() for arg in _msdp_words(args)]
     if "commands" in args_lower:
         inputfuncs = [
             key[5:] if key.startswith("msdp_") else key
@@ -724,7 +751,7 @@ def msdp_send(session, *args, **kwargs):
     MSDP SEND command
     """
     out = {}
-    for varname in args:
+    for varname in _msdp_words(args):
         if varname.lower() in _monitorable:
             out[varname] = _monitorable[varname.lower()]
     session.msg(send=((), out))

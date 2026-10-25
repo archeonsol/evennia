@@ -429,3 +429,48 @@ class TestClientOptionsScreenSize(unittest.TestCase):
         inputfuncs.client_options(session, screenwidth=10**9, screenheight=10**9)
         self.assertEqual(session.protocol_flags["SCREENWIDTH"], {0: 65535})
         self.assertEqual(session.protocol_flags["SCREENHEIGHT"], {0: 65535})
+
+
+class TestMsdpArguments(unittest.TestCase):
+    """MSDP commands take a name or an array of names, and survive odd arguments.
+
+    A telnet client that sends ``LIST [COMMANDS, LISTS]`` gives the inputfunc one
+    nested list, not two strings. ``msdp_list`` called ``.lower()`` on it and
+    died with an AttributeError in the server log.
+    """
+
+    def _session(self):
+        session = mock.MagicMock()
+        session.sessionhandler.get_inputfuncs.return_value = {"msdp_list": 1, "text": 2}
+        return session
+
+    def test_words_flatten_arrays_and_drop_what_is_not_text(self):
+        words = inputfuncs._msdp_words(["a", ["b", ["c"]], ("d",), {"x": 1}, 7, None, b"e"])
+        self.assertEqual(words, ["a", "b", "c", "d"])
+
+    def test_words_keep_order(self):
+        self.assertEqual(inputfuncs._msdp_words([["z", "y"], "x"]), ["z", "y", "x"])
+
+    def test_list_takes_a_single_name(self):
+        session = self._session()
+        inputfuncs.msdp_list(session, "COMMANDS")
+        session.msg.assert_called_once_with(commands=(["list", "text"], {}))
+
+    def test_list_takes_an_array_of_names(self):
+        session = self._session()
+        inputfuncs.msdp_list(session, ["COMMANDS", "LISTS"])
+        sent = [call.kwargs for call in session.msg.call_args_list]
+        self.assertEqual([next(iter(item)) for item in sent], ["commands", "lists"])
+
+    def test_list_ignores_a_table_and_a_number(self):
+        session = self._session()
+        inputfuncs.msdp_list(session, {"COMMANDS": "x"}, 5)
+        session.msg.assert_not_called()
+
+    def test_send_takes_an_array_of_names(self):
+        session = self._session()
+        name = next(iter(inputfuncs._monitorable))
+        inputfuncs.msdp_send(session, [name.upper()])
+        session.msg.assert_called_once_with(
+            send=((), {name.upper(): inputfuncs._monitorable[name]})
+        )
