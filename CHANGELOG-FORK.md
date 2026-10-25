@@ -25,6 +25,73 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.338: A list costs less to write, and the first log audit's engine fixes
+
+Writing a list or a dict to an Attribute walked the value twice, and both walks made a Python call for every number and string in it.
+A list of 25 wound rows holds about 1,800 values, a blow writes it once, and the two walks took about 3.7 ms of a blow that takes
+10 ms. Both walks now pass a plain value over with one type check and take about a third to a half of the time. The same release
+carries the fixes the 2026-10-25 production log audit found in the engine, and a console tab that stopped hammering the server.
+
+### Typeclasses
+
+- **`_is_json_safe` walks a list or a dict in a loop**
+  ([`jsonb_util.py`](evennia/typeclasses/jsonb_util.py)). A scalar in the loop is passed over by its type, with no call. The answer is
+  the one the recursive form gave: the same exact-type rule, the same refusal of a subclass of a scalar, of a key that is not a
+  string, of a tuple and of a set, and a structure that contains itself still fails by recursing too deep.
+- **A flush that cannot save a row names it** ([`jsonb_handler.py`](evennia/typeclasses/jsonb_handler.py)). The log line gives the
+  model, the key and the reason, at most once every ten minutes for a row that stays stuck. It used to read
+  `flush-attributes failed: 1 undurable rows` and never said which. A row deleted while its write was with the worker, and a worker
+  that lost to a newer flush of the same attribute, are no longer counted as failures: nothing is lost in either.
+
+### Utils
+
+- **`to_pickle` and `from_pickle` pass a plain value over with one check**
+  ([`dbserialize.py`](evennia/utils/dbserialize.py)). A key or a value whose type is `str`, `int`, `float`, `bool`, `bytes` or
+  `SafeString` goes into the new dict or list as it is. `to_pickle` reads a saver container through the list or dict it holds
+  (`_data`), where it went through the saver's `__iter__` and `__getitem__`. `from_pickle` has a branch for a list when it is given
+  no owner, and asks about a list or a dict before a packed object.
+- **The serialization helpers are module-level functions** (`_convert_tree`, `_to_pickle_item`, `_from_pickle_item`,
+  `_from_pickle_tree`). A function that calls itself from inside another function holds a reference to itself, so each call left a
+  function, a cell and a tuple for the cycle collector, two or three times for one attribute write. Reading and writing one dict
+  attribute leaves 4 objects, not 10; assigning one stored dict and flushing, 13, not 25. The fast paths above are in these
+  functions.
+- **A deque assigned into a stored dict is saved.** The converter built a saver deque and then returned the plain one, so a later
+  change to it was lost.
+- **`ENGINE_GC_CENSUS_TOP`** (default 0, off) makes the scheduled and overdue cleans count what they would free by type and log the
+  commonest kinds, then free it with a second full collection. The second pass makes the pause about twice as long, so it is for one
+  thaw and off again.
+
+### Actions
+
+- **A provider an earlier rule deleted takes no report rule** ([`engine.py`](evennia/actions/engine.py)). `go light` deletes the
+  character who typed it, and the report phase then ran that character's rules against a deleted row: three tracebacks a `go light`
+  on production. `_run_phase` now skips a provider whose pk an earlier rule cleared.
+
+### Server
+
+- **MSDP `LIST` and `SEND` take an array of names** ([`inputfuncs.py`](evennia/server/inputfuncs.py)). A client that sends
+  `LIST [COMMANDS, LISTS]` gives the inputfunc one nested list, which `msdp_list` called `.lower()` on and logged an
+  `AttributeError`. Nested lists are flattened and anything that is not text is dropped.
+
+### Console
+
+- **A console tab with a dead login stops polling.** The Sessions panel asked for its list of watches every five seconds and ignored
+  every failure, so a tab left open until its login or CSRF cookie lapsed got a 403 on every request, thousands an hour, and a host
+  intrusion ban read that as brute forcing and banned the operator's address. The panel now stops polling on a 401 or 403. Other
+  failures, such as a restart, still retry.
+
+### Tests
+
+- `test_dbserialize_plain` keeps the old walks as they were and holds the new ones to them over made-up structures of every kind
+  the serializer knows, and checks that saver containers link to their parents and to the Attribute, that an edit deep in the tree
+  writes back, and that a database object inside a structure still comes back. `test_jsonb_util` does the same for the JSON check.
+  The cycle fix, the flush naming, the provider rule, MSDP and the census each have tests next to the code.
+
+### Migration notes
+
+None. Every value stored and read is the same as before, and no signature changed. `ENGINE_GC_CENSUS_TOP` is a new setting that
+defaults to off.
+
 ## 6.0.0+underspire.337: A log file that fails to rotate keeps logging
 
 A Server log rotation failed, and Twisted had already closed the file before the rename. Every
