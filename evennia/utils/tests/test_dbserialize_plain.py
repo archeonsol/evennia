@@ -232,7 +232,11 @@ def old_convert_mutables(owner, data):
             dat._data.update((key, process_tree(val, dat)) for key, val in item.items())
             return dat
         elif dtype == deque:
+            # The walk before the cycle fix built this saver and then fell through to return the plain deque, so a change to it
+            # was not saved. It is filled and returned now, as ``_convert_tree`` does.
             dat = _SaverDeque(_parent=parent, maxlen=item.maxlen)
+            dat._data.extend(process_tree(val, dat) for val in item)
+            return dat
         elif dtype == set:
             dat = _SaverSet(_parent=parent)
             dat._data.update(process_tree(val, dat) for val in item)

@@ -506,6 +506,9 @@ class TestCensus(_PolicyTestCase):
     def setUp(self):
         super().setUp()
         gc_policy._state.managed = True
+        # A thaw frees what an earlier test left in the frozen set as well, and in a long run that crowds the cycles
+        # counted here out of the commonest kinds. Start from a heap with nothing frozen.
+        gc.unfreeze()
         gc.collect()
 
     def _die(self, count):
