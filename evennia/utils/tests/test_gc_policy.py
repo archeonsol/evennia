@@ -493,6 +493,90 @@ class TestRefreeze(_PolicyTestCase):
         self.assertIn("in 400ms", info.call_args.args[0])
 
 
+class _Cycle:
+    """An object that only a cycle collection can free."""
+
+    def __init__(self):
+        self.me = self
+
+
+class TestCensus(_PolicyTestCase):
+    """A backstop clean can name what it freed, once, when asked to."""
+
+    def setUp(self):
+        super().setUp()
+        gc_policy._state.managed = True
+        gc.collect()
+
+    def _die(self, count):
+        for _ in range(count):
+            _Cycle()
+
+    def _census_lines(self, info):
+        return [call.args[0] for call in info.call_args_list if "what was freed" in call.args[0]]
+
+    @override_settings(ENGINE_GC_CENSUS_TOP=3)
+    def test_a_backstop_names_what_it_freed(self):
+        self._die(300)
+        with patch.object(gc_policy.logger, "log_info") as info:
+            gc_policy.deep_clean("overdue")
+
+        lines = self._census_lines(info)
+        self.assertEqual(len(lines), 1)
+        self.assertIn(f"{_Cycle.__module__}._Cycle 300", lines[0])
+
+    @override_settings(ENGINE_GC_CENSUS_TOP=1)
+    def test_it_names_only_as_many_kinds_as_asked(self):
+        self._die(2000)
+        with patch.object(gc_policy.logger, "log_info") as info:
+            gc_policy.deep_clean("scheduled")
+
+        kinds = self._census_lines(info)[0].split("by type: ")[1]
+        self.assertEqual(kinds.count(","), 0)
+
+    @override_settings(ENGINE_GC_CENSUS_TOP=3)
+    def test_what_it_counted_is_freed_and_the_debug_flags_come_back(self):
+        flags = gc.get_debug()
+        cycle = _Cycle()
+        ref = weakref.ref(cycle)
+        del cycle
+        gc_policy.deep_clean("overdue")
+
+        self.assertIsNone(ref())
+        self.assertEqual(gc.garbage, [])
+        self.assertEqual(gc.get_debug(), flags)
+
+    @override_settings(ENGINE_GC_CENSUS_TOP=3)
+    def test_the_count_comes_back_unchanged(self):
+        self._die(200)
+        result = gc_policy.deep_clean("overdue")
+
+        self.assertGreaterEqual(result.collected, 200)
+
+    @override_settings(ENGINE_GC_CENSUS_TOP=3)
+    def test_a_growth_clean_is_not_counted(self):
+        self._die(50)
+        with patch.object(gc_policy.logger, "log_info") as info:
+            gc_policy.deep_clean("growth")
+
+        self.assertEqual(self._census_lines(info), [])
+        self.assertEqual(gc.garbage, [])
+
+    def test_it_is_off_by_default(self):
+        self._die(50)
+        with patch.object(gc_policy.logger, "log_info") as info:
+            gc_policy.deep_clean("overdue")
+
+        self.assertEqual(self._census_lines(info), [])
+
+    @override_settings(ENGINE_GC_CENSUS_TOP="many")
+    def test_a_bad_setting_means_off(self):
+        with patch.object(gc_policy.logger, "log_info") as info:
+            gc_policy.deep_clean("overdue")
+
+        self.assertEqual(self._census_lines(info), [])
+
+
 class _RecordedCollectorCase(_PolicyTestCase):
     """Collector entry points replaced by recorders, so a test reads the order they ran in."""
 

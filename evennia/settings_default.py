@@ -945,6 +945,11 @@ ENGINE_GC_REFREEZE = False
 # risen this many times above where the last thaw left them. A floor that climbs is live
 # growth or frozen garbage, and a thaw tells the two apart. 0 (or 1) = by schedule only.
 ENGINE_GC_THAW_FLOOR_FACTOR = 1.5
+# Name what a backstop clean freed: when above 0, the "scheduled" and "overdue" cleans
+# log this many of the most common kinds of garbage and their counts. It costs a second
+# full collection inside the same pause (about twice as long), so switch it on to learn
+# what the garbage is, then switch it off. 0 = off.
+ENGINE_GC_CENSUS_TOP = 0
 # Log any single collection that pauses the process at least this long (ms; 0 = off).
 ENGINE_GC_PAUSE_WARN_MS = 50
 # Attach trace_id to each command for structured logs (evennia.utils.command_trace).

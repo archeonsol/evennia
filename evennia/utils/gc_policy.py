@@ -80,7 +80,7 @@ from __future__ import annotations
 import gc
 import sys
 import time
-from collections import deque
+from collections import Counter, deque
 from dataclasses import dataclass
 
 from django.conf import settings
@@ -446,6 +446,46 @@ def _allocated_blocks():
     return sys.getallocatedblocks()
 
 
+def _census_size():
+    """How many kinds of garbage a backstop clean should name, from ``ENGINE_GC_CENSUS_TOP`` (0 = none)."""
+    try:
+        return max(0, int(getattr(settings, "ENGINE_GC_CENSUS_TOP", 0) or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _collect_and_count(top):
+    """
+    Run one full collection and count what it freed, by type.
+
+    The collector keeps what it would have freed in ``gc.garbage`` while the save-all
+    debug flag is set, so the objects can be counted. They still refer to each other,
+    so emptying the list frees nothing: a second full collection does that, and the
+    pause is about twice as long. Meant to be switched on for one backstop clean to
+    learn what the garbage is, then off again.
+
+    Args:
+        top (int): How many kinds to report.
+
+    Returns:
+        tuple: The number of objects the first collection found, and the ``top`` most
+        common kinds as ``(name, count)`` pairs.
+
+    """
+    previous = gc.get_debug()
+    gc.set_debug(previous | gc.DEBUG_SAVEALL)
+    try:
+        collected = _intentional_collect()
+        kinds = Counter(
+            f"{type(obj).__module__}.{type(obj).__qualname__}" for obj in gc.garbage
+        ).most_common(top)
+    finally:
+        gc.set_debug(previous)
+        del gc.garbage[:]
+    _intentional_collect()
+    return collected, kinds
+
+
 def deep_clean(reason="manual"):
     """Run one full collection and report what it cost.
 
@@ -465,11 +505,15 @@ def deep_clean(reason="manual"):
     # Only the backstops look at the frozen heap, so a cycle frozen alive and dead
     # since is freed at the next one rather than never.
     thaw = refreeze and reason in _THAW_REASONS
+    census_top = _census_size() if reason in _THAW_REASONS else 0
     rss_before, blocks_before = _rss_mb(), _allocated_blocks()
     started = _now()
     if thaw:
         gc.unfreeze()
-    collected = _intentional_collect()
+    if census_top:
+        collected, kinds = _collect_and_count(census_top)
+    else:
+        collected, kinds = _intentional_collect(), None
     if refreeze:
         gc.freeze()
     if thaw:
@@ -502,6 +546,12 @@ def deep_clean(reason="manual"):
         f"in {seconds * 1000:.0f}ms (allocated blocks {blocks_before} -> {blocks_after}"
         f"{size}{frozen})."
     )
+    if kinds:
+        logger.log_info(
+            f"gc deep clean ({reason}): what was freed, by type: "
+            + ", ".join(f"{name} {count}" for name, count in kinds)
+            + "."
+        )
     label = reason if reason in _RECLAIM_REASONS else "manual"
     prometheus_metrics.best_effort(
         "gc reclaim", prometheus_metrics.record_gc_reclaim, label, collected
