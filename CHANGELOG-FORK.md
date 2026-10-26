@@ -25,6 +25,78 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.342: A bulk patch refreshes the keys it wrote and not the whole row's cache, and a refreeze can wait for the heap to grow
+
+A game that patches the same rows every few seconds with `BulkTickContext.apply` (a vitals heartbeat that sets three scalars on each
+Character) used to throw away every cached Attribute of the row on each patch. A cached dict or list Attribute and its tree of Saver
+proxies refer to one another, so each one thrown away is a cycle that only a full collection frees, and with `ENGINE_GC_REFREEZE` on, a
+cycle that was alive at a growth clean is frozen and a frozen cycle that dies stays until a thaw. On production (2026-10-26, about 45
+sessions) that was 11 trees a second dropped and 48 Attributes built again a second, and a process that is restarted every few hours
+never reached the thaw: a thaw run by hand 57 minutes in freed 218,931 objects, and the two the logs still held freed 4.6M and 4.0M
+blocks. A game that does not patch rows in bulk, or that leaves `ENGINE_GC_REFREEZE` off, sees no difference.
+
+### Engine
+
+- **`BulkTickContext.apply` refreshes the keys it wrote**
+  ([`bulk_tick.py`](evennia/utils/bulk_tick.py)). Where it called `_sync_live_backends(state, invalidate=False)` it calls
+  `jsonb_handler._refresh_live_backends(state, keys, category=None)`
+  ([`jsonb_handler.py`](evennia/typeclasses/jsonb_handler.py)). That drops only the cached Attributes of the patched keys, in the
+  handlers of that category (a nick on the same row keeps its cache), marks their caches incomplete as any single write does, and brings
+  the model's copy of the document up to date for those keys. The old proxy of a patched key is still stale (its path generation was
+  bumped by `apply`), and the proxy of any other key still writes. `_sync_live_backends` is unchanged and is still the answer to a
+  change nobody can describe: a merge with another writer, a recovery, a reconcile of pending state.
+- **`ENGINE_GC_REFREEZE_GROWTH_BLOCKS`** ([`gc_policy.py`](evennia/utils/gc_policy.py),
+  [`settings_default.py`](evennia/settings_default.py)). The default, 0, is the old behavior: every growth or requested clean freezes its
+  survivors. Above 0, such a clean freezes only once `sys.getallocatedblocks()` has grown by that many since the last freeze, and the
+  clean that does not says `survivors not frozen yet` in its log line. The cleans in between mark the unfrozen survivors again, which
+  the setting bounds (150,000 blocks is about 60,000 objects and 50 to 100 ms), and a cycle that dies in the meantime is freed by the
+  next clean as any unfrozen cycle is. The backstop thaw (`scheduled`, `overdue`) always freezes, and the boot freeze and every freeze
+  record the heap's size as the floor to measure the next one from. A heap that this policy never froze is frozen by its first clean.
+- **Two counters** ([`prometheus_metrics.py`](evennia/server/prometheus_metrics.py)).
+  `evennia_attribute_cache_dropped_total` counts the Attribute objects a whole-cache reset threw away (counted in
+  `IAttributeBackend.reset_cache`), and `evennia_attribute_rebuilt_total` counts the Attribute objects built from a row's document
+  (counted in `JsonbAttributeBackend._make_attr`). Their rate against the flush rate is how a hot path that resets a whole cache shows
+  itself; before this change the dropped counter ran at about 46 a second on the live game.
+
+### Migration notes
+
+None required. A game that wants the policy sets `ENGINE_GC_REFREEZE_GROWTH_BLOCKS` (the underspire game sets 150000 with
+`ENGINE_GC_REFREEZE = True`). A game that patches a row's document itself and then called `_sync_live_backends` can call
+`_refresh_live_backends` with the keys it wrote; both are private.
+
+### Not changed
+
+A tree dropped for any other reason (a merge at a flush, `reset_cache()` called by a game, an eviction) is still a cycle: the Saver's
+`_parent` and `_db_obj` are strong references, so the tree and its Attribute are freed by a full collection and not by reference
+counting. Making them weak would turn a proxy held across a cache drop into a stale one that raises, where today it still writes when
+nothing changed, so it waits for a count of how often a game does that. The thaw schedule (12 hours after the last, only when no one is
+connected) is unchanged, and so is every instance's cycle with its handlers.
+
+### Performance
+
+Read from production on 2026-10-26, before this change: a counter around the Attribute cache for 750 s counted 36,177 Attribute objects
+built and 8,528 saver trees dropped, 99.7 percent of them a Character's and 99.7 percent through `BulkTickContext.apply` from the vitals
+heartbeat. One thaw 57 minutes into a process (7.09M blocks, 1.86M frozen objects) paused the game 1.198 s and freed 218,931 objects,
+270,055 blocks, about 27 MB an hour of them. Against the real collector (`TestRefreezeStrandsLess`), of 3,000 cycles that live 30 seconds
+with a clean every 45, 1,955 (65 percent) are stranded when every clean freezes and none when the freeze waits for growth. Fifty
+patches of a Character with eight cached dict Attributes leave 2,007 dead Attribute and Saver objects through the old whole-row sync and
+none through this refresh.
+
+### Tests
+
+- `evennia/utils/tests/test_bulk_tick.py`, `TestApplyRefreshesOnlyWhatItPatched` (10): an Attribute that was not patched keeps its cached
+  object, the patched key is read again from the document, no whole-cache reset happens, the old proxy of the patched key is stale and
+  the proxy of another key still writes, the cache is marked incomplete and `all()` still lists everything, a nick on the row keeps its
+  cache, the model's copy of the document follows, fifty patches leave no dead Attribute or Saver object, and a negative control that
+  shows the count sees the old way's garbage. Run against the `.341` code, four of them fail.
+- `evennia/typeclasses/tests/test_attribute_metrics.py`, `TestCacheChurnMetrics` (3).
+- `evennia/utils/tests/test_gc_policy.py`: `TestRefreezeWaitsForGrowth` (6), a test against the real collector that a cycle alive at a
+  clean is freed by a later one when the freeze waits, and `TestRefreezeStrandsLess` (2), the ratchet quoted above.
+- `evennia.typeclasses`, `evennia.utils.idmapper`, `evennia.utils.tests.test_bulk_tick` and `test_gc_policy`: 538 tests; and
+  `evennia.objects`, `evennia.accounts`, `evennia.scripts` and `evennia.server.tests`: 857 tests, 28 skipped. The one that fails is
+  `TestRefreeze.test_it_is_off_unless_asked_for`, which expects the engine's default for `ENGINE_GC_REFREEZE` and fails on the unmodified
+  engine too when the suite runs under a game whose settings turn it on.
+
 ## 6.0.0+underspire.341: Sockets that arrive already authenticated log in one loop turn each
 
 When a Portal outlives a Server restart, or restarts with it and its clients reconnect while the
