@@ -35,8 +35,24 @@ class SessionReconciler:
         self.portal_id = portal_id
         self.records = {sid: deepcopy(data) for sid, data in snapshot.items()}
 
+    @classmethod
+    def _arrives_authenticated(cls, data):
+        """Whether the socket comes with a login the Server will complete itself."""
+        admitted = cls.connection_data(data)
+        return bool(admitted["logged_in"] and admitted["uid"])
+
+    def _is_new_socket(self, sid, data):
+        """Whether ``data`` is a socket this Server has not admitted yet."""
+        previous = self.records.get(sid)
+        return not (previous and previous["_socket_id"] == data["_socket_id"])
+
     def reconcile(self, snapshot, portal_id):
-        """Apply current membership while preserving Server-owned live state."""
+        """Apply current membership while preserving Server-owned live state.
+
+        Several sockets that arrive already authenticated (the Portal kept them
+        through a restart) are admitted with the dear half of their login left for
+        a loop turn each. Logged in together they held the reactor for 2.9 s.
+        """
         if portal_id != self.portal_id:
             for session in list(self.handler.values()):
                 self.handler.portal_disconnect(session)
@@ -47,12 +63,18 @@ class SessionReconciler:
             current = snapshot.get(sid)
             if current is None or (previous and previous["_socket_id"] != current["_socket_id"]):
                 self.handler.portal_disconnect(session)
+        arriving = [
+            data
+            for sid, data in snapshot.items()
+            if self._is_new_socket(sid, data) and self._arrives_authenticated(data)
+        ]
+        admit = {"defer_login": True} if len(arriving) > 1 else {}
         for sid, data in snapshot.items():
             previous = self.records.get(sid)
-            same_socket = previous and previous["_socket_id"] == data["_socket_id"]
+            same_socket = not self._is_new_socket(sid, data)
             session = self.handler.get(sid)
             if not same_socket:
-                self.handler.portal_connect(self.connection_data(data))
+                self.handler.portal_connect(self.connection_data(data), **admit)
                 session = self.handler.get(sid)
             elif session is not None:
                 for key in _METADATA:

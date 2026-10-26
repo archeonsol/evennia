@@ -22,7 +22,7 @@ class RecoveryHandler(dict):
         self.connected = []
         self.restored = []
 
-    def portal_connect(self, data):
+    def portal_connect(self, data, **kwargs):
         """Create the runtime object at the normal connection boundary."""
         self.connected.append(deepcopy(data))
         self[data["sessid"]] = SimpleNamespace(**data)

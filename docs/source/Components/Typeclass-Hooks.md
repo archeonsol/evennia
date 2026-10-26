@@ -727,6 +727,16 @@ Notes:
   separately overridden on `DefaultAccount` (accounts.py:1590) as a
   stub. Sharing the name is intentional (it's the same idmapper
   hook, called from login because the account may be cold).
+- `login` is two halves, `_login_begin` (down to the portal AMP sync) and
+  `_login_finish` (`at_post_login` and the signals). Run together they are the
+  flow above. When the bus admits two or more sockets that arrive already
+  authenticated (a Portal that outlived a Server restart), `portal_connect(...,
+  defer_login=True)` runs the first half in the admitting call and each second half
+  in a loop callback of its own, so twenty players do not hold the reactor for
+  three seconds. Until its second half runs the session is the account's and
+  logged in, with no puppet; input that reaches it is held (at most 200 inputs)
+  and handed to `session.data_in` in order afterwards. A second half that raises is
+  logged and its session is disconnected.
 
 `at_failed_login(session)` fires from the auth path
 (accounts.py:833) when credentials are rejected; it does not feed

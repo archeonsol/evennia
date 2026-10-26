@@ -70,7 +70,7 @@ async def _run_peer(role, connection, url, prefix):
             session.menu = object()
             self[session.sessid] = session
 
-        def portal_connect(self, data):
+        def portal_connect(self, data, **kwargs):
             """Record normal new-socket admission."""
             counters["connect"] += 1
             self.create(data)

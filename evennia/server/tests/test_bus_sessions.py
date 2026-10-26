@@ -10,7 +10,7 @@ from evennia.server.bus_sessions import SessionReconciler
 class Handler(dict):
     """Minimal session creation and cleanup boundary."""
 
-    def portal_connect(self, data):
+    def portal_connect(self, data, **kwargs):
         """Create a session from protocol-authenticated data."""
         self[data["sessid"]] = SimpleNamespace(**data)
 

@@ -18,6 +18,7 @@ import os
 import time
 import traceback
 from codecs import decode as codecs_decode
+from collections import deque
 
 from django.conf import settings
 from django.utils.translation import gettext as _
@@ -105,6 +106,10 @@ def _output_frame_key(value, _depth=0):
         return ("float", repr(value))
     return (type(value).__name__, value)
 
+
+#: How many inputs a session whose login is waiting for its turn may have held for it.
+#: The wait is a few loop turns; a client that sends more than this meanwhile is not typing.
+_MAX_HELD_INPUT = 200
 
 #: An outbuf flush turn at least this long (seconds) logs its slowest sends.
 _SLOW_OUTBUF_TURN = 0.1
@@ -495,6 +500,18 @@ class ServerSessionHandler(SessionHandler):
         # bot connect requests awaiting confirmed publication (see
         # retry_pending_bot_sessions)
         self._pending_bot_sessions = {}
+        # logins whose second half waits for a loop turn of its own (see
+        # portal_connect): sessid -> (session, input held until it runs), and the
+        # order they run in
+        self._restoring = {}
+        self._restore_queue = deque()
+        self._restore_scheduled = False
+
+    def clear(self):
+        """Forget every session, and every login still waiting for its turn."""
+        super().clear()
+        self._restoring.clear()
+        self._restore_queue.clear()
 
     def _run_cmd_login(self, session):
         """
@@ -505,7 +522,7 @@ class ServerSessionHandler(SessionHandler):
         if not session.logged_in:
             self.data_in(session, text=[[CMD_LOGINSTART], {}])
 
-    def portal_connect(self, portalsessiondata):
+    def portal_connect(self, portalsessiondata, *, defer_login=False):
         """
         Called by Portal when a new session has connected.
         Creates a new, unlogged-in game session.
@@ -514,6 +531,13 @@ class ServerSessionHandler(SessionHandler):
             portalsessiondata (dict): a dictionary of all property:value
                 keys defining the session and which is marked to be
                 synced.
+            defer_login (bool, optional): For a session that arrives already
+                authenticated, do the first half of the login now and the second
+                half (`account.at_post_login`, which puppets the character and
+                shows the room) in a loop turn of its own. The bus asks this when
+                it admits several such sessions at once: one callback that logs in
+                twenty players held the reactor for 2.9 s on production. Input that
+                reaches the session meanwhile is held and handed to it afterwards.
 
         """
         delayed_import()
@@ -534,7 +558,12 @@ class ServerSessionHandler(SessionHandler):
             account = _AccountDB.objects.get_account_from_uid(sess.uid)
             if account:
                 # this will set account.is_connected too
-                self.login(sess, account, force=True)
+                if defer_login:
+                    nsess = self._login_begin(sess, account, force=True)
+                    if nsess is not None:
+                        self._defer_login(sess, account, nsess)
+                else:
+                    self.login(sess, account, force=True)
                 return
             else:
                 sess.logged_in = False
@@ -753,9 +782,26 @@ class ServerSessionHandler(SessionHandler):
                 faking login without any AMP being actually active.
 
         """
+        nsess = self._login_begin(session, account, force=force, testmode=testmode)
+        if nsess is not None:
+            self._login_finish(session, account, nsess)
+
+    def _login_begin(self, session, account, *, force=False, testmode=False):
+        """
+        First half of a login: the session becomes the account's, authenticated.
+
+        Everything that has to be true for the session to be counted as logged in. The
+        second half (`_login_finish`) puppets the character and shows the room, which
+        is the dear part; `login` runs both back to back.
+
+        Returns:
+            int or None: How many sessions the account has, this one included, or
+                None when the login did not go on (already logged in, or vetoed).
+
+        """
         if session.logged_in and not force:
             # don't log in a session that is already logged in.
-            return
+            return None
 
         account.is_connected = True
 
@@ -782,7 +828,7 @@ class ServerSessionHandler(SessionHandler):
             # If this was the only session for the account, undo is_connected.
             if not self.sessions_from_account(account):
                 account.is_connected = False
-            return
+            return None
 
         # Check if this is the first time the *account* logs in. Fires AFTER
         # at_pre_login so a vetoed login does not consume the FIRST_LOGIN flag.
@@ -806,10 +852,76 @@ class ServerSessionHandler(SessionHandler):
                 operation=amp.SLOGIN,
                 sessiondata={"logged_in": True, "uid": session.uid},
             )
+        return nsess
+
+    def _login_finish(self, session, account, nsess):
+        """Second half of a login: the account's own hook, then the signals."""
         account.at_post_login(session=session)
         if nsess < 2:
             SIGNAL_ACCOUNT_POST_FIRST_LOGIN.send(sender=account, session=session)
         SIGNAL_ACCOUNT_POST_LOGIN.send(sender=account, session=session)
+
+    def _defer_login(self, session, account, nsess):
+        """
+        Hold the second half of a login until its session's own loop turn.
+
+        The session is registered and authenticated, so it counts as the account's and
+        the Portal's view of it is true. Input for it is held (see `data_in`) so that no
+        command reaches it before the character is puppeted.
+        """
+        self._restoring[session.sessid] = (session, [])
+        self._restore_queue.append((session, account, nsess))
+        self._schedule_restore()
+
+    def _schedule_restore(self):
+        """Ask the loop for one callback to run the next waiting login."""
+        if self._restore_scheduled or not self._restore_queue:
+            return
+        self._restore_scheduled = True
+        from evennia.utils import clock
+
+        clock.call_later(0, self._restore_next, _task_kind="transport")
+
+    def _restore_next(self):
+        """Run the next waiting login, then ask for a callback for the one after."""
+        self._restore_scheduled = False
+        try:
+            while self._restore_queue:
+                session, account, nsess = self._restore_queue.popleft()
+                held = self._restoring.get(session.sessid)
+                if held is None or held[0] is not session:
+                    continue  # it went while it waited
+                if self.get(session.sessid) is not session:
+                    continue
+                self._restore_finish(session, account, nsess)
+                break
+        finally:
+            self._schedule_restore()
+
+    def _restore_finish(self, session, account, nsess):
+        """Finish one deferred login and hand the session the input held for it."""
+        try:
+            self._login_finish(session, account, nsess)
+        except Exception:
+            log_trace(f"session {session.sessid}: the second half of its login failed")
+            self._forget_restore(session)
+            self.disconnect(session, reason="Login failed.")
+            return
+        entry = self._restoring.pop(session.sessid, None)
+        held = entry[1] if entry is not None and entry[0] is session else []
+        for kwargs in held:
+            if self.get(session.sessid) is not session:
+                break
+            try:
+                session.data_in(**kwargs)
+            except Exception:
+                log_trace(f"session {session.sessid}: input held during its login failed")
+
+    def _forget_restore(self, session):
+        """Drop the wait of a session that is going, so its input is not held for good."""
+        held = self._restoring.get(session.sessid)
+        if held is not None and held[0] is session:
+            del self._restoring[session.sessid]
 
     def disconnect(self, session, reason="", sync_portal=True):
         """
@@ -827,6 +939,7 @@ class ServerSessionHandler(SessionHandler):
         session = self.get(session.sessid)
         if not session:
             return
+        self._forget_restore(session)
 
         # A watch outlives nothing. Ending it here writes its closing audit row
         # while the session is still around to be named in it.
@@ -1306,6 +1419,12 @@ class ServerSessionHandler(SessionHandler):
         if _watch.WATCHES:
             _watch.tap(session, "in", kwargs)
         if session:
+            waiting = self._restoring.get(session.sessid)
+            if waiting is not None and waiting[0] is session:
+                # Its login is not finished, so there is no character to act on yet.
+                if len(waiting[1]) < _MAX_HELD_INPUT:
+                    waiting[1].append(kwargs)
+                return
             session.data_in(**kwargs)
 
     def call_inputfuncs(self, session, **kwargs):
