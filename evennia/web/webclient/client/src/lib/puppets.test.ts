@@ -209,6 +209,55 @@ describe("puppet scene protocol", () => {
     expect(scenes.feeds.get("71")!.unread).toBe(0);
   });
 
+  it("watching several terminals keeps every one of them quiet", () => {
+    const request = vi.fn();
+    const scenes = new PuppetScenes(request);
+    scenes.apply(feedEnv(71, "Bob waves."));
+    scenes.apply(feedEnv(72, "Ann waves."));
+    scenes.apply(feedEnv(73, "Cy waves."));
+
+    scenes.setWatching([71, 72]);
+
+    expect(scenes.feeds.get("71")!.unread).toBe(0);
+    expect(scenes.feeds.get("72")!.unread).toBe(0);
+    expect(scenes.feeds.get("73")!.unread).toBe(1);
+    expect(request).toHaveBeenCalledTimes(2);
+
+    scenes.apply(feedEnv(71, "Bob leaves.", 2));
+    scenes.apply(feedEnv(72, "Ann leaves.", 2));
+    scenes.apply(feedEnv(73, "Cy leaves.", 2));
+    expect(scenes.feeds.get("71")!.unread).toBe(0);
+    expect(scenes.feeds.get("72")!.unread).toBe(0);
+    expect(scenes.feeds.get("73")!.unread).toBe(2);
+  });
+
+  it("a terminal that stops being watched badges again, and one already watched is not resynced twice", () => {
+    const request = vi.fn();
+    const scenes = new PuppetScenes(request);
+    scenes.apply(feedEnv(71, "Bob waves."));
+
+    scenes.setWatching([71]);
+    scenes.setWatching([71]);
+    expect(request).toHaveBeenCalledTimes(1);
+
+    scenes.setWatching([]);
+    scenes.apply(feedEnv(71, "Bob leaves.", 2));
+    expect(scenes.feeds.get("71")!.unread).toBe(1);
+  });
+
+  it("addLocal puts a line in a terminal without badging it, and ignores an unknown puppet", () => {
+    const scenes = new PuppetScenes();
+    scenes.apply(snapshot(71, 2, 1));
+
+    scenes.addLocal(71, "> look");
+    scenes.addLocal(99, "> look");
+
+    const feed = scenes.feeds.get("71")!;
+    expect(feed.feed.map((line) => line.body)).toEqual(["> look"]);
+    expect(feed.unread).toBe(0);
+    expect(scenes.feeds.has("99")).toBe(false);
+  });
+
   it("clearFeed wipes scrollback but keeps the puppet and its scene", () => {
     const scenes = new PuppetScenes();
     scenes.apply(snapshot(71, 2, 1));

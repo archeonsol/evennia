@@ -12,6 +12,7 @@ import { help } from "./help.svelte";
 import { lore } from "./lore.svelte";
 import { notify } from "./notify.svelte";
 import { puppets } from "./puppets.svelte";
+import { puppetLayout } from "./puppetLayout.svelte";
 import { routing } from "./routing.svelte";
 import { NOTES, noteHtml, savedLog } from "./savedlog.svelte";
 import { scene } from "./scene.svelte";
@@ -35,6 +36,7 @@ function forget(keepLog = false): void {
   commands.useAccount(null);
   compose.useAccount(null);
   puppets.clear();
+  puppetLayout.useAccount(null);
   scene.reset();
   help.clear();
   lore.hide(true);
@@ -111,6 +113,7 @@ export function handshake(resumed: boolean, account?: number | null): void {
 export function roleArrived(): void {
   commands.useAccount(chat.account);
   compose.useAccount(chat.account);
+  puppetLayout.useAccount(chat.account);
   if (chat.account != null) {
     signedIn = true;
     held = chat.account;

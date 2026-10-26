@@ -84,10 +84,19 @@ class Commands {
       session.append(`<span class="cmd-echo">&gt; ${safe}</span>`, "echo");
     }
     connection.sendCommand(expanded);
-    if (t && this.account != null) {
-      this.recent = [t, ...this.recent.filter((x) => x !== t)].slice(0, MAX);
-      this.save();
-    }
+    this.record(t);
+  }
+
+  /**
+   * Keep a line in the history without sending it. A puppet's command line
+   * sends through its own endpoint, but its lines belong to the same history
+   * as the main command line's, so the arrows and Ctrl-R find them everywhere.
+   */
+  record(line: string): void {
+    const t = line.trim();
+    if (!t || this.account == null) return;
+    this.recent = [t, ...this.recent.filter((x) => x !== t)].slice(0, MAX);
+    this.save();
   }
 
   private save(): void {

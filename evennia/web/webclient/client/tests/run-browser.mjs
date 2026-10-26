@@ -56,6 +56,12 @@ const PAGES = [
     report: () => window.__inputTest ?? null,
   },
   {
+    path: "tests/puppets.html",
+    label: "puppets panel",
+    done: () => window.__puppetsTest?.done === true,
+    report: () => window.__puppetsTest ?? null,
+  },
+  {
     path: "tests/help.html",
     label: "help panel",
     done: () => window.__helpTest?.done === true,
@@ -111,7 +117,9 @@ if (!base) throw new Error("vite did not report a local URL");
 const browser = await launch();
 let code = 0;
 try {
-  for (const spec of PAGES) {
+  // `npm run test:browser -- puppets input` runs only the pages whose path names one of these.
+  const only = process.argv.slice(2);
+  for (const spec of PAGES.filter((p) => !only.length || only.some((name) => p.path.includes(name)))) {
     console.log(`\n== ${spec.label} (${spec.path}) ==`);
     const page = await browser.newPage();
     const consoleErrors = [];

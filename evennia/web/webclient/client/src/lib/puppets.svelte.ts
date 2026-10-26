@@ -53,6 +53,9 @@ export class PuppetScenes {
   // copy for rendering and mirrors it here so appendFeed can suppress unread for
   // the focused NPC. Keeping this store rune-free keeps it unit-testable in vitest.
   activeId: number | null = null;
+  // Every terminal on screen right now. The Puppets panel shows several at
+  // once, so more than one NPC can be "looked at" and none of them badges.
+  private watching = new Set<number>();
   private requestResync: ResyncRequester | null;
 
   constructor(requestResync: ResyncRequester | null = null) {
@@ -82,6 +85,33 @@ export class PuppetScenes {
     this.requestResync?.(npcId, current?.revision ?? 0);
   }
 
+  /**
+   * Set which terminals are on screen. Each is read at once and stays quiet
+   * while shown; one that has just come into view pulls a fresh scene.
+   */
+  setWatching(npcIds: readonly number[]): void {
+    const next = new Set(npcIds);
+    for (const npcId of next) {
+      if (this.watching.has(npcId)) continue;
+      this.markRead(npcId);
+      const current = this.feeds.get(String(npcId));
+      this.requestResync?.(npcId, current?.revision ?? 0);
+    }
+    this.watching = next;
+  }
+
+  /**
+   * Put a line in one terminal that did not come from the game: the command
+   * just sent, or a note that it did not go. It never badges.
+   */
+  addLocal(npcId: number, body: string): void {
+    const key = String(npcId);
+    const current = this.feeds.get(key);
+    if (!current) return;
+    const line: FeedLine = { body, revision: current.revision };
+    this.feeds.set(key, { ...current, feed: [...current.feed, line].slice(-MAX_FEED_LINES) });
+  }
+
   /** A resync request never landed: drop the in-flight flag so it can retry. */
   resyncFailed(npcId: number): void {
     const key = String(npcId);
@@ -106,6 +136,7 @@ export class PuppetScenes {
   clear(): void {
     this.feeds.clear();
     this.activeId = null;
+    this.watching = new Set();
   }
 
   /** Populate/refresh the roster from a puppet_manifest RPC reply. */
@@ -145,7 +176,7 @@ export class PuppetScenes {
       // Only room activity badges the tab. Network traffic and the puppet's
       // own command feedback still render in the terminal but stay silent.
       let unread = current.unread;
-      if (this.activeId === npcId) unread = 0;
+      if (this.activeId === npcId || this.watching.has(npcId)) unread = 0;
       else if (String(lineMeta.news ?? "room") === "room") unread += 1;
       this.feeds.set(key, { ...current, feed, unread });
     }
