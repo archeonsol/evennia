@@ -25,6 +25,63 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.341: Sockets that arrive already authenticated log in one loop turn each
+
+When a Portal outlives a Server restart, or restarts with it and its clients reconnect while the
+Server boots, the Portal hands the Server every waiting socket in one snapshot. The bus admitted
+them all in one callback: `portal_connect`, `login` and `account.at_post_login` (which puppets the
+character and shows the room) for each socket back to back. On production about 20 sessions did that
+in one reactor turn of 2.9 s (2026-10-25 23:02:31 log time), with a worse turn for each player who
+had a cold room. A game that does nothing in `at_post_login` sees no difference.
+
+### Engine
+
+- **`ServerSessionHandler.login` is two halves**
+  ([`sessionhandler.py`](evennia/server/sessionhandler.py)). `_login_begin` is everything that makes
+  the session the account's and authenticated (`at_login`, `at_pre_login` and its veto, the
+  duplicate kick, the `Logged in` line, the `SLOGIN` frame to the Portal) and returns how many
+  sessions the account has, or `None` when the login did not go on. `_login_finish` is
+  `at_post_login` and the signals. `login` runs both back to back, so its behaviour is unchanged.
+- **`portal_connect(data, defer_login=False)`.** With `defer_login=True`, a session that arrives
+  authenticated runs the first half in the admitting call and queues the second. A pump asks the
+  loop for one callback at a time (`clock.call_later(0, ..., _task_kind="transport")`) and runs one
+  queued second half in each, so every login is a turn of its own.
+- **While it waits,** the session is registered, authenticated and counted as the account's, so the
+  state the Server sends back to the Portal is true. Input for it is held by
+  `ServerSessionHandler.data_in` (at most 200 inputs, more are dropped) and handed to
+  `session.data_in`, in order, once the character is puppeted. A session that goes first is
+  skipped; a session number that is reused is not mistaken for the one that waited (the wait holds
+  the session object, not the number); `clear()` forgets the queue. A second half that raises is
+  logged and its session is disconnected; the logins behind it still run.
+- **`SessionReconciler.reconcile`** ([`bus_sessions.py`](evennia/server/bus_sessions.py)) asks for
+  deferral only when two or more new sockets arrive authenticated (a login and a uid). One socket
+  logs in inside the call as before, and sockets that are not authenticated, or already admitted,
+  do not count. The handshake's 4 s staleness bound is why the apply step is not stretched
+  instead: the offer, the confirm and the ready frame must all land inside it.
+
+### Migration notes
+
+None required. A game that overrides `portal_connect` or calls it with its own handler class must
+accept the keyword `defer_login`; the three fake handlers in the bus tests take `**kwargs` now.
+`at_post_login` can run a few loop turns after the session is registered when several authenticated
+sockets arrive together, and not in the call that admitted it.
+
+### Not changed
+
+`portal_sessions_sync` (the restore of sessions the Server itself confirmed before a reload, through
+`at_sync`) still runs in one turn.
+
+### Tests
+
+- `evennia/server/tests/test_session_restore.py` (27 tests) over a real `ServerSessionHandler` with
+  stub sessions, and over `SessionReconciler` with it: half a login at once and the rest in a turn,
+  one callback for each login, input held and replayed in order, a stale wait for a reused number,
+  a flood capped at 200, a session that goes while it waits, a login that fails or disconnects its
+  own session, and the thresholds that decide when to defer. 23 hand-made faults, all caught.
+- `evennia.server`, `evennia.accounts` and `evennia.utils.tests`: 1979 tests; the two that fail
+  (`TestRefreeze.test_it_is_off_unless_asked_for`, `test_run_init_hooks` which needs `joserfc`) fail
+  on the unmodified engine too.
+
 ## 6.0.0+underspire.340: A first-person vista in the web client's room panel, and `parse_html` forgets a truecolor after a palette colour
 
 The room panel of the web client can now draw a picture of what lies ahead. A game sends it in the
