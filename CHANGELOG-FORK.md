@@ -25,6 +25,61 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.340: A first-person vista in the web client's room panel, and `parse_html` forgets a truecolor after a palette colour
+
+The room panel of the web client can now draw a picture of what lies ahead. A game sends it in the
+scene it already sends: the picture as the scene field `vista`, and the words that go with it as
+`scene.room.vista`. The shell holds no scene logic: it draws the pixels the game made, so a game
+with another look sends another picture. A game that sends neither is unchanged.
+
+### Web client
+
+- **The payload** is plain data (`src/lib/vista.ts`, `parseVista`):
+
+  | Key | Is |
+  |---|---|
+  | `width`, `height` | the canvas in pixels (at most 512 a side) |
+  | `rgb` | base64, `width * height * 3` bytes, row by row |
+  | `kind` | base64, `width * height` bytes, what each pixel shows |
+  | `kinds` | the legend of `kind`, `{name: number}`; the shell reads `star` and `light` from it |
+  | `ruler` | `[{label, column}]`, the compass ways inside the picture |
+  | `span`, `bearing`, `horizon`, `facing` | where the frame stands and the way it faces |
+
+  A payload whose bytes do not fit its size is dropped, not drawn.
+- **The panel** ([`VistaView.svelte`](evennia/web/webclient/client/src/components/VistaView.svelte)) draws
+  it on a canvas above the room description with the ruler under it, and
+  [`RoomPanel.svelte`](evennia/web/webclient/client/src/components/RoomPanel.svelte) shows
+  `scene.room.vista` beside it. It has alternative text built from the words and the facing.
+- **Motion** is two things only: stars brighten and dim, lamps pulse. A viewer who asked for less
+  motion, or reads by screen reader, gets the still picture.
+- `SceneRoom.vista` ([`scene-ops.ts`](evennia/web/webclient/client/src/lib/scene-ops.ts)) carries the
+  words. A full scene snapshot with no `fields` clears the bag, so a game sends the vista field in
+  the snapshot (or after it) every time.
+- `tests/preview.ts` loads a fixture picture with `?vista=dusk` (also `noon`, `night`, `rain`,
+  `dawn`); the fixtures in `tests/vista-fixtures.json` were written from the game's own map and words.
+- The shell bundle (`evennia/web/static/webclient/shell/`) is rebuilt on top of the Puppets panel of
+  underspire.339.
+
+### Engine
+
+- **`parse_html` no longer keeps a truecolor after a later palette colour code.**
+  [`text2html.py`](evennia/utils/text2html.py) set a new palette foreground or background without
+  clearing a truecolor one set earlier in the same run, so text set in a palette colour right after a
+  truecolor run was drawn in the truecolor still (a gold compass word inside a sentence whose way
+  colour is a palette cyan). A palette colour now clears the truecolor of its kind, as it does on a
+  terminal. New test in `evennia/utils/tests/test_text2html.py`.
+
+### Tests
+
+- `vista.test.ts` (8 tests): the parser's checks, the painter, the motion rules and the description.
+  `svelte-check` shows only the two files that need `fake-indexeddb`, which is not installed here.
+
+### Migration
+
+None. A game opts in by sending `scene.room.vista` and `scene.fields.vista`; the panel appears only
+while the scene has a `vista` field. A game that pins this tag for the `parse_html` fix needs
+nothing else.
+
 ## 6.0.0+underspire.339: The Puppets panel shows every puppet at once
 
 The Puppets panel opened one puppet terminal at a time, and its input line lacked the main command line's keys. It now shows a
