@@ -25,6 +25,39 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.339: The Puppets panel shows every puppet at once
+
+The Puppets panel opened one puppet terminal at a time, and its input line lacked the main command line's keys. It now shows a
+terminal for each puppet you choose, and each has a command line of its own. This is client work only: the server is unchanged, and the
+shell is rebuilt.
+
+### Webclient
+
+- **A strip of chips chooses the terminals** ([`PuppetsPanel.svelte`](evennia/web/webclient/client/src/components/PuppetsPanel.svelte)).
+  Show all and Hide all are there, Grid, Columns and Rows lay the shown terminals out, and Expand gives one the whole panel until
+  Restore. The choice is kept per account in the browser under `underspire.puppets.layout:<account>`
+  ([`puppetLayout.ts`](evennia/web/webclient/client/src/lib/puppetLayout.ts) is the pure part,
+  [`puppetLayout.svelte.ts`](evennia/web/webclient/client/src/lib/puppetLayout.svelte.ts) the stored state). A puppet that leaves the
+  roster loses its terminal.
+- **Each terminal has a command line of its own**
+  ([`PuppetTerminal.svelte`](evennia/web/webclient/client/src/components/PuppetTerminal.svelte)). It sends through
+  `puppets:puppet_cmd` by NPC id and keeps the main line's habits: history on the arrow keys, Ctrl-R search, Tab on the verb,
+  PageUp and PageDown to page its feed, Shift+Enter for a new line, and a confirm on a pasted block. The sent line is echoed in that
+  terminal's feed only, and a request that fails says so there.
+- **One history for all of them.** `commands.record(line)` keeps a line in the history without sending it, so the arrows and Ctrl-R find
+  a puppet's lines on the main command line and the other way round. The history is kept per account.
+- **Unread badges follow what is on screen.** A terminal that is shown never badges. One that is hidden, or in an inactive tab,
+  does, and showing it clears the badge.
+
+### Tests
+
+- `puppetLayout.test.ts` holds the pure layout, `puppets.test.ts` has more cases, and the browser page `tests/puppets.html` runs 57 checks.
+- `tests/run-browser.mjs` takes a page name, so `npm run test:browser -- puppets` runs one page.
+
+### Migration notes
+
+None for the server. The browser keeps a new `localStorage` key for the layout.
+
 ## 6.0.0+underspire.338: A list costs less to write, and the first log audit's engine fixes
 
 Writing a list or a dict to an Attribute walked the value twice, and both walks made a Python call for every number and string in it.
