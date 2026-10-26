@@ -2,6 +2,7 @@
 Tests for evennia.utils.bulk_tick.
 """
 
+import gc
 import tempfile
 import threading
 from copy import deepcopy
@@ -11,16 +12,19 @@ from django.db import transaction
 from django.test import override_settings
 
 from evennia.objects.models import ObjectDB
-from evennia.typeclasses.attributes import AttributeHandler
+from evennia.typeclasses.attributes import AttributeHandler, IAttributeBackend
 from evennia.typeclasses.jsonb_handler import (
     AttributeUpdateUnavailable,
     AttributeUpdateUsageError,
+    JsonbAttribute,
     JsonbAttributeBackend,
     StaleAttributeValueError,
     _spool_row_lock,
+    _sync_live_backends,
     _write_spool_payload,
 )
 from evennia.utils.bulk_tick import _NULL_CAT, BulkTickContext
+from evennia.utils.dbserialize import _SaverMutable
 from evennia.utils.test_resources import BaseEvenniaTest
 
 
@@ -249,3 +253,156 @@ class TestCompareAndSet(BaseEvenniaTest):
 
         self.assertEqual(handler.get("hp"), 100)
         self.assertFalse(handler.backend._dirty)
+
+
+def _dead_attribute_trees():
+    """How many Attribute objects and Saver proxies a full collection finds unreachable.
+
+    The collector is asked to keep what it would free (``DEBUG_SAVEALL``) so they can be counted, and the second
+    collection frees them. Nothing here is in the permanent generation, so a count above zero is garbage that
+    reference counting could not free.
+    """
+    previous = gc.get_debug()
+    gc.set_debug(previous | gc.DEBUG_SAVEALL)
+    try:
+        gc.collect()
+        found = sum(1 for obj in gc.garbage if isinstance(obj, (JsonbAttribute, _SaverMutable)))
+    finally:
+        gc.set_debug(previous)
+        del gc.garbage[:]
+    gc.collect()
+    return found
+
+
+@patch("evennia.utils.bulk_tick._assert_io_thread", lambda where: None)
+class TestApplyRefreshesOnlyWhatItPatched(BaseEvenniaTest):
+    """apply() leaves the cached Attributes it did not write alone.
+
+    A heartbeat patches a few scalars of each Character every few seconds. Resetting the whole row's cache
+    for that threw away every cached Attribute of the Character, and the dict and list ones are trees of
+    proxies that refer to one another: cyclic garbage that only a full collection frees, and that the
+    managed collector's refreeze keeps until a thaw.
+    """
+
+    evennia_fixtures = {"obj1"}
+
+    def _snapshot(self, obj_id, l1):
+        return {"id": obj_id, "hp": l1.get(_NULL_CAT, {}).get("_d", {}).get("hp")}
+
+    def _apply(self, obj, value):
+        ctx = BulkTickContext()
+        ctx.gather_objectdb([obj.id], self._snapshot)
+        return ctx.apply([{"id": obj.id, "hp": value}])
+
+    def _character_like(self):
+        obj = self.obj1
+        obj.attributes.add("hp", 100)
+        for name in ("injuries", "cyberware", "rpg"):
+            obj.attributes.add(name, {"a": [1, 2, {"b": 3}], "c": {"d": name}})
+        for name in ("injuries", "cyberware", "rpg", "hp"):
+            obj.attributes.get(name)
+        return obj
+
+    def test_an_attribute_that_was_not_patched_keeps_its_cached_object(self):
+        obj = self._character_like()
+        injuries = obj.attributes.get("injuries", return_obj=True)
+
+        self.assertEqual(self._apply(obj, 110), 1)
+
+        self.assertIs(obj.attributes.get("injuries", return_obj=True), injuries)
+        self.assertEqual(obj.attributes.get("injuries")["c"]["d"], "injuries")
+
+    def test_the_patched_key_is_read_again_from_the_document(self):
+        obj = self._character_like()
+        first = obj.attributes.get("hp", return_obj=True)
+
+        self.assertEqual(self._apply(obj, 110), 1)
+
+        second = obj.attributes.get("hp", return_obj=True)
+        self.assertIsNot(second, first)
+        self.assertEqual(obj.attributes.get("hp"), 110)
+
+    def test_no_whole_cache_reset_happens(self):
+        obj = self._character_like()
+        with patch.object(IAttributeBackend, "reset_cache", autospec=True) as reset:
+            self.assertEqual(self._apply(obj, 110), 1)
+        reset.assert_not_called()
+
+    def test_the_old_proxy_of_the_patched_key_is_still_stale(self):
+        obj = self._character_like()
+        obj.attributes.add("state", {"revision": 1})
+        stale = obj.attributes.get("state")
+        ctx = BulkTickContext()
+        ctx.gather_objectdb(
+            [obj.id], lambda obj_id, l1: {"id": obj_id, "state": l1[_NULL_CAT]["_d"]["state"]}
+        )
+        self.assertEqual(ctx.apply([{"id": obj.id, "state": {"revision": 2}}]), 1)
+        with self.assertRaises(StaleAttributeValueError):
+            stale["revision"] = 99
+        self.assertEqual(obj.attributes.get("state")["revision"], 2)
+
+    def test_the_proxy_of_an_attribute_that_was_not_patched_still_writes(self):
+        obj = self._character_like()
+        injuries = obj.attributes.get("injuries")
+        self.assertEqual(self._apply(obj, 110), 1)
+        injuries["c"]["d"] = "changed"
+        self.assertEqual(obj.attributes.get("injuries")["c"]["d"], "changed")
+
+    def test_the_cache_is_marked_incomplete_and_all_still_lists_everything(self):
+        obj = self._character_like()
+        obj.attributes.all()
+        backend = obj.attributes.backend
+        self.assertTrue(backend._cache_complete)
+
+        self.assertEqual(self._apply(obj, 110), 1)
+
+        self.assertFalse(backend._cache_complete)
+        values = {attr.key: attr.value for attr in obj.attributes.all()}
+        self.assertEqual(values["hp"], 110)
+        self.assertIn("injuries", values)
+        self.assertIn("rpg", values)
+
+    def test_another_kind_of_attribute_on_the_row_keeps_its_cache(self):
+        obj = self._character_like()
+        obj.nicks.add("w", "west", category="inputline")
+        nick_backend = obj.nicks.backend
+        self.assertTrue(nick_backend._cache)
+        cached = dict(nick_backend._cache)
+
+        self.assertEqual(self._apply(obj, 110), 1)
+
+        self.assertEqual(nick_backend._cache, cached)
+
+    def test_the_models_copy_of_the_document_follows_the_patched_key(self):
+        obj = self._character_like()
+        obj.__dict__["db_attrs"] = deepcopy(obj.attributes.backend._l1)
+
+        self.assertEqual(self._apply(obj, 110), 1)
+
+        mirror = obj.__dict__["db_attrs"][_NULL_CAT]["_d"]
+        self.assertEqual(mirror["hp"], 110)
+        self.assertIn("injuries", mirror)
+
+    def test_a_patch_leaves_no_cyclic_garbage_behind(self):
+        obj = self._character_like()
+        gc.collect()
+        before = _dead_attribute_trees()
+        for value in range(101, 151):
+            self.assertEqual(self._apply(obj, value), 1)
+            # the game reads the Character's Attributes again after every heartbeat
+            for name in ("injuries", "cyberware", "rpg", "hp"):
+                obj.attributes.get(name)
+        self.assertEqual(_dead_attribute_trees() - before, 0)
+
+    def test_the_whole_row_reset_does_leave_garbage_which_is_what_the_test_above_guards(self):
+        # Negative control: the sensitivity of the count. Resetting the row the old way, once per
+        # patch, leaves a dead tree for each cached dict Attribute.
+        obj = self._character_like()
+        state = obj.attributes.backend._row_state
+        gc.collect()
+        before = _dead_attribute_trees()
+        for _ in range(20):
+            _sync_live_backends(state, invalidate=False)
+            for name in ("injuries", "cyberware", "rpg", "hp"):
+                obj.attributes.get(name)
+        self.assertGreater(_dead_attribute_trees() - before, 20)

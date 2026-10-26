@@ -940,6 +940,14 @@ ENGINE_GC_DEEP_CLEAN_MAX_DEFER = 43200
 # never runs. Leave off if the idmapper evicts often (a small IDMAPPER_CACHE_MAXSIZE),
 # since every evicted instance that was frozen waits for a backstop.
 ENGINE_GC_REFREEZE = False
+# With ENGINE_GC_REFREEZE: freeze the survivors of a clean only once the interpreter's
+# allocated blocks have grown by this many since the last freeze (about 2.5 blocks to an
+# object). Freezing after every clean freezes whatever is alive at that moment, including
+# cycles that die a minute later, and those stay until a thaw. Waiting keeps the cleans in
+# between marking a bounded set of recent survivors (250000 blocks is about 100,000 objects
+# and 50 to 100 ms) and lets a short-lived cycle be freed by the next clean. The backstop
+# thaw always freezes. 0 = after every clean.
+ENGINE_GC_REFREEZE_GROWTH_BLOCKS = 0
 # With ENGINE_GC_REFREEZE: bring the thaw forward, to the next moment with no sessions
 # connected, once the blocks held right after a clean (evennia_gc_blocks_floor) have
 # risen this many times above where the last thaw left them. A floor that climbs is live

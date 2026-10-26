@@ -23,6 +23,8 @@ ATTR_FLUSH_BACKENDS_TOTAL = None
 ATTR_FLUSH_RUNS_TOTAL = None
 ATTR_DIRTY_PENDING = None
 ATTR_FLUSH_DURATION_SECONDS = None
+ATTR_CACHE_DROPPED_TOTAL = None
+ATTR_REBUILT_TOTAL = None
 LOCATION_CMDSET_CACHE_HIT_TOTAL = None
 LOCATION_CMDSET_CACHE_MISS_TOTAL = None
 CHANNEL_SUBSCRIBER_CACHE_HIT_TOTAL = None
@@ -185,6 +187,7 @@ def _create_metrics() -> bool:
     """Build every metric on the default registry; caller holds the lock."""
     global ATTR_FLUSH_TOTAL, ATTR_FLUSH_BACKENDS_TOTAL, ATTR_FLUSH_RUNS_TOTAL
     global ATTR_DIRTY_PENDING, ATTR_FLUSH_DURATION_SECONDS
+    global ATTR_CACHE_DROPPED_TOTAL, ATTR_REBUILT_TOTAL
     global LOCATION_CMDSET_CACHE_HIT_TOTAL, LOCATION_CMDSET_CACHE_MISS_TOTAL
     global CHANNEL_SUBSCRIBER_CACHE_HIT_TOTAL, CHANNEL_SUBSCRIBER_CACHE_MISS_TOTAL
     global REDIS_ATTR_CACHE_HIT_TOTAL, REDIS_ATTR_CACHE_MISS_TOTAL
@@ -242,6 +245,14 @@ def _create_metrics() -> bool:
         "Time spent in flush_all_dirty by caller kind",
         ("source",),
         buckets=(0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0),
+    )
+    ATTR_CACHE_DROPPED_TOTAL = Counter(
+        "evennia_attribute_cache_dropped_total",
+        "Cached Attribute objects thrown away by a whole-cache reset of a handler",
+    )
+    ATTR_REBUILT_TOTAL = Counter(
+        "evennia_attribute_rebuilt_total",
+        "Attribute objects built from a row's document after a read missed the handler's cache",
     )
     LOCATION_CMDSET_CACHE_HIT_TOTAL = Counter(
         "evennia_location_cmdset_cache_hit_total",
@@ -536,6 +547,26 @@ def record_attribute_flush(
         ATTR_FLUSH_BACKENDS_TOTAL.inc(backends)
     if duration_seconds is not None and ATTR_FLUSH_DURATION_SECONDS is not None:
         ATTR_FLUSH_DURATION_SECONDS.labels(source=source).observe(max(0.0, float(duration_seconds)))
+
+
+def record_attribute_cache_dropped(count: int) -> None:
+    """Count Attribute objects a handler threw away with a whole-cache reset.
+
+    A reset is the expensive way to bring a cache up to date: every Attribute of the object
+    is built again from its document on the next read, and the ones thrown away leave a tree of
+    reference cycles behind. The rate of this counter against ``evennia_attribute_rebuilt_total``
+    is how a hot path that resets a whole cache for the sake of one key shows itself.
+    """
+    if count <= 0 or not _init_metrics() or ATTR_CACHE_DROPPED_TOTAL is None:
+        return
+    ATTR_CACHE_DROPPED_TOTAL.inc(count)
+
+
+def record_attribute_rebuilt(count: int = 1) -> None:
+    """Count Attribute objects built from a row's document."""
+    if count <= 0 or not _init_metrics() or ATTR_REBUILT_TOTAL is None:
+        return
+    ATTR_REBUILT_TOTAL.inc(count)
 
 
 def record_idmapper_flush(

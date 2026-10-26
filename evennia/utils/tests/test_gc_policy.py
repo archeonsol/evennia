@@ -7,6 +7,7 @@ real collection or leaves the interpreter's collector disabled.
 """
 
 import gc
+import sys
 import time
 import weakref
 from unittest.mock import Mock, patch
@@ -493,6 +494,85 @@ class TestRefreeze(_PolicyTestCase):
         self.assertIn("in 400ms", info.call_args.args[0])
 
 
+class TestRefreezeWaitsForGrowth(_PolicyTestCase):
+    """With a growth threshold a clean freezes its survivors only once the heap has grown enough."""
+
+    def setUp(self):
+        super().setUp()
+        self.calls = []
+        self.blocks = 1_000_000
+
+        def recorder(name, result=None):
+            def call(*args, **kwargs):
+                self.calls.append(name)
+                return result
+
+            return call
+
+        for name, result in (("collect", 42), ("freeze", None), ("unfreeze", None)):
+            patcher = patch.object(gc_policy.gc, name, side_effect=recorder(name, result))
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        patcher = patch.object(gc_policy, "_allocated_blocks", lambda: self.blocks)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        gc_policy._state.managed = True
+        gc_policy._state.freeze_floor = 1_000_000
+
+    @override_settings(ENGINE_GC_REFREEZE=True, ENGINE_GC_REFREEZE_GROWTH_BLOCKS=200_000)
+    def test_a_clean_does_not_freeze_until_the_heap_has_grown_enough(self):
+        self.blocks = 1_150_000
+        gc_policy.deep_clean("growth")
+        self.assertEqual(self.calls, ["collect"])
+        self.assertEqual(gc_policy._state.freeze_floor, 1_000_000)
+
+        self.calls.clear()
+        self.blocks = 1_250_000
+        gc_policy.deep_clean("growth")
+        self.assertEqual(self.calls, ["collect", "freeze"])
+        self.assertEqual(gc_policy._state.freeze_floor, 1_250_000)
+
+        self.calls.clear()
+        self.blocks = 1_300_000
+        gc_policy.deep_clean("growth")
+        self.assertEqual(self.calls, ["collect"])
+
+    @override_settings(ENGINE_GC_REFREEZE=True, ENGINE_GC_REFREEZE_GROWTH_BLOCKS=200_000)
+    def test_the_log_says_when_survivors_were_left_unfrozen(self):
+        with patch.object(gc_policy.logger, "log_info") as info:
+            gc_policy.deep_clean("growth")
+
+        self.assertIn("survivors not frozen yet", info.call_args.args[0])
+
+    @override_settings(ENGINE_GC_REFREEZE=True, ENGINE_GC_REFREEZE_GROWTH_BLOCKS=10**12)
+    def test_a_thaw_freezes_again_whatever_the_growth(self):
+        for reason in ("scheduled", "overdue"):
+            with self.subTest(reason=reason):
+                self.calls.clear()
+                gc_policy.deep_clean(reason)
+                self.assertEqual(self.calls, ["unfreeze", "collect", "freeze"])
+                self.assertEqual(gc_policy._state.freeze_floor, self.blocks)
+
+    @override_settings(ENGINE_GC_REFREEZE=True, ENGINE_GC_REFREEZE_GROWTH_BLOCKS=0)
+    def test_zero_freezes_after_every_clean_as_before(self):
+        self.blocks = 1_000_001
+        gc_policy.deep_clean("growth")
+        self.assertEqual(self.calls, ["collect", "freeze"])
+
+    @override_settings(ENGINE_GC_REFREEZE=True, ENGINE_GC_REFREEZE_GROWTH_BLOCKS=200_000)
+    def test_a_heap_never_frozen_by_the_policy_is_frozen_by_the_first_clean(self):
+        gc_policy._state.freeze_floor = None
+        gc_policy.deep_clean("growth")
+        self.assertEqual(self.calls, ["collect", "freeze"])
+        self.assertEqual(gc_policy._state.freeze_floor, self.blocks)
+
+    @override_settings(ENGINE_GC_REFREEZE=False, ENGINE_GC_REFREEZE_GROWTH_BLOCKS=200_000)
+    def test_without_refreeze_the_threshold_changes_nothing(self):
+        self.blocks = 9_000_000
+        gc_policy.deep_clean("growth")
+        self.assertEqual(self.calls, ["collect"])
+
+
 class _Cycle:
     """An object that only a cycle collection can free."""
 
@@ -806,6 +886,20 @@ class TestRefreezeAgainstTheRealCollector(SimpleTestCase):
         gc_policy.deep_clean("scheduled")
         self.assertIsNone(ref(), "the backstop did not free a cycle that died while frozen")
 
+    @override_settings(ENGINE_GC_REFREEZE=True, ENGINE_GC_REFREEZE_GROWTH_BLOCKS=10**12)
+    def test_a_cycle_alive_at_a_clean_is_freed_by_a_later_one_when_the_freeze_waits(self):
+        # The counterpart of the test above, which strands the same cycle: the freeze waits for
+        # the heap to grow, so the cycle that was alive at the first clean is still collectable.
+        gc_policy._state.freeze_floor = sys.getallocatedblocks()
+        survivor = _Cyclic()
+        ref = weakref.ref(survivor)
+        gc_policy.deep_clean("growth")  # alive, and not frozen: the heap has not grown
+        del survivor
+
+        gc_policy.deep_clean("growth")
+
+        self.assertIsNone(ref(), "a cycle that died after a clean was kept by a freeze that waited")
+
     @override_settings(ENGINE_GC_REFREEZE=True)
     def test_a_cycle_made_after_the_freeze_is_freed_by_the_next_ordinary_clean(self):
         gc_policy.deep_clean("growth")
@@ -827,6 +921,54 @@ class TestRefreezeAgainstTheRealCollector(SimpleTestCase):
         gc_policy.deep_clean("growth")
 
         self.assertIsNone(ref())
+
+
+class TestRefreezeStrandsLess(SimpleTestCase):
+    """What a freeze strands, with the real collector: cycles that die after the clean that froze them.
+
+    The load is the one the live game had: cycles that live about half a minute (the cached Attribute
+    trees of a Character, rebuilt after every patch of its vitals) and a clean every 45 seconds. Each
+    clean freezes whatever is alive, which is most of them, and a full collection at the end (the thaw)
+    counts what was stranded.
+    """
+
+    LIFE = 30
+    CLEAN_EVERY = 45
+    SECONDS = 600
+    BIRTHS = 5
+
+    def setUp(self):
+        super().setUp()
+        gc_policy._reset_for_tests()
+        self.addCleanup(gc_policy._reset_for_tests)
+        self.addCleanup(gc.unfreeze)
+        gc.unfreeze()
+        gc.collect()
+
+    def _stranded(self):
+        from collections import deque
+
+        gc_policy._state.freeze_floor = sys.getallocatedblocks()
+        alive = deque()
+        for second in range(self.SECONDS):
+            for _ in range(self.BIRTHS):
+                alive.append((second + self.LIFE, _Cyclic()))
+            while alive and alive[0][0] <= second:
+                alive.popleft()
+            if second % self.CLEAN_EVERY == 0:
+                gc_policy.deep_clean("growth")
+        alive.clear()
+        gc.collect()  # an ordinary full collection frees what was never frozen, the pending cycles included
+        gc.unfreeze()
+        return gc.collect()  # what is left was alive when frozen and died after: stranded
+
+    @override_settings(ENGINE_GC_REFREEZE=True, ENGINE_GC_REFREEZE_GROWTH_BLOCKS=0)
+    def test_freezing_after_every_clean_strands_the_short_lived_cycles(self):
+        self.assertGreater(self._stranded(), 500)
+
+    @override_settings(ENGINE_GC_REFREEZE=True, ENGINE_GC_REFREEZE_GROWTH_BLOCKS=10**9)
+    def test_waiting_for_growth_strands_almost_none_of_them(self):
+        self.assertLess(self._stranded(), 100)
 
 
 class _ManagedCase(_PolicyTestCase):

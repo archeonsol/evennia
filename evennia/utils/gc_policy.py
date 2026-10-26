@@ -49,8 +49,14 @@ The ``managed`` policy keeps what the collector is good at and drops what costs:
   collection are frozen too, so the next one marks only what was allocated since
   and costs a few percent of the first. What that gives up is the freeing of a
   cycle that was alive when frozen and dies later, so the two backstop collections
-  thaw the permanent generation, collect all of it, and freeze again. The backstop
-  is timed from the last thaw, not from the last full collection of any kind:
+  thaw the permanent generation, collect all of it, and freeze again. A clean
+  freezes everything alive at that moment, and a cycle that is alive only for a minute
+  (the Attribute trees a patch of a Character's vitals threw away every few seconds) is
+  alive at about two cleans in three, so it dies frozen and stays until a thaw. With
+  ``ENGINE_GC_REFREEZE_GROWTH_BLOCKS`` a clean freezes only once the heap has grown by
+  that many blocks since the last freeze. The cleans between mark the unfrozen survivors
+  again, a bounded cost, and a cycle that dies in the meantime is freed by the next one.
+  The backstop is timed from the last thaw, not from the last full collection of any kind:
   growth cleans can come every half hour, and a clock that each of them restarted
   never ran. (On production the frozen heap grew from 1.7 to 4.8 million objects
   and the process from 0.9 to 2.1 GB in two days that way.) A floor, the blocks
@@ -129,6 +135,7 @@ class _State:
         self.last_deep_clean = 0.0
         self.last_thaw = 0.0
         self.thaw_floor = None
+        self.freeze_floor = None
         self.frozen = 0
         self.last_reclaim = None
         self.pending = None
@@ -382,7 +389,7 @@ def _manage(loop):
         _state.booted = True
         _state.last_deep_clean = _state.last_thaw = time.time()
         _state.last_reclaim = _now()
-        _state.blocks_floor = _state.thaw_floor = _allocated_blocks()
+        _state.blocks_floor = _state.thaw_floor = _state.freeze_floor = _allocated_blocks()
         logger.log_info(
             f"gc: boot heap settled in {(_now() - started) * 1000:.0f}ms "
             f"({collected} unreachable objects collected{', survivors frozen' if freeze else ''})."
@@ -486,6 +493,19 @@ def _collect_and_count(top):
     return collected, kinds
 
 
+def _freeze_due():
+    """Whether a clean should freeze its survivors now.
+
+    ``ENGINE_GC_REFREEZE_GROWTH_BLOCKS`` is how far the heap must have grown since the last
+    freeze. 0 freezes after every clean. So does a heap that was never frozen by this policy
+    (no boot freeze to measure from).
+    """
+    need = int(getattr(settings, "ENGINE_GC_REFREEZE_GROWTH_BLOCKS", 0) or 0)
+    if need <= 0 or _state.freeze_floor is None:
+        return True
+    return _allocated_blocks() - _state.freeze_floor >= need
+
+
 def deep_clean(reason="manual"):
     """Run one full collection and report what it cost.
 
@@ -514,7 +534,9 @@ def deep_clean(reason="manual"):
         collected, kinds = _collect_and_count(census_top)
     else:
         collected, kinds = _intentional_collect(), None
-    if refreeze:
+    # A thaw always freezes again; a growth clean does when the heap has grown enough.
+    froze = refreeze and (thaw or _freeze_due())
+    if froze:
         gc.freeze()
     if thaw:
         # A thaw has just marked every object, so counting what it froze costs a
@@ -528,6 +550,8 @@ def deep_clean(reason="manual"):
     _state.last_reclaim = ended
     rss_after, blocks_after = _rss_mb(), _allocated_blocks()
     _state.blocks_floor = blocks_after
+    if froze:
+        _state.freeze_floor = blocks_after
     if thaw:
         _state.last_thaw = _state.last_deep_clean
         _state.thaw_floor = blocks_after
@@ -541,6 +565,8 @@ def deep_clean(reason="manual"):
         else ""
     )
     frozen = f", {_state.frozen} frozen" if thaw else ""
+    if refreeze and not froze:
+        frozen += ", survivors not frozen yet"
     logger.log_info(
         f"gc deep clean ({reason}): {collected} unreachable objects collected "
         f"in {seconds * 1000:.0f}ms (allocated blocks {blocks_before} -> {blocks_after}"
