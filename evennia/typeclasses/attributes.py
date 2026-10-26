@@ -750,9 +750,16 @@ class IAttributeBackend:
         """
         Reset cache from the outside.
         """
+        dropped = len(self._cache)
         self._cache_complete = False
         self._cache = {}
         self._catcache = {}
+        if dropped:
+            from evennia.server import prometheus_metrics
+
+            prometheus_metrics.best_effort(
+                "attribute cache drop", prometheus_metrics.record_attribute_cache_dropped, dropped
+            )
 
     def idmapper_trim_cache(self):
         """Discard disposable handler materialization during idmapper retention."""

@@ -1949,6 +1949,11 @@ class JsonbAttributeBackend(IAttributeBackend):
         attr.db_value = from_jsonb(encoded, db_obj=attr)
         attr._backend_ref = weakref.ref(self)
         attr._backend_generation = self._path_generation(key, category)
+        from evennia.server import prometheus_metrics
+
+        prometheus_metrics.best_effort(
+            "attribute rebuilt", prometheus_metrics.record_attribute_rebuilt
+        )
         return attr
 
     # ------------------------------------------------------------------
@@ -2291,6 +2296,47 @@ def _sync_live_backends(state, *, invalidate):
         backend.obj.db_attrs = deepcopy(document)
         IAttributeBackend.reset_cache(backend)
     state.sync_failed = False
+
+
+def _refresh_live_backends(state, keys, *, category=None):
+    """Bring every same-process handler up to date after ``keys`` of one category were patched in the row's document.
+
+    ``_sync_live_backends`` is the answer to a change nobody can describe (a merge with another writer, a recovery): it throws away every cached Attribute of the row and copies
+    the whole document. A patch knows exactly what it wrote. An Attribute it did not write still holds its value, so only the cached Attributes of the patched keys leave the
+    caches and are read again, on demand, from the document.
+
+    The difference is not only the rebuild. A cached dict or list Attribute and its tree of Saver proxies refer to one another, so a cache that is thrown away is cyclic garbage that
+    reference counting cannot free, and the managed collector's refreeze (``ENGINE_GC_REFREEZE``) keeps what was alive when it froze until a thaw. A heartbeat that patched three
+    scalars of each Character every few seconds threw away all of its cached Attributes each time, 11 trees a second on the live game (docs/performance.md, section 33).
+
+    Args:
+        state (JsonbRowState): The row.
+        keys (iterable): The Attribute keys that were patched.
+        category (str, optional): Their category; ``None`` is the default one.
+    """
+    _require_io_thread("JSONB Attribute cache refresh")
+    keys = tuple(keys)
+    cat = _NULL_CATEGORY if category is None else category.lower()
+    source = state.visible_document.get(cat)
+    source = source.get(_DATA, {}) if isinstance(source, dict) else {}
+    mirrored = set()
+    for backend in list(state.backends):
+        if not backend._attrtype:
+            for key in keys:
+                backend._delete_cache(key, category)
+        owner = backend.obj
+        if id(owner) in mirrored:
+            continue
+        mirrored.add(id(owner))
+        # the model's copy of the document is kept as ``_sync_live_backends`` kept it, for the keys that changed
+        copy = owner.__dict__.get("db_attrs")
+        if isinstance(copy, dict):
+            target = copy.setdefault(cat, {}).setdefault(_DATA, {})
+            for key in keys:
+                if key in source:
+                    target[key] = deepcopy(source[key])
+                else:
+                    target.pop(key, None)
 
 
 def _quarantine_cache_sync(state):

@@ -102,3 +102,32 @@ class TestWarnPendingDirty(TestCase):
         with patch.object(attribute_metrics.logger, "log_warn") as warn:
             attribute_metrics.maybe_warn_pending_dirty({"pending": 9999}, tick_count=1)
         warn.assert_not_called()
+
+
+class TestCacheChurnMetrics(TestCase):
+    """The counters that show a hot path throwing away whole attribute caches."""
+
+    def test_a_whole_cache_reset_counts_the_attributes_it_drops(self):
+        backend = attributes.IAttributeBackend.__new__(attributes.IAttributeBackend)
+        backend._cache = {("a", None): object(), ("b", None): None, ("c", None): object()}
+        backend._catcache = {}
+        backend._cache_complete = True
+        with patch.object(prometheus_metrics, "record_attribute_cache_dropped") as rec:
+            backend.reset_cache()
+        rec.assert_called_once_with(3)
+        self.assertEqual(backend._cache, {})
+        self.assertFalse(backend._cache_complete)
+
+    def test_resetting_an_empty_cache_counts_nothing(self):
+        backend = attributes.IAttributeBackend.__new__(attributes.IAttributeBackend)
+        backend._cache = {}
+        backend._catcache = {}
+        backend._cache_complete = False
+        with patch.object(prometheus_metrics, "record_attribute_cache_dropped") as rec:
+            backend.reset_cache()
+        rec.assert_not_called()
+
+    def test_the_recorders_ignore_nothing_to_count(self):
+        with override_settings(ENGINE_PROMETHEUS_METRICS_ENABLED=True):
+            prometheus_metrics.record_attribute_cache_dropped(0)
+            prometheus_metrics.record_attribute_rebuilt(0)

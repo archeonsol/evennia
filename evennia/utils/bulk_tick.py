@@ -58,10 +58,10 @@ from evennia.typeclasses.jsonb_handler import (
     _has_user_transaction,
     _list_row_entries,
     _quarantine_cache_sync,
+    _refresh_live_backends,
     _regular_backend_for_state,
     _require_io_thread,
     _spool_row_lock,
-    _sync_live_backends,
     protected_mutation_active,
 )
 from evennia.typeclasses.jsonb_util import to_jsonb
@@ -298,7 +298,10 @@ class BulkTickContext:
                     for key in applicable:
                         backend._bump_path_generation(key, None)
                     try:
-                        _sync_live_backends(backend._row_state, invalidate=False)
+                        # Only the keys written leave the handlers' caches. Resetting the
+                        # whole row, as this once did, threw away every cached Attribute of
+                        # a Character for a patch of three scalars (see _refresh_live_backends).
+                        _refresh_live_backends(backend._row_state, applicable)
                     except Exception as err:
                         _quarantine_cache_sync(backend._row_state)
                         raise AttributeUpdateUnavailable(
