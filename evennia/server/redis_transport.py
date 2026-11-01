@@ -416,7 +416,7 @@ class RedisTransport:
             responses = pipeline.execute(raise_on_error=False)
         except Exception as caught:
             responses = [caught] * len(batch)
-            self.fail("Redis publication failed")
+            self.fail(f"Redis publication failed: {caught!r}")
         with self._condition:
             self._writing.difference_update(key for key, _frame, _fields in batch)
             self._condition.notify_all()
@@ -602,9 +602,9 @@ class RedisTransport:
                         self._read_origin, self._read_sequence = origin, sequence
                         self._cursor = entry_id
                         self._admit_incoming(fields)
-            except Exception:
+            except Exception as err:
                 if not self._stop.is_set():
-                    self.fail("Redis read failed")
+                    self.fail(f"Redis read failed: {err!r}")
 
     def _close_after_workers(self, workers, client):
         """Close the captured client after its workers relinquish ownership."""
