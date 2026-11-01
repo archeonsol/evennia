@@ -25,6 +25,30 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.343: A Redis bus failure names its cause
+
+When the Redis bus closed a connection after a failed publish or a failed read, the reason it passed on said only "Redis publication
+failed" or "Redis read failed". The exception was caught and then lost, so a log showed that the bus went down and not why. The reason
+now carries the exception. A game sees no change in behavior: the same failures close the same connection, and only the text differs.
+
+### Engine
+
+- **`RedisTransport` puts the exception in the failure reason**
+  ([`redis_transport.py`](evennia/server/redis_transport.py)). A pipeline that raises gives `Redis publication failed: <repr>`, and a
+  read loop that raises gives `Redis read failed: <repr>`. A pipeline that succeeds with some commands refused keeps its plain reason,
+  because the warning logged just before it already names the first error and the count.
+
+### Migration
+
+None. A log filter that matches the whole reason string exactly must now match its start.
+
+### Tests
+
+`evennia.server.tests.test_redis_transport`, `test_redis_transport_writer` and `test_bus_cutover` pass (35 tests, 5 skipped). No new test:
+the change is the text of a reason those tests do not assert.
+
+---
+
 ## 6.0.0+underspire.342: A bulk patch refreshes the keys it wrote and not the whole row's cache, and a refreeze can wait for the heap to grow
 
 A game that patches the same rows every few seconds with `BulkTickContext.apply` (a vitals heartbeat that sets three scalars on each
