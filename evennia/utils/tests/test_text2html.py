@@ -1,6 +1,7 @@
 """Tests for text2html"""
 
 import json
+import re
 import unittest
 from html.parser import HTMLParser
 
@@ -80,6 +81,34 @@ class TestText2Html(SimpleTestCase):
             '<span class="" style="color: #ff0000;">red</span>foo',
             parser.format_styles(f"\x1b[38;2;255;0;0m" + "red" + ansi.ANSI_NORMAL + "foo"),
         )
+
+    def test_underline_off_ends_the_underline_and_leaves_no_code_in_the_text(self):
+        """`|U` is ESC[24m. It ended nothing on the web and showed as "[24m" in the text."""
+        parser = text2html.HTML_PARSER
+        self.assertEqual(
+            '<span class="underline">a</span><span class="">b</span>',
+            parser.format_styles(
+                ansi.ANSI_UNDERLINE + "a" + ansi.ANSI_UNDERLINE_RESET + "b" + ansi.ANSI_NORMAL
+            ),
+        )
+        # the colour carries across the end of the underline
+        out = parser.format_styles(
+            ansi.ANSI_HILITE
+            + ansi.ANSI_RED
+            + ansi.ANSI_UNDERLINE
+            + "a"
+            + ansi.ANSI_UNDERLINE_RESET
+            + "b"
+            + ansi.ANSI_NORMAL
+        )
+        self.assertEqual(
+            '<span class="underline color-009">a</span><span class="color-009">b</span>', out
+        )
+        # a reset with nothing underlined leaves the text as it was
+        plain = parser.format_styles("a" + ansi.ANSI_UNDERLINE_RESET + "b")
+        self.assertEqual("ab", re.sub(r"<[^>]+>", "", plain))
+        self.assertNotIn("24m", text2html.parse_html("|uunder|U and after|n"))
+        self.assertNotIn("[", text2html.parse_html("|uunder|U and after|n"))
 
     def test_a_palette_colour_after_a_truecolor_one_replaces_it(self):
         """A terminal paints the later code, so the web does too: the truecolor style must not outlive a palette colour."""

@@ -25,6 +25,29 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.344: The web page ends an underline at `|U`
+
+`|U` turns an underline off (`ANSI_UNDERLINE_RESET`, ESC[24m). `text2html` knew the code that turns one on and not this one. On the web the
+underline ran on to the next full reset, and the code itself reached the page as "[24m" in the text. A game that underlines one word in a
+line, a recording or a performance for one, showed both.
+
+### Engine
+
+- **`text2html` treats ESC[24m as a style code** ([`text2html.py`](evennia/utils/text2html.py)). The code is dropped from the text and takes
+  `underline` out of the classes in force, so the next text opens a span without it. A colour set before it carries across. A reset with
+  nothing underlined leaves the text as it was.
+
+### Migration
+
+None. A page that styled the leftover "[24m" text has nothing left to style.
+
+### Tests
+
+`evennia.utils.tests.test_text2html` passes (16 tests). The new one, `test_underline_off_ends_the_underline_and_leaves_no_code_in_the_text`,
+fails on `underspire.343`.
+
+---
+
 ## 6.0.0+underspire.343: A Redis bus failure names its cause
 
 When the Redis bus closed a connection after a failed publish or a failed read, the reason it passed on said only "Redis publication

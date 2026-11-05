@@ -35,6 +35,7 @@ class TextToHTMLparser(object):
         # non-color style markers
         ANSI_NORMAL,
         ANSI_UNDERLINE,
+        ANSI_UNDERLINE_RESET,
         ANSI_HILITE,
         ANSI_UNHILITE,
         ANSI_INVERSE,
@@ -324,6 +325,10 @@ class TextToHTMLparser(object):
                 # underline
                 if substr == ANSI_UNDERLINE and "underline" not in classes:
                     classes.append("underline")
+
+                # underline off: the next text opens a span without the class
+                if substr == ANSI_UNDERLINE_RESET:
+                    classes = [cls for cls in classes if cls != "underline"]
 
             else:
                 # normal text, add text back to list
