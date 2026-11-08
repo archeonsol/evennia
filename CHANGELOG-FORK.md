@@ -25,6 +25,31 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.345: `accounts_holding` names who holds a capability without loading accounts
+
+A game that counts its staff (for a money census, say) had to load every account and ask `world_capabilities` of each one: a few
+queries per account, on the reactor. `accounts_holding(capability)` answers the same question from the grant rows in four queries,
+and touches no typeclass, so it runs in a worker thread.
+
+### Engine
+
+- **`accounts_holding(capability)`** ([`storage.py`](evennia/authorization/storage.py)) returns the ids of the accounts whose
+  `world_capabilities` includes `capability`: live grants at `world:*` to the account, its `entity:` ref, a character it owns
+  (`db_account`), or a group either belongs to. Like `world_capabilities` it counts constrained grants and does not consult quell,
+  suspension or superuser status.
+
+### Tests
+
+- [`test_accounts_holding.py`](evennia/authorization/tests/test_accounts_holding.py) checks every case against `world_capabilities`
+  over all accounts: direct, entity, owned character, unowned character, group, revoked, expired, below world scope, constrained,
+  suspended and quelled.
+
+### Migration
+
+None. The function is new; nothing else changed.
+
+---
+
 ## 6.0.0+underspire.344: The web page ends an underline at `|U`
 
 `|U` turns an underline off (`ANSI_UNDERLINE_RESET`, ESC[24m). `text2html` knew the code that turns one on and not this one. On the web the
