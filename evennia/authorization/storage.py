@@ -337,6 +337,57 @@ def world_capabilities(principal, *, acting: bool = False) -> frozenset[str]:
     return frozenset(row["capability"] for row in rows if not (acting and row["constraints"]))
 
 
+def accounts_holding(capability: str) -> frozenset[int]:
+    """Ids of the accounts whose :func:`world_capabilities` includes ``capability``.
+
+    Counts the same grants without loading any account: grants to the account
+    or its entity, to a character it owns, and to a group either belongs to.
+    Quell, suspension and superuser status are not consulted. Plain queries
+    only, so it is safe in a worker thread.
+
+    Args:
+        capability (str): The capability key, held at ``world:*``.
+
+    Returns:
+        frozenset[int]: Account ids.
+    """
+
+    from evennia.accounts.models import AccountDB
+    from evennia.objects.models import ObjectDB
+
+    now = timezone.now()
+    subjects = set(
+        AuthorizationGrant.objects.filter(
+            capability=capability, scope_kind="world", scope_key="*", revoked_at__isnull=True
+        )
+        .filter(models.Q(expires_at__isnull=True) | models.Q(expires_at__gt=now))
+        .values_list("principal_ref", flat=True)
+    )
+    groups = [ref.removeprefix("group:") for ref in subjects if ref.startswith("group:")]
+    if groups:
+        subjects.update(
+            AuthorizationGroupMembership.objects.filter(group_ref__in=groups).values_list(
+                "principal_ref", flat=True
+            )
+        )
+    account_ids, object_ids = set(), set()
+    for ref in subjects:
+        kind, _sep, key = ref.partition(":")
+        if not key.isdigit():
+            continue
+        if kind in ("account", "entity"):
+            account_ids.add(int(key))
+        elif kind == "object":
+            object_ids.add(int(key))
+    holders = set(AccountDB.objects.filter(id__in=account_ids).values_list("id", flat=True))
+    holders.update(
+        ObjectDB.objects.filter(id__in=object_ids, db_account__isnull=False).values_list(
+            "db_account_id", flat=True
+        )
+    )
+    return frozenset(holders)
+
+
 def principal_is_superuser(principal, *, acting: bool = False) -> bool:
     """Whether any account in :func:`_authority_refs` is a Django superuser."""
 
