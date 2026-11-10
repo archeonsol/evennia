@@ -68,6 +68,39 @@ const PAGES = [
     report: () => window.__helpTest ?? null,
   },
   {
+    path: "tests/screen.html",
+    label: "game screen panel",
+    done: () => window.__screenTest?.done === true,
+    report: () => window.__screenTest ?? null,
+    // A terminal reads key presses in ways a synthetic event does not (a space comes from the
+    // keypress, not the keydown), so the keys of the game are pressed for real, on the live panel.
+    drive: async (page) => {
+      const lines = [];
+      const press = async (label, key, wanted) => {
+        const from = await page.evaluate(() => window.__screenSent.length);
+        await page.keyboard.press(key);
+        await page.waitForTimeout(40);
+        const got = await page.evaluate((n) => window.__screenSent.slice(n).map((s) => s.kwargs.data), from);
+        const ok = JSON.stringify(got) === JSON.stringify(wanted);
+        lines.push(`${ok ? "PASS" : "FAIL"} real key: ${label}${ok ? "" : `: ${JSON.stringify(got)}`}`);
+      };
+      const ESC = String.fromCharCode(27);
+      await page.locator("textarea.xterm-helper-textarea").last().focus();
+      await press("space", "Space", [" "]);
+      await press("left arrow", "ArrowLeft", [`${ESC}[D`]);
+      await press("right arrow", "ArrowRight", [`${ESC}[C`]);
+      await press("a letter", "KeyP", ["p"]);
+      await press("a capital", "Shift+KeyW", ["W"]);
+      await press("enter", "Enter", ["\r"]);
+      await press("control c", "Control+KeyC", ["\x03"]);
+      // Shift+Esc is the way out of the screen: nothing is sent and the focus moves.
+      await press("shift escape sends nothing", "Shift+Escape", []);
+      const left = await page.evaluate(() => document.activeElement?.classList.contains("sh-cmd") === true);
+      lines.push(`${left ? "PASS" : "FAIL"} real key: shift escape moves the focus to a button`);
+      return lines;
+    },
+  },
+  {
     path: "tests/lore.html",
     label: "lore tooltips",
     done: () => window.__loreTest?.done === true,
@@ -138,6 +171,12 @@ try {
     }
 
     const report = await page.evaluate(spec.report);
+    if (report && spec.drive) {
+      for (const line of await spec.drive(page)) {
+        report.results.push(line);
+        if (line.startsWith("FAIL")) report.failures += 1;
+      }
+    }
     if (!report) {
       console.error("the page never reported results");
       code = 1;

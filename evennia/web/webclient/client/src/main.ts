@@ -37,6 +37,7 @@ import { lore } from "./lib/lore.svelte";
 import { activity } from "./lib/activity.svelte";
 import { handshake, loggedIn, loggedOut, roleArrived } from "./lib/accountSession";
 import { savedLog } from "./lib/savedlog.svelte";
+import { screens } from "./lib/screens.svelte";
 
 const OOB_TRACE_KEY = "underspire.trace.oob";
 
@@ -95,6 +96,13 @@ compose.setPreviewRequest((req) => connection.request("compose", "compose_previe
 // store is handed the opener rather than importing the dock.
 chat.setPanelOpener((view) => dock.openView(view));
 activity.connect((ns, action, data) => connection.request(ns, action, data), (entries) => puppets.setManifest(entries));
+// A game's terminal screen: the store holds the screens, the dock shows their panels.
+screens.connect({
+  send: (action, kwargs) => connection.sendOobRaw(action, [], kwargs, "screen"),
+  openPanel: (spec) => dock.openScreen(spec.id, spec.title, spec.size),
+  closePanel: (id) => dock.closeScreen(id),
+  say: (text) => announcer.now(text),
+});
 
 // Speak new output. A category the player filtered out of the log is muted
 // here too, so the log's filter chips double as speech filters. The echo of
@@ -199,6 +207,8 @@ connection.on("hello", (env) => {
 
 connection.on("connection_open", () => {
   void activity.ensureSubscribed();
+  // A game's screen is a live view the Portal does not replay: draw each one again.
+  screens.resync();
   refreshPuppetManifest();
   // The lean ticket protocol is a session flag, so every connection asks again.
   void tickets.hello();
@@ -227,6 +237,16 @@ const is = (event: string, name: OobEvent) => event === name;
 // other events can register here as consumers land.
 connection.on("oob", (env) => {
   const event = String(env.event ?? "");
+  // A game's screen is the busiest thing here, so it goes first.
+  if (is(event, "screen_frame")) {
+    const kw = env.kwargs ?? {};
+    screens.frame(String(kw.id ?? ""), kw.data);
+    return;
+  }
+  if (is(event, "screen_end")) {
+    screens.end(env.kwargs);
+    return;
+  }
   if (is(event, "activity_role")) {
     activity.setRole(env.kwargs as any);
     return;
@@ -249,10 +269,15 @@ connection.on("oob", (env) => {
     if (is(event, "ticket_thread")) dock.openView("assist");
   } else if (is(event, "ui_component")) {
     const comp = Array.isArray(env.args) ? env.args[0] : env.args;
-    if (comp) ui.set(comp);
+    // A terminal screen has a panel of its own; every other component is a card.
+    if (comp?.type === "screen") screens.open(comp);
+    else if (comp) ui.set(comp);
   } else if (is(event, "ui_remove")) {
     const id = (Array.isArray(env.args) ? env.args[0] : env.args)?.id;
-    if (id) ui.remove(String(id));
+    if (id) {
+      ui.remove(String(id));
+      screens.close(String(id));
+    }
   } else if (is(event, "web_panel")) {
     // Fold a magic-link page into the shell: open its URL in a floating iframe.
     // The iframe carries the shared Django session, so no token is required.
