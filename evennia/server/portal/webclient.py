@@ -145,6 +145,11 @@ _SESSION_STATE = (
 #: Never hold more than this many frames before forcing a flush.
 BATCH_MAX_FRAMES = 64
 
+#: OOB events that show something live rather than record it. They go straight to the wire with no
+#: ``s``, no replay slot and no batch. A client that missed some asks the game for the whole picture
+#: again (the arcade terminal's ``screen_sync``), and replaying old frames would only paint over it.
+LIVE_EVENTS = frozenset({"screen_frame"})
+
 _DEFAULT_MAX_OUTGOING_BYTES = 32 * 1024 * 1024
 _DEFAULT_BATCH_BYTES = 1024 * 1024
 _DEFAULT_RESUME_BYTES = 32 * 1024 * 1024
@@ -171,6 +176,11 @@ def _frame_bytes(frame):
     if isinstance(frame, str):
         frame = frame.encode("utf-8")
     return len(frame)
+
+
+def _is_live_frame(frame):
+    """Whether an outgoing envelope is a live view (see ``LIVE_EVENTS``)."""
+    return isinstance(frame, dict) and frame.get("t") == "oob" and frame.get("event") in LIVE_EVENTS
 
 
 def _check_outgoing_size(frame):
@@ -1332,7 +1342,8 @@ class WebSocketClient(WSProtocolBase, _BASE_SESSION_CLASS):
         Text frames from a resume-capable wire format are sequence-stamped and
         buffered here, exactly as ``sendLine`` does for the legacy path. Without
         this, a subprotocol that encodes its own frames would never populate the
-        resume buffer and reconnects would silently replay nothing.
+        resume buffer and reconnects would silently replay nothing. The one
+        exception is a live view (``LIVE_EVENTS``), which is sent as it is.
 
         Args:
             data (bytes or dict): The data to send. A resume-capable format may
@@ -1344,6 +1355,8 @@ class WebSocketClient(WSProtocolBase, _BASE_SESSION_CLASS):
 
         """
         if not is_binary and getattr(self.wire_format, "supports_resume", False):
+            if _is_live_frame(data):
+                return self._send_live(data)
             frame = data
             if isinstance(frame, (bytes, bytearray)):
                 try:
@@ -1361,6 +1374,24 @@ class WebSocketClient(WSProtocolBase, _BASE_SESSION_CLASS):
             data = data.encode("utf-8")
         _check_outgoing_size(data)
         return self._write(data, is_binary=is_binary)
+
+    def _send_live(self, frame):
+        """
+        Put a live frame on the wire: no seq, no replay slot, no batch.
+
+        Frames still waiting in a batch go first, so the client sees things in the
+        order they were sent. A socket that is held or gone drops the frame, which
+        is the point of a live view.
+
+        Args:
+            frame (dict): The envelope.
+
+        """
+        if getattr(self, "_batch_pending", None):
+            self._flush_batch()
+        line = json.dumps(frame, ensure_ascii=True)
+        _check_outgoing_size(line)
+        return self._write(line.encode("utf-8"))
 
     def _batching_enabled(self):
         """

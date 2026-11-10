@@ -54,6 +54,8 @@ const CLIENT_CAPS = {
   theme: true,
   // Shows `help_view` in the help panel; the game then sends help there, not to the log.
   helpPanel: true,
+  // Draws a terminal screen: a `ui_component` of type "screen", then its `screen_frame` output.
+  screen: true,
 };
 
 // The resume token names *one connection's* session at the portal, which issues
@@ -219,9 +221,12 @@ export class AzabanConnection {
     this.sendEnvelope({ t: "oob", action, data });
   }
 
-  /** Raw OOB with args/kwargs, matching the legacy Evennia.msg(cmd, args, kwargs). */
-  sendOobRaw(action: string, args: any[] = [], kwargs: Record<string, any> = {}): void {
-    this.sendEnvelope({ t: "oob", action, args, kwargs });
+  /**
+   * Raw OOB with args/kwargs, matching the legacy Evennia.msg(cmd, args, kwargs).
+   * `ns` names the namespace, for an action the server allows as "ns:action".
+   */
+  sendOobRaw(action: string, args: any[] = [], kwargs: Record<string, any> = {}, ns?: string): void {
+    this.sendEnvelope(ns ? { t: "oob", ns, action, args, kwargs } : { t: "oob", action, args, kwargs });
   }
 
   /**
