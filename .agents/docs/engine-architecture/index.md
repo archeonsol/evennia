@@ -44,6 +44,9 @@ which drifted stale as the work shipped (a roadmap rots; a decisions log doesn't
 - **[webclient-saved-log.md](webclient-saved-log.md)**: the log the shell keeps in
   the browser between visits: saved with the place it reaches, shown only to its
   account, one saving tab, and the limits.
+- **[webclient-live-screens.md](webclient-live-screens.md)**: a program's text
+  screen in the shell: live view frames that skip the replay buffer, the `screen`
+  protocol, and the panel.
 
 If an item moves from speculative to scoped, it graduates from `horizon.md` up to
 `committed.md`, and to `decisions.md` once shipped.

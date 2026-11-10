@@ -612,3 +612,111 @@ class TestBatching(TestCase):
         self.assertEqual(len(t.sent), 2)
         self.assertEqual(json.loads(t.sent[0].decode("utf-8"))["t"], "render")
         self.assertEqual(t.sent[1], b"not json")
+
+
+def _screen(data="x"):
+    """The envelope the Azaban format makes for a ``screen_frame`` event."""
+    return {
+        "t": "oob",
+        "event": "screen_frame",
+        "args": [],
+        "kwargs": {"id": "arcade-1", "data": data},
+    }
+
+
+class TestLiveFrames(TestCase):
+    """A live view goes out as it is: no seq, no replay slot, no batch."""
+
+    def setUp(self):
+        self.loop = Mock()
+        self.running_loop = patch.object(
+            webclient_mod.asyncio, "get_running_loop", return_value=self.loop
+        )
+        self.running_loop.start()
+        self.addCleanup(self.running_loop.stop)
+
+    def test_a_screen_frame_has_no_seq_and_no_replay_slot(self):
+        t = _Transport()
+        t.sendEncoded(_screen("hello"))
+        frame = _frames(t)[0]
+        self.assertNotIn("s", frame)
+        self.assertEqual(frame["kwargs"], {"id": "arcade-1", "data": "hello"})
+        self.assertFalse(hasattr(t, "out_buffer"))
+        self.assertFalse(hasattr(t, "out_seq"))
+
+    def test_a_screen_frame_leaves_the_counter_where_it_was(self):
+        t = _Transport()
+        t.sendEncoded({"t": "render"})
+        t.sendEncoded(_screen())
+        t.sendEncoded({"t": "prompt"})
+        self.assertEqual([f.get("s") for f in _frames(t)], [1, None, 2])
+        self.assertEqual([seq for seq, _ in t.out_buffer], [1, 2])
+
+    def test_a_reconnect_replays_the_record_and_not_the_screen(self):
+        t = _Transport()
+        t.sendEncoded({"t": "render"})
+        t.sendEncoded(_screen())
+        t.sendEncoded({"t": "prompt"})
+        t.sent.clear()
+        replayed, gap = t._replay_since(0)
+        self.assertEqual(replayed, 2)
+        self.assertFalse(gap)
+        self.assertEqual([f["t"] for f in _frames(t)], ["render", "prompt"])
+
+    def test_a_screen_frame_is_not_batched(self):
+        t = _Transport(caps={"batching": True})
+        t.sendEncoded(_screen())
+        self.assertEqual(len(t.sent), 1)
+        self.assertEqual(_frames(t)[0]["event"], "screen_frame")
+        self.loop.call_soon.assert_not_called()
+
+    def test_frames_waiting_in_a_batch_go_first(self):
+        t = _Transport(caps={"batching": True})
+        t.sendEncoded({"t": "oob", "event": "ui_component", "args": [{"id": "arcade-1"}]})
+        t.sendEncoded(_screen())
+        self.assertEqual([f["event"] for f in _frames(t)], ["ui_component", "screen_frame"])
+        self.assertEqual(_frames(t)[0]["s"], 1)
+        self.assertNotIn("s", _frames(t)[1])
+
+    def test_other_events_of_the_same_run_are_kept_for_a_reconnect(self):
+        t = _Transport()
+        t.sendEncoded({"t": "oob", "event": "screen_end", "args": [], "kwargs": {"id": "arcade-1"}})
+        self.assertEqual(_frames(t)[0]["s"], 1)
+        self.assertEqual(len(t.out_buffer), 1)
+
+    def test_a_screen_frame_for_a_socket_that_is_gone_is_dropped(self):
+        t = _Transport()
+        t._link_lost = True
+        t.sendEncoded(_screen())
+        self.assertEqual(t.sent, [])
+        self.assertFalse(hasattr(t, "out_buffer"))
+
+    def test_a_screen_frame_keeps_its_text_whole(self):
+        t = _Transport()
+        esc = chr(0x1B)
+        text = (
+            f"{esc}[2J{esc}[1;1H{esc}[38;2;10;20;30m"
+            + chr(0x2588)
+            + " caf"
+            + chr(0xE9)
+            + f"{esc}[0m"
+        )
+        t.sendEncoded(_screen(text))
+        self.assertEqual(_frames(t)[0]["kwargs"]["data"], text)
+
+    @patch.object(webclient_mod.settings, "WEBSOCKET_MAX_OUTGOING_BYTES", 120, create=True)
+    def test_a_screen_frame_over_the_size_limit_is_refused(self):
+        t = _Transport()
+        with self.assertRaises(ValueError):
+            t.sendEncoded(_screen("x" * 200))
+        self.assertEqual(t.sent, [])
+
+    def test_a_format_without_resume_is_left_alone(self):
+        t = _Transport(resume=False)
+        t.sendEncoded(_screen())
+        self.assertEqual(_frames(t)[0], _screen())
+
+    def test_binary_frames_are_never_taken_for_a_screen(self):
+        t = _Transport()
+        t.sendEncoded(b"\x00\x01", is_binary=True)
+        self.assertEqual(t.sent, [b"\x00\x01"])

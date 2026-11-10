@@ -74,6 +74,10 @@ the frames above it. State events are idempotent, so re-pushes are safe.
   pressure evicts oldest whole frames. Sequence counters retain the highest sent
   value. When evicted frames fall inside the client's gap, the `hello` reply
   carries `gap: true` and the shell says output was lost.
+- **Live view frames are not buffered.** An event in `LIVE_EVENTS` (a game
+  screen's picture) skips `s`, the buffer and batching, so a reconnect never
+  replays an old picture. The client asks for a fresh one. See
+  [`webclient-live-screens.md`](webclient-live-screens.md).
 - **`resume_reset` clears the buffer** (the shell's "clear log"), so a reload
   does not replay what the player cleared. The counter runs on.
 - **Frames keep the time they were made.** `ts` is stamped beside `s`, once, so a

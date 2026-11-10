@@ -149,6 +149,19 @@ export interface PlayerMentionPayload {
   text: string;
 }
 
+/** An arcade run is over: the panel's word for how it ended. The score is told in the game's own text. */
+export interface ScreenEndPayload {
+  id: string;
+  headline: string;
+  why: string;
+}
+
+/** Output of an arcade program for its panel, as a stream of text. Not kept for a reconnect. */
+export interface ScreenFramePayload {
+  id: string;
+  data: string;
+}
+
 /** The session's SCREENREADER flag, sent whenever it is set (login restore, @option). */
 export interface ScreenreaderModePayload {
   on: boolean;
@@ -295,6 +308,8 @@ export type OobEvent =
   | "play_music"
   | "play_yt"
   | "player_mention"
+  | "screen_end"
+  | "screen_frame"
   | "screenreader_mode"
   | "stop_music"
   | "stop_music_now"
@@ -346,6 +361,8 @@ export interface OobEventMap {
   "play_music": PlayMusicPayload;
   "play_yt": PlayYtPayload;
   "player_mention": PlayerMentionPayload;
+  "screen_end": ScreenEndPayload;
+  "screen_frame": ScreenFramePayload;
   "screenreader_mode": ScreenreaderModePayload;
   "stop_music": StopMusicPayload;
   "stop_music_now": StopMusicNowPayload;

@@ -290,6 +290,48 @@ class Dock {
     });
   }
 
+  /**
+   * Show the terminal panel of a screen the server opened. It floats beside the terminal, sized to the
+   * program's own shape; a second open for the same screen only brings it forward.
+   */
+  openScreen(id: string, title: string, size: [number, number] = [80, 24]): void {
+    const panelId = `screen:${id}`;
+    const params = { screenId: id };
+    if (settings.screenreader) {
+      const fresh = !simple.has(panelId);
+      simple.open({ id: panelId, component: "screen", title, params });
+      if (fresh) announcer.now(`${title} opened in a new view tab. Alt+O returns to the game output.`);
+      return;
+    }
+    if (!this.api) return;
+    const existing = this.api.getPanel(panelId);
+    if (existing) {
+      existing.api.setActive();
+      return;
+    }
+    const w = this.host?.clientWidth || this.api.width;
+    const h = this.host?.clientHeight || this.api.height;
+    // The screen is cols x rows letters, about half as wide as they are tall. Around it: the panel's
+    // border and padding (18 across), its head, and the tab strip above it (about 90 down).
+    const shape = (size[0] * 0.5) / size[1];
+    const width = Math.max(Math.min(w * 0.62, 900), Math.min(w, 420));
+    const height = Math.max(Math.min((width - 18) / shape + 90, h - 40), Math.min(h, 320));
+    this.api.addPanel({
+      id: panelId,
+      component: "screen",
+      title,
+      params,
+      floating: { x: Math.max(0, w - width - 20), y: 20, width, height },
+    });
+  }
+
+  /** Close the terminal panel of a screen. */
+  closeScreen(id: string): void {
+    const panelId = `screen:${id}`;
+    simple.close(panelId);
+    this.api?.getPanel(panelId)?.api.close();
+  }
+
   /** Pop a panel's group out into a real browser window (multi-monitor). */
   popout(id: string): void {
     if (!this.api) return;

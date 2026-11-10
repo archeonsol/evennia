@@ -25,6 +25,55 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.346: The web client can show a program's screen
+
+A game that runs a real text program (an old arcade game, say) had no way to show it in the shell. Terminal bytes sent as log output
+would have filled the replay buffer with pictures nobody wants again. This release adds a live view path to the Portal and a game
+screen panel to the shell: the program's picture is drawn in place, a key press goes back to the program, and a reconnect asks for the
+picture again instead of replaying it.
+
+### Engine
+
+- **Live view frames** ([`webclient.py`](evennia/server/portal/webclient.py)). `LIVE_EVENTS` names the oob events that only show what
+  is on a screen right now; today that is `screen_frame`. On a resume-capable socket such a frame is written straight to the
+  socket: no `s` stamp, no replay slot, no batching, and the sequence counter does not move. Batched output that is already pending
+  is flushed first, so order holds. A lost socket drops the frame, and `WEBSOCKET_MAX_OUTGOING_BYTES` still applies. Every other
+  event, `screen_end` included, is stamped and replayed as before. Formats without resume, and binary frames, are untouched.
+- **OOB catalog** ([`oob-events.ts`](evennia/web/webclient/client/src/lib/oob-events.ts)). Regenerated from the merged catalog. It now
+  holds the game's `screen_frame` and `screen_end` events. A game's `test_checked_in_types_are_not_stale` compares this file, so a game
+  that registers those events must run on the engine tag that carries the regenerated file.
+
+### Client
+
+- **Game screen panel** ([`ScreenPanel.svelte`](evennia/web/webclient/client/src/components/ScreenPanel.svelte),
+  [`screens.svelte.ts`](evennia/web/webclient/client/src/lib/screens.svelte.ts)). A `ui_component` of type `screen` opens a dock panel
+  in the look of a puppet's terminal tile: the title in the head, a one-word state ("Click to play", "Playing", and at the end the
+  game's `headline`) beside a Close command, and an xterm.js terminal that takes the shell's ground and ink. The panel adds no key
+  list, result card or colour of its own. The program's own screen is the picture, and a finished run stays on screen, dimmed. The
+  screen is measured and scaled to fit its panel. Keys go to the game as `screen_key` actions in the `screen` namespace. A new panel
+  and a reconnect send `screen_sync`, and the game answers with the whole picture. `Shift+Esc` leaves the screen without sending a
+  key. The keys the game takes are read to a screen reader when the screen opens, and xterm's screen reader mode follows the shell's
+  screen reader setting. A panel whose screen is gone closes itself after a few seconds.
+- `CLIENT_CAPS.screen` is declared, and `sendOobRaw` takes an optional namespace for the action.
+- **New dependency**: `@xterm/xterm` 6.0.0 (MIT) in the client's `package.json` and lockfile.
+
+### Tests
+
+- [`test_webclient_transport.py`](evennia/server/portal/test_webclient_transport.py) gains `TestLiveFrames`: no stamp and no replay
+  slot, the counter unmoved, a reconnect replays records and not pictures, no batching, pending batch flushed first, `screen_end` still
+  stamped, a lost socket drops the frame, oversize refused, and the other formats untouched.
+- [`screens.test.ts`](evennia/web/webclient/client/src/lib/screens.test.ts) covers the store (27 tests).
+- [`tests/screen.ts`](evennia/web/webclient/client/tests/screen.ts) is a browser page that runs the real panel and xterm. The runner
+  presses real keys on it, since a terminal reads a space from the key press and not from the key down.
+
+### Migration
+
+None for a game that does not use screens. A game that does registers `screen_frame` and `screen_end`, allows `screen:screen_key` and
+`screen:screen_sync` in `AZABAN_PUBLIC_ACTIONS`, and answers `screen_sync` with the whole picture. The protocol notes are in
+[`webclient-live-screens.md`](.agents/docs/engine-architecture/webclient-live-screens.md).
+
+---
+
 ## 6.0.0+underspire.345: `accounts_holding` names who holds a capability without loading accounts
 
 A game that counts its staff (for a money census, say) had to load every account and ask `world_capabilities` of each one: a few
