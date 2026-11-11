@@ -3,7 +3,7 @@ from django.test.utils import CaptureQueriesContext
 from mock import MagicMock, patch
 
 from evennia.authorization.policy import Always, Never, PredicateRequirement, RequiresCapability
-from evennia.objects.models import ObjectDB
+from evennia.objects.models import UNTRACKED, ObjectDB
 from evennia.objects.objects import DefaultCharacter, DefaultExit, DefaultObject, DefaultRoom
 from evennia.objects.search_result import Ambiguous, Found, NotFound
 from evennia.typeclasses.attributes import AttributeProperty
@@ -1926,3 +1926,60 @@ class TestObjectDBFromDbPartialLoad(BaseEvenniaTest):
 
         full = ObjectDB.objects.get(id=char.id)
         self.assertEqual(full._loaded_location_id, room2.id)
+
+
+class TestObjectDBLocationBaseline(BaseEvenniaTest):
+    """A direct save of ``db_location`` rebuilds every contents cache only when the old location is unknown.
+
+    ``None`` means the object is known to have had no location, so there is no cache to take it out of.
+    A room is the usual case: it clears its own location in ``basetype_setup``, and the location it was
+    created with is then saved straight to the database. That rebuilt the cache of every object in
+    memory, 15.6 s on prod with about 18,000 loaded.
+    """
+
+    @staticmethod
+    def _warn():
+        return patch("evennia.objects.models.logger.log_warn")
+
+    @staticmethod
+    def _rebuilds(warn):
+        return [call for call in warn.call_args_list if "no tracked location" in str(call.args[0])]
+
+    def test_a_room_created_inside_an_object_does_not_rebuild_the_caches(self):
+        with self._warn() as warn:
+            room = create.create_object(DefaultRoom, key="Inside", location=self.obj1)
+        self.assertEqual(self._rebuilds(warn), [])
+        self.assertIs(room.location, self.obj1)
+        self.assertIn(room, self.obj1.contents)
+        self.assertEqual(room._loaded_location_id, self.obj1.pk)
+
+    def test_an_object_with_no_location_can_be_given_one_by_a_direct_save(self):
+        loose = create.create_object(DefaultObject, key="loose", location=None, nohome=True)
+        self.assertIsNone(loose._loaded_location_id)
+        with self._warn() as warn:
+            loose.db_location = self.room1
+            loose.save(update_fields=["db_location"])
+        self.assertEqual(self._rebuilds(warn), [])
+        self.assertIn(loose, self.room1.contents)
+        self.assertEqual(loose._loaded_location_id, self.room1.pk)
+
+    def test_an_object_with_unknown_tracking_still_rebuilds_every_cache(self):
+        thing = create.create_object(DefaultObject, key="thing", location=self.room1)
+        self.assertIn(thing, self.room1.contents)
+        thing._loaded_location_id = UNTRACKED
+        with self._warn() as warn:
+            thing.db_location = self.room2
+            thing.save(update_fields=["db_location"])
+        self.assertEqual(len(self._rebuilds(warn)), 1)
+        self.assertNotIn(thing, self.room1.contents)
+        self.assertIn(thing, self.room2.contents)
+        self.assertEqual(thing._loaded_location_id, self.room2.pk)
+
+    def test_a_known_old_location_is_still_taken_out_of_its_cache(self):
+        thing = create.create_object(DefaultObject, key="thing", location=self.room1)
+        with self._warn() as warn:
+            thing.db_location = self.room2
+            thing.save(update_fields=["db_location"])
+        self.assertEqual(self._rebuilds(warn), [])
+        self.assertNotIn(thing, self.room1.contents)
+        self.assertIn(thing, self.room2.contents)

@@ -27,6 +27,10 @@ from evennia.typeclasses.models import TypedObject
 from evennia.utils import logger
 from evennia.utils.utils import dbref, lazy_property, make_iter
 
+# What ``ObjectDB._loaded_location_id`` holds when nothing is known about where the object sat.
+# ``None`` is a different answer: the object is known to have had no location.
+UNTRACKED = object()
+
 
 class ContentsHandler:
     """
@@ -508,7 +512,7 @@ class ObjectDB(TypedObject):
             # Partial row: under idmapper, `instance` may be a cached object far
             # fuller than the row, so a missing field means "no information",
             # never "reset tracking to None".
-            instance._loaded_location_id = None
+            instance._loaded_location_id = UNTRACKED
         return instance
 
     @hook(
@@ -541,8 +545,17 @@ class ObjectDB(TypedObject):
             else:
                 # Targeted cache update using the location tracked at load time.
                 # This avoids the expensive full-reinit of all cached instances.
-                old_loc_id = getattr(self, "_loaded_location_id", None)
-                if old_loc_id is not None:
+                old_loc_id = getattr(self, "_loaded_location_id", UNTRACKED)
+                if old_loc_id is UNTRACKED:
+                    # Nothing is known about where this object sat, so rebuild every cache.
+                    # On prod that took 15.6 s with about 18,000 objects loaded, so a path
+                    # that can know the old location should record it.
+                    logger.log_warn(
+                        "db_location direct save with no tracked location; "
+                        "triggering contents_cache.init() for all objects."
+                    )
+                    [o.contents_cache.init() for o in self.__dbclass__.get_all_cached_instances()]
+                elif old_loc_id is not None:
                     old_loc = type(self).__instance_cache__.get(old_loc_id)
                     if old_loc is not None:
                         old_loc.contents_cache.remove(self)
@@ -553,13 +566,9 @@ class ObjectDB(TypedObject):
                             old_loc.contents_cache.remove(self)
                         except Exception:
                             pass
-                else:
-                    # No tracked location (object predates this fix) — fall back to full reinit.
-                    logger.log_warn(
-                        "db_location direct save with no tracked location; "
-                        "triggering contents_cache.init() for all objects."
-                    )
-                    [o.contents_cache.init() for o in self.__dbclass__.get_all_cached_instances()]
+                # else: tracked as having no location, so there is no cache to take it out of.
+                # A room does this on creation: it clears its own location in basetype_setup,
+                # then the location it was created with is saved straight to the database.
                 if self.db_location:
                     self.db_location.contents_cache.add(self)
         # Keep tracked location in sync after any save.

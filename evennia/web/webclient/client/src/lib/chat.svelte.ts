@@ -215,11 +215,22 @@ class Chat {
     });
   }
 
-  /** Ask the server to (re)push the channel list, comms status, ticket role and queue. */
-  syncChannels(): void {
-    connection.request("channels", "sync_channels").catch((err) => {
-      toasts.push("channels", "Channels", String(err?.message ?? err));
-    });
+  /**
+   * Ask the server to (re)push the channel list, comms status, ticket role and queue.
+   *
+   * Rejects when no answer came; the caller decides whether to try again (lib/resync.ts) and when to say so.
+   */
+  syncChannels(): Promise<unknown> {
+    return connection.request("channels", "sync_channels");
+  }
+
+  /** Tell the player the channel list could not be fetched, once the retries ran out. */
+  syncFailed(): void {
+    toasts.push(
+      "channels",
+      "Channels",
+      "The game did not answer for the channel list. Refresh the page if it does not come back.",
+    );
   }
 
   post(key: string, text: string): void {

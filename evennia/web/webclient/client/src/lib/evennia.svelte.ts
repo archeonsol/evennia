@@ -211,6 +211,18 @@ export class AzabanConnection {
     this.handlers.set(type, handler);
   }
 
+  /**
+   * Run the connect handlers again, on the socket that is already open.
+   *
+   * The Portal drops what a page sends before the game is back from a restart or reload, so
+   * what the page asked as the socket opened (its feed subscription, its ticket protocol, its
+   * display flags) may never have arrived. Every one of those requests can be repeated.
+   */
+  reannounce(): void {
+    if (this.state !== "open") return;
+    this.handlers.get("connection_open")?.({ t: "connection_open" });
+  }
+
   /** Send a command line. */
   sendCommand(line: string): void {
     this.sendEnvelope({ t: "cmd", line });
