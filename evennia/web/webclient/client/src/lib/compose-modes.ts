@@ -47,6 +47,13 @@ export function withBreaks(mode: ComposeMode, text: string): string {
 }
 
 /**
+ * A pose that already names how it is sent: the "." and "," markers, and the
+ * place poses "p." and "p," (`ppose`). Putting another "." in front of a place
+ * pose sent it to the whole room as "Egret p.nods."
+ */
+const POSE_MARKER = /^(?:p?[.,])/i;
+
+/**
  * The command line a composed draft actually sends.
  *
  * Pose uses the "." verb-marker shorthand rather than `pose <text>` because the
@@ -58,7 +65,7 @@ export function composeToCommand(mode: ComposeMode, text: string): string {
   if (!t) return "";
   switch (mode) {
     case "pose":
-      return t.startsWith(".") || t.startsWith(",") ? t : `.${t}`;
+      return POSE_MARKER.test(t) ? t : `.${t}`;
     case "emote":
       return `emote ${t}`;
     case "say":
@@ -78,6 +85,8 @@ export interface ComposePreviewRequest {
 
 /** The preview request for a draft, or null if there is nothing to preview. */
 export function composeToPreview(mode: ComposeMode, text: string): ComposePreviewRequest | null {
-  const t = withBreaks(mode, text);
+  let t = withBreaks(mode, text);
+  // The preview shows the pose itself; a place pose's "p" marker is not part of it.
+  if (mode === "pose" && /^p[.,]/i.test(t)) t = t.slice(1);
   return t ? { mode, text: t } : null;
 }

@@ -25,6 +25,36 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.347: Three web client fixes from player tickets
+
+Three small faults in the shell, each reported by a player and each reproduced in a test. The shell bundle is rebuilt.
+
+### Engine
+
+- **New-lines bar during a search** (ticket 880; [`autoscroll.ts`](evennia/web/webclient/client/src/lib/autoscroll.ts),
+  [`GameLog.svelte`](evennia/web/webclient/client/src/components/GameLog.svelte)). The "N new lines" bar was hidden for as long as the
+  search bar was open, and a pinned log held in place by a search did not count its arrivals as unseen. `searchHolds` and
+  `awayFromNewest` now decide both, using the same rule `follow()` uses to stand still.
+- **Kept command after a history edit** (ticket 1356; [`history.ts`](evennia/web/webclient/client/src/lib/history.ts),
+  [`CommandInput.svelte`](evennia/web/webclient/client/src/components/CommandInput.svelte),
+  [`PuppetTerminal.svelte`](evennia/web/webclient/client/src/components/PuppetTerminal.svelte)). With "Keep command after sending" on,
+  the typed line is the command sent just before. Editing an older command and sending it put that older one back instead of keeping
+  the edit. `HistoryWalk.finish(keeping)` takes the setting and does not restore a typed line that is only the newest command; a
+  half-written line still comes back.
+- **Place poses from the compose pad** (ticket 1460; [`compose-modes.ts`](evennia/web/webclient/client/src/lib/compose-modes.ts)).
+  The pad put a "." in front of a place pose (`p.` and `p,`), so the room read "Egret p.nods.". `composeToCommand` now sends a place
+  pose as written, and the preview drops its `p` marker.
+
+### Tests
+
+- Vitest cases in `autoscroll.test.ts`, `history.test.ts` and `compose-modes.test.ts`, one set per fix.
+
+### Migration
+
+None. A game picks the fixes up by pinning this tag; the rebuilt bundle ships under `evennia/web/static/webclient/shell`.
+
+---
+
 ## 6.0.0+underspire.346: The web client can show a program's screen
 
 A game that runs a real text program (an old arcade game, say) had no way to show it in the shell. Terminal bytes sent as log output

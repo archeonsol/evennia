@@ -139,6 +139,11 @@ async function run(): Promise<void> {
   await settle(6);
   const active = document.querySelector<HTMLElement>(".log-line.active");
   check("search jumps to the match", !!active && (active.textContent ?? "").includes("marker1234"), active?.textContent ?? "no active row");
+  // Ticket 880: the new-line bar went missing for as long as the search was open.
+  session.append("<span>tail while searching</span>", "text");
+  await settle();
+  const heldBar = document.querySelector<HTMLElement>(".latest");
+  check("the new-line bar shows while a search holds the log", !!heldBar && /new line/.test(heldBar.textContent ?? ""), heldBar?.textContent ?? "no bar");
   logview.searchOpen = false;
   logview.search = "";
   await settle();

@@ -86,15 +86,22 @@ export class HistoryWalk {
   /**
    * End the walk because a line was sent.
    *
+   * With "Keep command after sending" on, the typed line is often only the
+   * command sent just before: it stayed on the line, selected. That is not
+   * something half written, so sending a recalled (or edited) command leaves
+   * the command just sent on the line instead of bringing the old one back.
+   *
+   * @param keeping "Keep command after sending" is on.
    * @returns The line to put back: what was being typed when a recalled command
    *   went instead of it, otherwise "".
    */
-  finish(): string {
+  finish(keeping = false): string {
     const typed = this.walking ? (this.kept.get(-1) ?? "") : "";
+    const kept = keeping && typed === this.entries[0];
     this.index = -1;
     this.entries = [];
     this.kept.clear();
-    return typed.trim() ? typed : "";
+    return typed.trim() && !kept ? typed : "";
   }
 
   private begin(history: readonly string[]): void {

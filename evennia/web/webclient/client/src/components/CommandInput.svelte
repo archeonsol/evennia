@@ -87,7 +87,7 @@
     chat.armEcho(value);
     commands.run(value);
     // A recalled command went instead of the line being typed: put that back.
-    const typed = walk.finish();
+    const typed = walk.finish(settings.keepCommand);
     if (typed) {
       value = typed;
       announcer.now(`Restored: ${typed}`);

@@ -4,7 +4,7 @@
   import { logview, CATS } from "../lib/logview.svelte";
   import { keybinds } from "../lib/keybinds.svelte";
   import { typewriter, markBacklog } from "../lib/typewriter";
-  import { pinAfterScroll } from "../lib/autoscroll";
+  import { awayFromNewest, pinAfterScroll, searchHolds } from "../lib/autoscroll";
   import { settings } from "../lib/settings.svelte";
   import { buildTranscript, type TranscriptFormat } from "../lib/transcript";
   import { createLogVirtualizer, estimateLinePx, indexOfId, type LogVirtualizer } from "../lib/logvirtual";
@@ -146,7 +146,7 @@
       const v = virtualizer;
       if (!v || !el || !el.clientHeight || !pinned) return;
       // A search holds its match in view; following would scroll past it.
-      if (logview.searchOpen && logview.search.trim()) return;
+      if (searchHolds(logview.searchOpen, logview.search)) return;
       syncSpacer(v);
       if (el.scrollHeight - el.scrollTop - el.clientHeight > 1) v.scrollToEnd({ behavior: "auto" });
     });
@@ -250,7 +250,7 @@
     let grew = 0;
     while (grew < n && lines[n - 1 - grew].id > seenLast) grew++;
     if (n) seenLast = Math.max(seenLast, lines[n - 1].id);
-    if (pinned && !logview.searchOpen) {
+    if (!awayFromNewest(pinned, searchHolds(logview.searchOpen, logview.search))) {
       unseen = 0;
     } else if (grew > 0) {
       unseen = untrack(() => unseen) + grew;
@@ -264,7 +264,7 @@
     }
   });
   $effect(() => {
-    if (pinned) unseen = 0;
+    if (!awayFromNewest(pinned, searchHolds(logview.searchOpen, logview.search))) unseen = 0;
   });
   // The record keeps older lines the reader asked for while they are away from
   // the bottom, and lets them go once they are back.
@@ -653,7 +653,7 @@
       {/each}
     </div>
   </div>
-  {#if !pinned && unseen > 0 && !logview.searchOpen}
+  {#if unseen > 0 && awayFromNewest(pinned, searchHolds(logview.searchOpen, logview.search))}
     <button class="latest" onclick={jumpToLatest}>&#9660; {unseen} new line{unseen === 1 ? "" : "s"}</button>
   {/if}
 </div>
