@@ -19,6 +19,7 @@
   import { connection } from "./lib/evennia.svelte";
   import { session } from "./lib/session.svelte";
   import { chat } from "./lib/chat.svelte";
+  import { syncUntilAnswered } from "./lib/resync";
   import { settings } from "./lib/settings.svelte";
   import { dock } from "./lib/dock.svelte";
   import { logview } from "./lib/logview.svelte";
@@ -45,14 +46,26 @@
   });
   let paletteOpen = $state(false);
 
-  // On (re)connect, ask the server to push the channel registry + assist inbox.
+  // On (re)connect, ask the server to push the channel registry + assist inbox. The Portal takes
+  // the socket before the game is back from a restart or reload and drops what arrives meanwhile,
+  // so a miss is asked again, and everything else the page asks on connect goes with it.
   let synced = false;
+  let syncRun = 0;
   $effect(() => {
     if (connection.state === "open" && !synced) {
       synced = true;
-      chat.syncChannels();
+      const run = ++syncRun;
+      const current = () => run === syncRun && connection.state === "open";
+      void syncUntilAnswered({
+        attempt: () => chat.syncChannels(),
+        stillWanted: current,
+        onRecovered: () => connection.reannounce(),
+      }).then((answered) => {
+        if (!answered && current()) chat.syncFailed();
+      });
     } else if (connection.state !== "open") {
       synced = false;
+      syncRun++;
     }
   });
 

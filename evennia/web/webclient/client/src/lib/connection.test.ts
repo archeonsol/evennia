@@ -93,6 +93,25 @@ function connected(token = "T1") {
   return conn;
 }
 
+describe("asking for the connect requests again", () => {
+  it("runs the connect handler once more on an open socket", () => {
+    const conn = connected();
+    const opened = vi.fn();
+    conn.on("connection_open", opened);
+    conn.reannounce();
+    expect(opened).toHaveBeenCalledTimes(1);
+  });
+
+  it("does nothing on a socket that is not open", () => {
+    const conn = new AzabanConnection();
+    conn.init();
+    const opened = vi.fn();
+    conn.on("connection_open", opened);
+    conn.reannounce();
+    expect(opened).not.toHaveBeenCalled();
+  });
+});
+
 describe("resume token", () => {
   it("presents the token the portal issued, and the last seq applied", () => {
     connected("T1");
