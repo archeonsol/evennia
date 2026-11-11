@@ -25,6 +25,27 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.348: A room made inside an object, and the web client after a reload
+
+Two faults found in production logs and tickets. A game that made a room inside another object stopped for 15.6 s, and the web client lost its channels when the game came back from a reload. The shell bundle is rebuilt.
+
+### Engine
+
+- **Location tracking** ([`models.py`](evennia/objects/models.py)). `ObjectDB._loaded_location_id` held `None` both for "known to have no location" and for "nothing known about where it sat", and `at_db_location_postsave` rebuilt `contents_cache` for every cached object on either. A `Room` created inside another object takes that path: `basetype_setup` clears its location, then `at_first_save` saves the one it was created with. On production that held the reactor for 15.6 s with about 18,000 objects loaded. `UNTRACKED` now means "no information" (a partial row from `from_db`) and keeps the full rebuild. `None` means no location, so there is nothing to take out of a cache.
+- **Channel list after a reload** ([`resync.ts`](evennia/web/webclient/client/src/lib/resync.ts), [`App.svelte`](evennia/web/webclient/client/src/App.svelte),
+  [`chat.svelte.ts`](evennia/web/webclient/client/src/lib/chat.svelte.ts), [`evennia.svelte.ts`](evennia/web/webclient/client/src/lib/evennia.svelte.ts)). The Portal takes the socket before the game is back from a restart or reload and drops every request that arrives meanwhile. The page asked for the channel list once, on connect, so a lost reply left the role (which history, compose and the feeds are keyed on) and the feed subscriptions unbound until a refresh. The page now retries `sync_channels` on a schedule (3 s growing to 30 s, about three minutes in all). Once the game answers after a miss it replays the connect-time handlers once through `connection.reannounce()`, and a toast says so if the game never answers.
+
+### Tests
+
+- `TestObjectDBLocationBaseline` in `evennia/objects/tests/test_objects.py`: a room created inside an object, a direct save of a location on an object that had none, an untracked save (still rebuilds once) and a known old location (still removed from its own cache without a rebuild).
+- Vitest cases in `resync.test.ts` and `connection.test.ts`.
+
+### Migration
+
+None. A game picks the fixes up by pinning this tag; the rebuilt bundle ships under `evennia/web/static/webclient/shell`.
+
+---
+
 ## 6.0.0+underspire.347: Three web client fixes from player tickets
 
 Three small faults in the shell, each reported by a player and each reproduced in a test. The shell bundle is rebuilt.
