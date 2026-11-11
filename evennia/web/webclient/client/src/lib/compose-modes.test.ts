@@ -43,6 +43,23 @@ describe("composeToCommand", () => {
     expect(composeToCommand("emote", "waves.\r\nsmiles.")).toBe("emote waves.|/smiles.");
   });
 
+  // Ticket 1460: a place pose sent from the pad went to the whole room as "Egret p.nods."
+  it("sends a place pose as it was written, without a second marker", () => {
+    expect(composeToCommand("pose", 'p.nod. "I love places!"')).toBe('p.nod. "I love places!"');
+    expect(composeToCommand("pose", "p,'s hat falls.")).toBe("p,'s hat falls.");
+    expect(composeToCommand("pose", "P.nods.")).toBe("P.nods.");
+  });
+
+  it("still marks a pose that only starts with the letter p", () => {
+    expect(composeToCommand("pose", "pokes the fire.")).toBe(".pokes the fire.");
+  });
+
+  it("previews a place pose without its marker", () => {
+    expect(composeToPreview("pose", "p.nods.")).toEqual({ mode: "pose", text: ".nods." });
+    expect(composeToPreview("pose", "pokes the fire.")).toEqual({ mode: "pose", text: "pokes the fire." });
+    expect(composeToPreview("emote", "p.nods.")).toEqual({ mode: "emote", text: "p.nods." });
+  });
+
   it("keeps a pose that already starts with its marker, across lines", () => {
     expect(composeToCommand("pose", ".waves.\nsmiles.")).toBe(".waves.|/smiles.");
   });

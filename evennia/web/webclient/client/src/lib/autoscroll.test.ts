@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { REPIN_PX, pinAfterScroll } from "./autoscroll";
+import { REPIN_PX, awayFromNewest, pinAfterScroll, searchHolds } from "./autoscroll";
 
 describe("pinAfterScroll", () => {
   it("keeps pinning when content grows past the threshold after our own write", () => {
@@ -26,5 +26,29 @@ describe("pinAfterScroll", () => {
 
   it("stays unpinned as long as the user stays away from the bottom", () => {
     expect(pinAfterScroll(false, 500, 200, 1000)).toBe(false);
+  });
+});
+
+// Ticket 880: the "N new lines" bar was hidden for as long as the search bar was open.
+describe("searchHolds", () => {
+  it("holds only while the bar is open and has a term", () => {
+    expect(searchHolds(true, "marker")).toBe(true);
+    expect(searchHolds(true, "   ")).toBe(false);
+    expect(searchHolds(true, "")).toBe(false);
+    expect(searchHolds(false, "marker")).toBe(false);
+  });
+});
+
+describe("awayFromNewest", () => {
+  it("is away when scrolled up", () => {
+    expect(awayFromNewest(false, false)).toBe(true);
+  });
+
+  it("is away while a search holds the log, even if still pinned", () => {
+    expect(awayFromNewest(true, true)).toBe(true);
+  });
+
+  it("is not away when following with no search", () => {
+    expect(awayFromNewest(true, false)).toBe(false);
   });
 });

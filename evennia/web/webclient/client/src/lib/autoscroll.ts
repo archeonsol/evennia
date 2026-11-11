@@ -25,3 +25,26 @@ export function pinAfterScroll(pinned: boolean, gap: number, top: number, lastTo
   if (top < lastTop - USER_PX) return false;
   return pinned;
 }
+
+/**
+ * Whether a search is holding its match in view. The log does not follow the
+ * newest line while it is, so a line that lands is news the reader has not
+ * seen, whether or not they have scrolled.
+ *
+ * @param open The search bar is open.
+ * @param term What is typed in it.
+ */
+export function searchHolds(open: boolean, term: string): boolean {
+  return open && term.trim() !== "";
+}
+
+/**
+ * Whether the reader is away from the newest line, so arrivals are counted on
+ * the "N new lines" bar. Scrolled up, or held in place by a search.
+ *
+ * @param pinned The log follows the newest line.
+ * @param holding A search holds its match in view (see searchHolds).
+ */
+export function awayFromNewest(pinned: boolean, holding: boolean): boolean {
+  return !pinned || holding;
+}

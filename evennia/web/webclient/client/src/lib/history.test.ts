@@ -134,6 +134,30 @@ describe("HistoryWalk", () => {
     it("gives back nothing without a walk", () => {
       expect(new HistoryWalk().finish()).toBe("");
     });
+
+    // Ticket 1356: with "Keep command after sending" on, the typed line is the
+    // command sent just before. Editing an older command and sending it brought
+    // that one back instead of keeping the edit.
+    it("keeps the command just sent when Keep command is on and the typed line was only the last command", () => {
+      const history = ["emote looks around a bit.", "emote sighs quietly."];
+      const w = new HistoryWalk();
+      expect(w.step(1, "emote looks around a bit.", history)).toBe("emote sighs quietly.");
+      expect(w.finish(true)).toBe("");
+    });
+
+    it("still gives back a line that was really being typed when Keep command is on", () => {
+      const w = new HistoryWalk();
+      w.step(1, "half a pose", HISTORY);
+      expect(w.finish(true)).toBe("half a pose");
+    });
+
+    it("gives back a typed line equal to the newest command when Keep command is off", () => {
+      const w = new HistoryWalk();
+      w.step(1, "say three", HISTORY);
+      expect(w.finish()).toBe("say three");
+      w.step(1, "say three", HISTORY);
+      expect(w.finish(false)).toBe("say three");
+    });
   });
 
   describe("jump", () => {
