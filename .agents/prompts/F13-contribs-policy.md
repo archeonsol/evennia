@@ -36,8 +36,6 @@ findings that cite the "no new additions" rule).
   newmoo (cooldowns, name_generator, traits, components, buffs,
   rpsystem). So contrib has already shrunk; the current set is
   what's left after one cull.
-- F3 (doc rot sweep) is gated on a newmoo PR that moves more
-  contrib modules. Coordinate timing.
 
 ## Scope boundary
 
@@ -51,7 +49,6 @@ findings that cite the "no new additions" rule).
 ## Existing code to study
 
 - `evennia/contrib/` — current contents.
-- `docs/source/Contribs/` (or wherever contrib docs live).
 - Past release notes / changelog for the F1 cull as precedent.
 
 ## Done means

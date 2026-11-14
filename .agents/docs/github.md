@@ -1,26 +1,26 @@
 # GitHub Issues & PRs
 
-Use the `gh` CLI to interact with the Evennia repository on GitHub
-(`-R evennia/evennia`).
+Use the `gh` CLI to interact with the engine fork on GitHub
+(`-R archeonsol/evennia`).
 If `gh` is not installed, ask the developer to install it — do not attempt
 workarounds.
 
 ## Listing
 
 ```bash
-gh issue list -R evennia/evennia                    # open issues
-gh pr list -R evennia/evennia                       # open PRs
-gh issue list -R evennia/evennia --search "keyword"  # search issues
-gh pr list -R evennia/evennia --search "keyword"     # search PRs
+gh issue list -R archeonsol/evennia                    # open issues
+gh pr list -R archeonsol/evennia                       # open PRs
+gh issue list -R archeonsol/evennia --search "keyword"  # search issues
+gh pr list -R archeonsol/evennia --search "keyword"     # search PRs
 ```
 
 ## Viewing Details
 
 ```bash
-gh issue view <number> -R evennia/evennia
-gh pr view <number> -R evennia/evennia
-gh pr diff <number> -R evennia/evennia               # PR diff
-gh api repos/evennia/evennia/pulls/<number>/comments  # PR review comments
+gh issue view <number> -R archeonsol/evennia
+gh pr view <number> -R archeonsol/evennia
+gh pr diff <number> -R archeonsol/evennia               # PR diff
+gh api repos/archeonsol/evennia/pulls/<number>/comments  # PR review comments
 ```
 
 ## Output Formatting
@@ -28,7 +28,7 @@ gh api repos/evennia/evennia/pulls/<number>/comments  # PR review comments
 When presenting issues or PRs to the user, always include a clickable URL:
 
 ```
-#3850 — Fix EvMenu node persistence (https://github.com/evennia/evennia/issues/3850)
+#<number> — <title> (https://github.com/archeonsol/evennia/issues/<number>)
 ```
 
-Use the `evennia/evennia#<number>` shorthand where markdown rendering supports it.
+Use the `archeonsol/evennia#<number>` shorthand where markdown rendering supports it.

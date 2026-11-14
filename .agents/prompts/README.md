@@ -166,8 +166,6 @@ F18 unused engine handlers, F23 dead `COMMAND_DEFAULT_CLASS` patches.
 
 **Mechanical / verification:**
 
-- [F3: doc rot sweep in `docs/source/`](F3-doc-rot-sweep.md) —
-  gated on a newmoo PR.
 - [F21: migration-scaffolding carveout](F21-migration-scaffolding-carveout.md)
   — in-progress. The I1 reconcile scaffolding was removed in `.72`; the
   broader sweep for one-time backfill machinery remains.
@@ -186,6 +184,6 @@ F18 unused engine handlers, F23 dead `COMMAND_DEFAULT_CLASS` patches.
   [committed](../docs/engine-architecture/committed.md) not-yet-built,
   [horizon](../docs/engine-architecture/horizon.md) speculative).
 - [Core Beliefs](../docs/core-beliefs.md) — the engine/game placement rule.
-- [Typeclass Hooks Contracts](../../docs/source/Components/Typeclass-Hooks.md) +
-  [Reference Tables](../../docs/source/Components/Typeclass-Hooks-Reference.md) — B1's
+- [Typeclass Hooks Contracts](../../docs/Typeclass-Hooks.md) +
+  [Reference Tables](../../docs/Typeclass-Hooks-Reference.md) — B1's
   output; consumed by H1, M1, R1, CM1.

@@ -8,7 +8,7 @@ authority is capabilities rather than lock strings. This module reflects the
 
 Everything here is read-only, pure, and safe on a web worker: it inspects
 classes and the app registry, never instances, so it holds to the boundary
-rules in ``docs/source/Components/Web-IO-Boundary.md`` without needing the IO
+rules in ``docs/Web-IO-Boundary.md`` without needing the IO
 owner at all. That is what lets the Records, Migrations, and Settings panels
 keep working in degraded mode when the game server is down.
 

@@ -195,7 +195,7 @@ scheduled.
 Cross-refs: H1 in
 [`decisions.md`](.agents/docs/engine-architecture/decisions.md);
 appearance-mixin §2.10 and §3.3 in
-[`Typeclass-Hooks.md`](docs/source/Components/Typeclass-Hooks.md).
+[`Typeclass-Hooks.md`](docs/Typeclass-Hooks.md).
 
 ---
 

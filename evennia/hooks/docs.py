@@ -38,8 +38,8 @@ _MARKER_RE = re.compile(
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _DOCS = (
-    _REPO_ROOT / "docs/source/Components/Typeclass-Hooks.md",
-    _REPO_ROOT / "docs/source/Components/Typeclass-Hooks-Reference.md",
+    _REPO_ROOT / "docs/Typeclass-Hooks.md",
+    _REPO_ROOT / "docs/Typeclass-Hooks-Reference.md",
 )
 
 

@@ -375,8 +375,8 @@ admin 500s in the first place. The panel API must make it *unrepresentable*, not
 merely discouraged — see K4 below.
 
 **C4. Outcomes are a five-way taxonomy, not success-or-error.** Per
-[`Web-Mutation-Bridge.md`](../../docs/source/Components/Web-Mutation-Bridge.md)
-and [`Web-IO-Boundary.md`](../../docs/source/Components/Web-IO-Boundary.md):
+[`Web-Mutation-Bridge.md`](../../docs/Web-Mutation-Bridge.md)
+and [`Web-IO-Boundary.md`](../../docs/Web-IO-Boundary.md):
 
 | Outcome | Meaning | Retry |
 | --- | --- | --- |
@@ -979,7 +979,7 @@ the UI rather than offering a dead button.
 - `ControlBinding` focus stack per session, since that is now the authority on
   session-to-puppet.
 - **Watch**, subscribing to a session's render output through the existing
-  read-only sink mechanism. ENGINE.md already lists bounded semantic timelines
+  read-only sink mechanism. README.md already lists bounded semantic timelines
   and pluggable read-only sinks supporting cameras, recordings, and headless
   consumers. This is that, aimed at staff.
 - **Disconnect** and **kick** with a reason, audited, and a one-click path into
@@ -1810,10 +1810,10 @@ investigation will want and the ones an attacker would most want gone.
 - `underspire/docs/performance.md` — §1 db/ndb, §3 query optimization and
   `prime_tag_caches`, §6 profiling, §8 document size, §9 off-reactor I/O,
   §10 indexed tags.
-- [`Web-IO-Boundary.md`](../../docs/source/Components/Web-IO-Boundary.md) —
+- [`Web-IO-Boundary.md`](../../docs/Web-IO-Boundary.md) —
   **canonical.** Bridge contract, timeout ownership, ORM read/write rules, the
   DTO rule, stock website services. Read before writing any service.
-- [`Web-Mutation-Bridge.md`](../../docs/source/Components/Web-Mutation-Bridge.md)
+- [`Web-Mutation-Bridge.md`](../../docs/Web-Mutation-Bridge.md)
   — **canonical.** The closed admin registry, owner operation, the five-way
   outcome taxonomy, audit ordering, the Tag exception, and the extension rule
   that governs every new adapter.

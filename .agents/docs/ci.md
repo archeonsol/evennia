@@ -16,10 +16,6 @@ Triggers on push/PR to `main` or `develop` (skips docs-only changes).
 
 **Deploy step** (main branch only, after all tests pass): builds and pushes Docker image `evennia/evennia:latest` to DockerHub.
 
-### Doc Build (`github_action_build_docs.yml`)
-
-Triggers on push/PR to `main`/`develop` when `docs/` or `evennia/contrib/` changes. Builds with Sphinx via `make release` in `docs/`. Requires a full game dir init + migrations before building.
-
 ### Other Workflows
 
 - `codeql-analysis.yml` — Security scanning (JS + Python), weekly + on push/PR

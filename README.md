@@ -1,63 +1,135 @@
-# Evennia MUD/MU\* Creation System ![][logo]
-[![unittestciimg]][unittestcilink] [![Coverage Status][coverimg]][coverlink] [![Pypi Version][pypibadge]][pypilink]
+# Underspire Engine
 
+Fork of Evennia 6.x maintained for **UNDERSPIRE**. The Python package remains `evennia` for compatibility (`import evennia`, `evennia start`).
 
-[Evennia][homepage] is a modern library for creating [online multiplayer text
-games][wikimudpage] (MUD, MUSH, MUX, MUCK, MOO etc) in pure Python. It
-allows game creators to design and flesh out their ideas with great
-freedom.
+## Install
 
-Evennia does not impose a particular style, genre or game mechanic. Instead it
-solves the boring networking and basic stuff all online games need. It provides
-a framework and tools for you to build the game you want. Coding in Evennia is
-done using normal Python modules imported into the server at runtime.
+```bash
+pip install -e /path/to/this/repo
+pip install -e /path/to/this/repo[game]   # game-server deps (Redis, DRF, etc.)
+```
 
-Evennia has [extensive documentation][docs]. It also has a very active community
-with [discussion forums][group] and a [discord server][chat] to help and support you!
+Requires **Django 6.0.2+** and **Python 3.12+**.
 
-## Installation
+## Fork features
 
-    pip install evennia
-        (windows users once: py -m evennia)
-        (note: Windows users with multiple Python versions should prefer `py -3.11` instead of `python` when creating virtual environments)
-    evennia --init mygame
-    cd mygame
-    evennia migrate
-    evennia start / stop / reload
+### Universal rendering (R1A-R1D)
 
-See [the full installation instructions][installation] for more help.
+- Immutable, versioned `render.v1` nodes with semantic blocks, bounded metadata,
+  correlation IDs, and safe server-side replay payloads.
+- Viewer-scoped expiring entity handles replace raw database IDs in narrative and
+  scene payloads; games supply perception/display policy.
+- `msg`, `msg_contents`, emotes, room looks, and Azaban text normalize through one
+  delivery authority with telnet byte parity and multi-session capability routing.
+- Bounded semantic timelines and pluggable read-only sinks support cameras,
+  recordings, accessibility, replay, and headless consumers.
+- The Azaban shell renders nodes/scene patches natively and rejects raw identity in
+  public payloads.
 
-Next, browse to `http://localhost:4001` or use your third-party mud client to
-connect to `localhost`, port `4000` to see your working (if empty) game!
+### Capability authorization (R3A-R3E)
 
-![screenshot][screenshot]
-_A game website is created automatically. Connect to your Evennia game from your
-web browser as well as using traditional third-party clients_.
+- Namespaced, game-extensible capabilities replace tier implication for new
+  authority; bundles are conveniences, not ranks.
+- Positive scoped grants, materialized resource labels, structured policies, and
+  explainable decisions live in `evennia.authorization`.
+- Grant and resource caches invalidate independently; typed actions and RenderNode
+  affordances consume the same decision.
+- Temporary audited recovery replaces an immortal in-game genesis account.
+- Offline compiler/differential commands and per-kind freeze settings provide the
+  finite migration path. LockHandler removal is reserved for R3F.
 
-## Where to go next
+### Supervised runtime tasks
 
-If this piqued your interest, there is a [lengthier introduction][introduction] to read. You
-can also read our [Evennia in pictures][evenniapictures] overview. After that,
-why not check out the [Evennia Beginner tutorial][beginnertutorial].
+- `clock.run_coroutine(..., task_kind=...)` owns detached asyncio roots, preserves
+  application context while isolating Django wrappers, and closes root-owned
+  connections on every terminal path.
+- Synchronous scheduler fires stay inline; async systems, commands, activities,
+  jobs, and service work use named roots. Long-lived loops close DB state after
+  each iteration and worker threads retain no pooler clients.
+- Runtime metrics expose active roots, outcomes, DB-scope closes, and unmanaged
+  asyncio ORM access. Authorization policy packages and negative caching keep
+  warm decisions SQL-free.
 
-Welcome!
+### Tier 1 (command / messaging hot path)
 
+- **`msg_contents`**: precomputed display names, `display_names` passed to actor-stance parser; skips `$` parse when message has no funcparser tokens; `get_message_recipients()` hook on locations
+- **Location cmdset cache**: `evennia.commands.location_cmdset_cache` + `_cmdset_generation` invalidation
+- **Lock check cache**: `LOCK_CHECK_CACHE_ENABLED` — Command `lockhandler.check` memoized per caller ndb
+- **Look prefetch**: `LOOK_ATTR_PREFETCH_ENABLED` — `attributes.get_all()` at start of `at_look`
 
-[homepage]: https://www.evennia.com
-[docs]: https://www.evennia.com/docs/latest
-[screenshot]: https://user-images.githubusercontent.com/294267/205434941-14cc4f59-7109-49f7-9d71-0ad3371b007c.jpg
-[logo]: https://raw.githubusercontent.com/evennia/evennia/refs/heads/main/evennia/web/static/website/images/evennia_logo.png
-[unittestciimg]: https://github.com/evennia/evennia/workflows/test-suite/badge.svg
-[unittestcilink]: https://github.com/evennia/evennia/actions?query=workflow%3Atest-suite
-[coverimg]: https://coveralls.io/repos/github/evennia/evennia/badge.svg?branch=main
-[coverlink]: https://coveralls.io/github/evennia/evennia?branch=main
-[pypibadge]: https://img.shields.io/pypi/v/evennia?color=blue
-[pypilink]: https://pypi.org/project/evennia/
-[introduction]: https://www.evennia.com/docs/latest/Evennia-Introduction.html
-[license]: https://www.evennia.com/docs/latest/Licensing.html
-[group]: https://github.com/evennia/evennia/discussions
-[chat]: https://discord.gg/AJJpcRUhtF
-[wikimudpage]: http://en.wikipedia.org/wiki/Multi-user_dungeon
-[evenniapictures]: https://www.evennia.com/docs/latest/Evennia-In-Pictures.html
-[beginnertutorial]: https://www.evennia.com/docs/latest/Howtos/Beginner-Tutorial/Beginner-Tutorial-Overview.html
-[installation]: https://www.evennia.com/docs/latest/Setup/Setup-Overview.html#installation-and-running
+### Tier 2 (subsystem modernization)
+
+- **AMP session serde:** `AMP_SESSION_SERDE = "json"` for Msg* traffic (no pickle on hot path). Admin/sync still uses pickle. Reject legacy pickle unless `AMP_SESSION_ACCEPT_LEGACY_PICKLE = True`.
+- **Event bus:** `evennia.eventbus.emit(subject, payload, actor=..., persist=...)` — sanitized JSON payloads; optional Redis stream + `GameEvent` Postgres rows (`EVENT_BUS_BACKEND`, `EVENT_BUS_PERSIST_SUBJECTS`).
+- **Job queue:** `evennia.jobs.enqueue_job(type, payload)` — **registry-only** callables (`JOB_QUEUE_REGISTRY`); Redis list or `EngineJob` table; drain via `JOB_QUEUE_DRAIN_EVERY_N_TICKS` on global tick.
+- **Channel subscriber cache:** Redis SET per channel (`CHANNEL_SUBSCRIBER_CACHE_ENABLED`); PG M2M remains source of truth; invalidates on subscribe/unsubscribe.
+- **Postgres tooling:** `evennia.server.database_postgres.apply_postgres_engine_defaults(DATABASES)` — `CONN_MAX_AGE`, health checks, statement timeout. Read replicas for website/logs only (not game thread).
+
+**Not implemented (by design):** WebSocket typing/presence/draft OOB.
+
+### Tier 2.5 (game + engine hooks)
+
+- **Room scene index:** `evennia.objects.scene_index` — Redis SET per room; `DefaultObject.get_message_recipients()` uses it when `ROOM_SCENE_INDEX_ENABLED`.
+- **Audit:** `evennia.eventbus.emit` via `mootest/world/audit.py` (economy, staff pending, ban/unban, `@perm`).
+- **Jobs:** extended `JOB_QUEUE_REGISTRY` in game settings (indexes, channel cache rebuild, event export, Discord webhook).
+- **Channel cache:** PG M2M is truth; Redis rebuilt on start via `channel_subscriber_cache_rebuild` job.
+
+### Tier 1D–E (ops / startup)
+
+- **`defer`**: `evennia.utils.defer` — `in_thread` / `background` / `threaded`, thread offload for Whoosh, search rebuild, HTTP, etc.
+- **Command trace**: `evennia.utils.command_trace` + `COMMAND_TRACE_ENABLED` — `trace_id` per command for structured logs
+- **Batched `at_init`**: `evennia.server.at_init_scheduler` — `AT_INIT_BATCH_SIZE`, `AT_INIT_DEFER_ON_RELOAD`
+- **GLOBAL_SCRIPTS tiers**: `start_priority: "lazy"` defers non-critical script starts across reactor ticks
+
+### Moderation substrate
+
+- `evennia.moderation` — `SessionRecord` per connection, `Sanction` with expiry and
+  evidence, `SanctionHit` per enforcement, `ModerationFlag` for staff review.
+  Detectors write flags only; sanctioning is always a staff action.
+- Address intelligence: local GeoLite2 ASN/country lookup, hosting-ASN, Tor exit
+  and disposable-domain lists in `ServerConfig`, refreshed by a scheduled job.
+- Device token: signed first-party cookie value, read from the websocket
+  handshake. Identity signal only, never an authorization input.
+- Portal-level refusal for blocking sanctions, from an in-memory snapshot rebuilt
+  on sanction change — `MODERATION_PORTAL_BLOCK_ENABLED`, `MODERATION_FAIL_CLOSED`.
+- `DefaultAccount.is_banned` reads sanctions first, `server_bans` second.
+
+### Session fingerprint
+
+- Websocket and telnet sessions publish `PEER_IP`, `XFF_APPLIED`, `XFF_PRESENT` in
+  `protocol_flags`, so the Server can distinguish a real client address from a
+  reverse-proxy address that `UPSTREAM_IPS` never rewrote. Address *selection* is
+  unchanged — only its provenance is now visible downstream.
+- `NEG_ORDER` / `NEG_TIMING_MS`: which telnet options the client answered, in order,
+  with milliseconds to each. Option handlers call `protocol.note_negotiation` when
+  the protocol defines it.
+- `HTTP_FP`: the browser's identifying handshake headers, previously discarded.
+
+### Storage / tick
+
+- Write-behind attributes with `flush_all_dirty()` on the global tick
+- Typed attribute columns (`db_int_val`, `db_str_val`, …)
+- Optional Redis L2 attribute backend (`RedisCachedModelAttributeBackend`)
+- Command access cache (`COMMAND_ACCESS_CACHE_ENABLED`, `evennia.commands.cmd_access_cache`)
+- Flush metrics / Prometheus (`evennia.typeclasses.attribute_metrics`)
+- Optional maintenance safety flush (`ATTRIBUTE_FLUSH_ON_MAINTENANCE`)
+
+## Attribute write-behind contract
+
+1. **Hot path:** `Attribute.value` setter and `ModelAttributeBackend.do_update_attribute` mark rows dirty; they are **not** written immediately.
+2. **Flush:** Call `evennia.typeclasses.attributes.flush_all_dirty()` on a fixed interval (game global tick, typically 1s). Returns `{"backends": N, "orphans": M, "total": N+M}`.
+3. **Crash / tick stall:** Unflushed attrs are lost back to the last flush. Enable `ATTRIBUTE_FLUSH_ON_MAINTENANCE = True` for a 60s safety net in `server_maintenance` (in addition to the game tick).
+4. **Production:** Use **PostgreSQL** (not SQLite) when write-behind is enabled.
+5. **Redis L2:** Optional read cache; PG remains source of truth. Enable with `ATTRIBUTE_REDIS_CACHE_ENABLED` and `ATTRIBUTE_BACKEND_CLASS = "evennia.typeclasses.redis_attr_cache.RedisCachedModelAttributeBackend"`.
+6. **Metrics:** `ATTRIBUTE_FLUSH_METRICS_EVERY_N_TICKS` + `maybe_log_flush_metrics(stats, tick_count)`. `ATTRIBUTE_FLUSH_PENDING_WARN_THRESHOLD` logs tick backlog. With `django-prometheus` + `ENGINE_PROMETHEUS_METRICS_ENABLED` (default on), scrape `/metrics` for:
+   - `evennia_attribute_flush_total`, `evennia_attribute_flush_backends_total`, `evennia_attribute_flush_orphans_total`
+   - `evennia_attribute_dirty_pending` (gauge, pre-flush backlog)
+   - `evennia_attribute_flush_duration_seconds` (histogram)
+   - `evennia_cmd_access_cache_hit_total`, `evennia_cmd_access_cache_miss_total` (when `COMMAND_ACCESS_CACHE_ENABLED`)
+   - `evennia_location_cmdset_cache_hit_total`, `evennia_location_cmdset_cache_miss_total` (when `LOCATION_CMDSET_CACHE_ENABLED`)
+   - `evennia_channel_subscriber_cache_hit_total`, `evennia_channel_subscriber_cache_miss_total` (when `CHANNEL_SUBSCRIBER_CACHE_ENABLED` and Redis reachable)
+   - `evennia_redis_attr_cache_hit_total`, `evennia_redis_attr_cache_miss_total` (when `ATTRIBUTE_REDIS_CACHE_ENABLED`)
+
+## Game repository
+
+The game (`underspire` / `mootest`) depends on this fork via `-e ../evennia` (monorepo) or CI checkout to `./evennia`. Do not install PyPI `evennia==6.0.0` alone for production.

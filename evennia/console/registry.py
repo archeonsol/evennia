@@ -19,7 +19,7 @@ plain data by ``thaw_plain``, so a panel cannot leak a model, queryset,
 handler, or Attribute proxy to a frontend even by accident. That is the JSONB
 IO-thread trap made unrepresentable rather than merely discouraged.
 
-See ``docs/source/Components/Web-IO-Boundary.md`` for the underlying contract.
+See ``docs/Web-IO-Boundary.md`` for the underlying contract.
 
 """
 

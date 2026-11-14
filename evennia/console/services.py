@@ -6,7 +6,7 @@ panel registry. Nothing here imports ``django.contrib.admin`` -- the one
 place that needed it (cascade delete permissions) takes an injected checker
 so each caller supplies its own authority model.
 
-See ``docs/source/Components/Web-Mutation-Bridge.md`` for the contract.
+See ``docs/Web-Mutation-Bridge.md`` for the contract.
 """
 
 from __future__ import annotations
