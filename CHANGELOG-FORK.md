@@ -2675,7 +2675,7 @@ Two architectural guards close the failure class behind a production incident: a
 
 ### Docs
 
-- [`docs/source/Components/Attributes.md`](docs/source/Components/Attributes.md) states the single-Server invariant and the quarantine contract; [`evennia.server.server_lock`](docs/source/api/evennia.server.server_lock.md) joins the API tree.
+- [`docs/Attributes.md`](docs/Attributes.md) states the single-Server invariant and the quarantine contract; `evennia.server.server_lock` joins the API tree.
 
 ### Tests
 
@@ -3724,7 +3724,7 @@ read-path guards ~5%, and per-object authorization inside visibility filtering
 - No database migration or setting change. Games with resource adapters whose
   labels derive from location or containment must set
   `location_sensitive=True` (see
-  [Authorization](docs/source/Components/Authorization.md)).
+  [Authorization](docs/Authorization.md)).
 
 ### Tests
 
@@ -4117,7 +4117,7 @@ read-path guards ~5%, and per-object authorization inside visibility filtering
   frames are published in their own batch, so a failed data publication cannot
   trip the handshake errback that disconnects the peer. Control saturation still
   fails the generation for non-capacity reasons. Docs:
-  [Redis-Bus-Delivery](docs/source/Components/Redis-Bus-Delivery.md); settings:
+  [Redis-Bus-Delivery](docs/Redis-Bus-Delivery.md); settings:
   `REDIS_BUS_MAX_ENTRIES`, `REDIS_BUS_MAX_BYTES`, `REDIS_BUS_DATA_ENTRIES`,
   `REDIS_BUS_DATA_BYTES`, `REDIS_BUS_WRITE_BATCH`.
 
@@ -4659,7 +4659,7 @@ No migration: no settings, API or wire-format changes.
 - Custom Portal protocols can implement `Session.at_auth_sync` to mirror
   authoritative authentication into protocol-owned client state. It must be
   idempotent and must not repeat login or character initialization. See
-  [bus recovery](docs/source/Components/Redis-Bus-Recovery.md).
+  [bus recovery](docs/Redis-Bus-Recovery.md).
 - No database migration, dependency change, or settings change is required.
 
 ## 6.0.0+underspire.232: Keep password hashing off the game loop
@@ -4686,7 +4686,7 @@ No migration: no settings, API or wire-format changes.
   limited to 992 entries and 32 slots reserved for control/state. This admits
   a burst of 25 broadcasts to 25 recipients before callbacks settle. Encoded byte
   limits, the 32-frame drain batch, and saturation behavior remain unchanged.
-  See [bus delivery](docs/source/Components/Redis-Bus-Delivery.md).
+  See [bus delivery](docs/Redis-Bus-Delivery.md).
 
 ### Performance and tests
 
@@ -4708,7 +4708,7 @@ No migration: no settings, API or wire-format changes.
 - Custom Account classes and subclasses of the shipped authentication backend
   that override `authenticate` must also implement `aauthenticate` for live
   login policy. Custom async backends must keep typeclass work on the IO owner.
-  See the [login contract](docs/source/Components/Default-Actions.md#login).
+  See the [login contract](docs/Default-Actions.md#login).
 - No database migration, dependency change, or settings change is required.
 
 ## 6.0.0+underspire.231: Preserve launcher status responses
@@ -4777,7 +4777,7 @@ No migration: no settings, API or wire-format changes.
   engine and game revisions, and starts the service. Obsolete Redis consumer
   group removal is optional on upgrade. Rolling back to the group-based reader
   still requires group recreation at current stream tails. See
-  [cutover and rollback](docs/source/Components/Redis-Bus-Cutover.md).
+  [cutover and rollback](docs/Redis-Bus-Cutover.md).
 
 ### Validation
 
@@ -4825,7 +4825,7 @@ No migration: no settings, API or wire-format changes.
   notice. Lifecycle callers arm restart state only after successful publication.
   An uncertain lifecycle result inhibits watchdog restart until confirmed
   recovery. Operators can explicitly start Server if needed.
-- [Reload and reset](docs/source/Components/Redis-Bus-Shutdown.md) close input,
+- [Reload and reset](docs/Redis-Bus-Shutdown.md) close input,
   run cleanup hooks, then allow five seconds for final snapshot publication and
   Portal application acknowledgment. A failed transition reports uncertainty and
   continues process cleanup. Transport stop uses a shared three-second worker
@@ -4836,7 +4836,7 @@ No migration: no settings, API or wire-format changes.
 
 - **Coordinated cutover required.** Stop Portal and Server before installing the
   matching engine and game revisions. Mixed bus versions are unsupported.
-  Follow [the cutover and rollback procedure](docs/source/Components/Redis-Bus-Cutover.md)
+  Follow [the cutover and rollback procedure](docs/Redis-Bus-Cutover.md)
   for scoped consumer-group maintenance. Rollback must recreate the old expected
   groups at current stream tails to avoid delivering retained actions.
 - An interrupted action may already have run. Publication and synchronization

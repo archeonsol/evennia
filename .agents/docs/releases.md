@@ -68,21 +68,8 @@ worked examples; mirror their depth and section structure.
    new version exactly. `uv lock` regenerates `uv.lock`.
 4. Run `make cleanrot` if any `.agents/` or `AGENTS.md` files were
    touched on the branch.
-5. If the branch added, removed, or renamed any public module or contrib,
-   regenerate the doc trees so they stay aligned (skipping this is how the
-   large `underspire.NN` doc drift accumulated: 99 undocumented new modules
-   and 12 stale contribs in one jump). Both generators walk the filesystem,
-   so no import or gamedir is needed:
-   - api tree: `cd docs && EVDIR=$(realpath ../evennia) uv run --with sphinx make _autodoc-index`
-   - contrib index + narrative pages: `uv run python docs/pylib/contrib_readmes2docs.py`
-   - `git rm` any orphaned `docs/source/Contribs/Contrib-*.md` left behind
-     for removed contribs — the generator writes live pages but never
-     prunes stale ones.
-   - For every removed contrib page, grep the narrative docs for inbound links
-     and fix them (pruning the page leaves the prose that pointed at it). Both
-     styles: `../Contribs/Contrib-<Name>.md` and autodoc `(evennia.contrib.<path>)`.
-     Keep historical changelogs as history (de-link, don't rewrite); drop or
-     reword active howto/concept recommendations pointing at a now-absent contrib.
+5. If the branch changed a contract that a page in `docs/` describes,
+   update that page on the same branch.
 6. Run the relevant test suite from the test game dir (see
    [Testing](testing.md)) before merging. Don't tag a release that
    doesn't pass.

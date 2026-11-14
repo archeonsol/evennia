@@ -72,7 +72,7 @@ class TestRealRedisCutover(SimpleTestCase):
 
     def maintenance(self, mode):
         """Execute the exact operator block with this test's explicit scope."""
-        document = self.repo / "docs/source/Components/Redis-Bus-Cutover.md"
+        document = self.repo / "docs/Redis-Bus-Cutover.md"
         source = document.read_text().split("```python\n", 1)[1].split("```", 1)[0]
         with patch.dict(
             os.environ,

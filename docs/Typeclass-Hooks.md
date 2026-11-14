@@ -1,0 +1,1215 @@
+# Typeclass Hooks Contracts
+
+Runtime contracts for the typeclass hook surface. Sibling to
+[`command-system.md`](../.agents/docs/command-system.md), which covers cmdset / command
+hooks. Companion reference tables (return contracts, override
+discipline, object-state-at-firing) live in
+[`Typeclass-Hooks-Reference.md`](./Typeclass-Hooks-Reference.md).
+
+Scope: `DefaultObject`, `DefaultCharacter`, `DefaultRoom`,
+`DefaultExit`, `DefaultAccount` (+ `DefaultGuest`), `DefaultChannel`,
+`DefaultScript`, the typeclass mixins (`LifecycleMixin`,
+`MovementMixin`, `AppearanceMixin`, `MessagingMixin`, `SearchMixin`),
+and the `ServerSession` puppet/sync hooks. Out of scope: cmdset
+internals (see `command-system.md`); web / protocol hooks (deferred to
+the architecture doc's W1).
+
+The runtime registry that operationalizes these contracts lives at
+`evennia.hooks`. Every hook documented here is declared with a
+`@hook(...)` decorator; the registry validates the surface at server
+startup and feeds the generated tables below.
+
+## Sequence-diagram legend
+
+```
+caller.method(args)       a method call; arrow points from caller to callee
+veto?                     pre-hook gate; falsy-not-None aborts the chain
+                          (see is_veto in evennia/utils/utils.py)
+[short-circuit]           branch taken when the preceding gate fires
+*N                        repeated N times (e.g. one per receiver)
+```
+
+Where the chain crosses actors (mover / source room / destination,
+or session / account / puppet), a small swim-lane table is used; flat
+single-actor chains use inline arrows.
+
+## §1. Naming taxonomy
+
+Hook names today carry semantics by prefix, with two important
+violations called out below. Section 6 lists every hook whose name
+does not match its behavior.
+
+### Prefixes
+
+| Prefix | Semantic | Return contract | Override safety | Example |
+|---|---|---|---|---|
+| `at_pre_<event>` | Veto gate, fires before the operation. | Falsy-not-None aborts; `None`/`True`/truthy allows. | Public override. | `at_pre_move`, `at_pre_puppet`, `at_pre_say` |
+| `at_post_<event>` | Notification, fires after the operation completed (or after the relevant phase). | Ignored. | Public override; engine never reads the return. | `at_post_move`, `at_post_puppet`, `at_post_arrive` |
+| `at_<event>` (no pre/post) | Lifecycle mutator or composite action hook. State and contract are per-hook; see §2 for the firing event and §3 for return contract. | Mixed. Some return content (e.g. `at_look`); most return `None`. | Mostly public override; a few are engine-internal coordination points (e.g. `at_first_save`, `at_post_load`). | `at_object_creation`, `at_first_save`, `at_say`, `at_look`, `at_desc` |
+| `at_failed_<event>` | Branch fired when the matching `at_pre_<event>` vetoed (or the operation otherwise failed). `at_failed_login` is the exception: auth-fail only, not the `at_pre_login` veto. | Ignored. | Public override. | `at_failed_traverse`, `at_failed_login` |
+| `get_display_<part>` | Content provider for a named slot of `return_appearance`. | Returns a string (the rendered slot). | Public override; this is the primary customization surface for appearance. | `get_display_name`, `get_display_desc`, `get_display_exits`, `get_display_things` |
+| `get_<other>` | State query or configuration provider. Reads state, never mutates. | Returns a value; type per hook. | Public override for query hooks; some are internal plumbing (e.g. `get_cmdset_providers`). | `get_numbered_name`, `get_search_candidates`, `get_default_lockstring`, `get_log_filename` |
+| `return_<event>` | Composite renderer. Assembles a slot-by-slot string by calling the matching `get_display_*` providers and returning the joined result. | Returns the rendered output. | Public override, but most games override the `get_display_*` providers instead. | `return_appearance` |
+
+`at_*` and `get_*` are the only conventional prefixes. `return_*` is
+attested only by `return_appearance` and exists for historical
+reasons; new composite renderers should use a less ambiguous prefix
+(see §6).
+
+### Prefix-by-prefix rules
+
+**`at_pre_*`**: every name in this prefix MUST be a veto gate using
+the `is_veto` rule (falsy-not-None aborts). Returning `None` is the
+default-safe case; overrides that forget to `return True` still
+allow the action. The veto consumer is expected to message the
+caller; the engine never auto-messages on veto.
+
+**`at_post_*`**: every name in this prefix MUST be a notification.
+Return values are ignored. The post-hook runs after the visible
+side effects of the event are committed; subsequent engine code
+does not consult its return.
+
+**`at_<event>`**: this prefix is overloaded. It covers
+(a) one-shot lifecycle mutators that run exactly once per object
+(`at_object_creation`, `at_account_creation`, `at_channel_creation`,
+`at_script_creation`),
+(b) idempotent re-init hooks that run on every cache load
+(`at_post_load`, `at_first_save` on `TypedObject`),
+(c) composite action hooks that both perform an operation and
+return its output (`at_look`, `at_say`),
+(d) failure branches (`at_failed_traverse`, `at_failed_login`).
+The overload is real; see §6 for the misshapen-hooks tally.
+
+**`get_display_*`**: content providers consumed by
+`return_appearance`. These are pure functions of `(self, looker,
+**kwargs)`. The override surface for appearance customization lives
+here, not on `return_appearance`. Adding a new appearance slot means
+adding a `get_display_<slot>` plus referencing it from
+`appearance_template`; existing slots should not be repurposed.
+
+**`get_<other>`**: state queries or configuration providers.
+Examples: `get_numbered_name` (pluralization), `get_search_candidates`
+(search-pipeline stage), `get_default_lockstring` (per-class lock
+defaults), `get_cmdset_providers` (cmdset-handler plumbing), and
+`get_equipped_rule_providers` (game-defined action-rule equipment).
+Heterogeneous by return type; see §3 reference table. Query hooks return
+content and do not mutate the queried object; callers define whether `None`
+has distinct meaning from an empty value.
+
+### Search disambiguation hooks
+
+`TypedObject.get_extra_info(looker)` supplies optional content for ambiguous
+search rows. The base implementation preserves the stock inventory and
+same-room location hints. Overrides may return extra domain information for
+other matches and may safely compose with `super()`.
+
+`evennia.utils.multimatch.location_hint()` owns composition: it returns stock
+location context immediately, otherwise invokes `get_extra_info()` once. The
+base hook requests only the non-recursive stock portion when it delegates back
+to the compositor. Hooks should remain side-effect-free, but the once-per-row
+contract also prevents duplicate work for overrides that return an empty string.
+
+**`return_*`**: a composite renderer that joins `get_display_*`
+slots. Today only `return_appearance` uses this prefix; treat the
+prefix as deprecated for new hooks.
+
+**`at_<noun>_added` / `at_<noun>_removed`**: set-membership
+notifications. Today this shape appears only on Account
+(`at_puppet_added`, `at_puppet_removed`, `at_character_added`,
+`at_character_removed`); the `at_character_*` pair tracks the
+persistent characters-list, the `at_puppet_*` pair tracks the live
+puppet-set. See §2.7 and §2.15.
+
+### Aliases preserved for compatibility
+
+These names are kept as aliases of newer names, defined at module
+level on the mixin. New code should use the canonical name.
+
+| Alias | Canonical |
+|---|---|
+| `at_before_move` | `at_pre_move` |
+| `at_after_move` | `at_post_move` |
+| `at_after_traverse` | `at_post_traverse` |
+
+The aliases are simple class-attribute assignments
+(`at_before_move = at_pre_move` etc.); overriding the canonical
+in a subclass updates the alias only if the override happens before
+class-body evaluation finishes. Game-side overrides should bind to
+the canonical name to avoid surprises.
+
+## §2. Calling order
+
+Per-event subsections. Each documents the hook sequence, short-circuit
+rules, and cross-actor dispatch (mover / source / destination, or
+account / session / puppet). State-at-firing details live in §5 of
+[`Typeclass-Hooks-Reference.md`](./Typeclass-Hooks-Reference.md); return
+contracts in §3, override discipline in §4.
+
+### 2.1 Object creation (`DefaultObject`)
+
+Driver: Django's `post_save` signal, connected in
+`evennia/typeclasses/models.py:166`. The signal receiver
+`call_at_first_save` (models.py:69) fires `instance.at_first_save()`
+only when `created=True`.
+
+```
+post_save(created=True)
+  └─ obj.at_first_save()                           [LifecycleMixin]
+       ├─ obj.basetype_setup()                     (locks default)
+       ├─ obj.at_object_creation()                 [PUBLIC OVERRIDE POINT]
+       ├─ obj.init_evennia_properties()
+       ├─ (if _createdict) apply create kwargs:
+       │     ├─ db_key / db_location / db_home / db_destination
+       │     ├─ permissions / locks / aliases / tags / attributes
+       │     └─ if cdict.location:
+       │           ├─ location.at_post_arrive(self, None)
+       │           └─ self.at_post_move(None)
+       ├─ obj.at_object_post_creation()            [PUBLIC OVERRIDE POINT]
+       └─ obj.basetype_posthook_setup()
+```
+
+After `at_first_save` returns, `evennia/prototypes/spawner.py` may
+call `obj.at_prototype_spawn(prototype=...)` if the object was
+created via the spawner (spawner.py:803 and :872; two call sites,
+covering spawn-new and update-existing paths).
+
+Notes:
+
+- `at_object_creation` fires after locks but before
+  `_createdict`-supplied attributes; overrides must not assume
+  passed-in attributes are present. `at_object_post_creation` is the
+  hook to use when an override needs to see kwargs/prototype data.
+- The `at_post_arrive` / `at_post_move` calls inside `at_first_save`
+  fire ONLY when an initial `location` is supplied via `_createdict`.
+  Objects created without a location skip the move chain entirely.
+  These calls fire `at_post_arrive` and `at_post_move` only; the
+  `at_pre_*` / `at_post_leave` halves are skipped on first placement.
+- `at_prototype_spawn` is spawner-specific. Objects created with
+  `evennia.create_object` directly do NOT fire it. The name (renamed
+  from `at_object_post_spawn`) reflects this.
+
+### 2.2 Object load / idmapper cache rehydration
+
+Driver: owner-side `TypedObject` initialization through the idmapper.
+`at_post_load` fires once per canonical cache insertion, both on first DB fetch
+and after every server reload. Web-worker reads construct detached complete
+rows without cache insertion and never fire this hook.
+
+```
+idmapper.cache_object(instance)
+  └─ instance.at_post_load()           [PUBLIC OVERRIDE POINT]
+```
+
+Override chain (multiple defining classes, MRO-resolved):
+
+1. `TypedObject.at_post_load` (typeclasses/models.py:540): stub.
+2. `LifecycleMixin.at_post_load` (mixins/lifecycle.py:395): stub.
+3. `DefaultExit.at_post_load` (objects/exit.py:261): clears the
+   exit's default cmdset so a renamed exit rebuilds its command.
+4. `DefaultChannel.at_post_load` (comms/comms.py:775): subscriber
+   cache attach.
+5. `DefaultAccount.at_post_load` (accounts/accounts.py:1590): stub.
+6. `DefaultScript.at_post_load` (scripts/scripts.py:533): stub.
+
+Distinct from `at_idmapper_flush`, which fires when the idmapper
+DROPS the object from cache (typeclasses/models.py:501); see §2.20.
+
+Despite a docstring on `TypedObject.at_post_load` (models.py:546)
+referring to "the historical name `at_init`", no `at_init` method
+exists in this fork. Older Evennia docs that mention `at_init` are
+stale; the rename to `at_post_load` is complete.
+
+### 2.3 Object delete
+
+Driver: `LifecycleMixin.delete()` (mixins/lifecycle.py:159).
+
+```
+obj.delete()
+  ├─ obj.at_pre_delete()  ─── returns False?  [veto]  ─→ abort
+  │
+  ├─ msg + unpuppet all sessions
+  ├─ remove from account.characters
+  ├─ delete owned scripts
+  ├─ obj.clear_exits()
+  ├─ obj.clear_contents()
+  ├─ obj.attributes.clear() / nicks / aliases
+  ├─ bump_cmdset_generation(self.location)
+  ├─ self.location = None  (fires contents_cache update on old loc)
+  └─ super().delete()       (Django delete; `post_delete` signals fire)
+```
+
+`at_pre_delete` is a veto hook (returning `False` aborts). The
+default returns `True`, matching the "non-None truthy allows" rule
+from `is_veto`. (Renamed from `at_object_delete`; the old name was inconsistent with the `at_pre_*`
+convention.)
+
+No `at_post_delete` hook exists on the typeclass; downstream
+notification rides Django's `post_delete` signal or a manual
+override of `delete()`.
+
+### 2.4 Rename
+
+Driver: `TypedObject.key` setter and the `@name` command. The
+typeclass exposes both halves on `TypedObject`
+(typeclasses/models.py:910), with `at_post_rename` separately re-defined
+on `AppearanceMixin` (mixins/appearance.py:907).
+
+```
+rename_caller
+  └─ obj.at_pre_rename(oldname, newname)  ─── falsy-not-None?  ─→ abort
+  ├─ obj.key = newname   (db_key write; post_save fires)
+  └─ obj.at_post_rename(oldname, newname)
+```
+
+`at_post_rename` is defined twice with identical signatures
+(`TypedObject.at_post_rename` is a stub; `AppearanceMixin.at_post_rename`
+clears plural aliases set by `get_numbered_name`). MRO resolves to
+the mixin for `DefaultObject` and descendants; the base version
+serves Account/Channel/Script (which have no plural aliases to
+clear). Renamed from `at_rename`.
+
+### 2.5 Move
+
+Driver: `MovementMixin.move_to()` (mixins/movement.py:64; signature
+documented in the method docstring lines 64 to 82). Three actors:
+**mover** (self), **source** (current location), **destination**.
+
+```
+mover                  source                destination
+─────                  ──────                ───────────
+move_to()
+  is_veto check:
+  at_pre_move      ─→ falsy-not-None? abort
+                         source.at_pre_leave    ─→ falsy-not-None? abort
+                                                    destination.at_pre_arrive ─→ falsy abort
+  ─── lock & access checks ───
+  self.location = destination     (single assignment; contents_cache
+                                   on both source and destination updates)
+                         source.at_post_leave     destination.at_post_arrive
+  at_post_move                                    (the two at_post_*-side
+                                                   hooks are unordered
+                                                   relative to each other
+                                                   and both fire BEFORE
+                                                   at_post_move)
+```
+
+Detailed sequence (movement.py:64 to :199):
+
+1. `mover.at_pre_move(destination, move_type=...)` veto check.
+2. `source.at_pre_leave(mover, destination, move_type=...)` veto
+   check. Skipped if `source is None` (e.g. first placement).
+3. `destination.at_pre_arrive(mover, source, move_type=...)` veto
+   check.
+4. Lock check (`getfrom`, `traverse`, `enter`; see movement.py),
+   permission check.
+5. `mover.location = destination`. Side effect: Django save and
+   `contents_cache` invalidation on both old and new location.
+6. `source.at_post_leave(mover, destination, move_type=...)`.
+   Skipped if `source is None`.
+7. `destination.at_post_arrive(mover, source, move_type=...)`.
+8. `mover.at_post_move(source, move_type=...)`.
+
+Steps 6 and 7 are unordered relative to each other; both complete
+before step 8. The mover-side invariant
+("mover is in destination before followers are scheduled") holds:
+by step 6, `mover.location` is already `destination`.
+
+Errors from any hook are caught inside `move_to` and logged via
+`logerr`; they do not abort subsequent hooks. This is a deliberate
+isolation choice and a behavior subtle enough to surprise
+overriders; see §6.
+
+Per-hook `**kwargs` is the same dict passed to `move_to`, so
+`move_type` and any custom kwargs are propagated to every hook.
+
+### 2.6 Exit traversal
+
+Driver: `DefaultExit.do_traverse()` (objects/exit.py:270).
+
+```
+exit.do_traverse(mover, target_location)
+  ├─ exit.at_pre_traverse(mover, target_location)
+  │      ─── falsy-not-None?  ─→  exit.at_failed_traverse(mover); return
+  ├─ source_location = mover.location
+  ├─ mover.move_to(target_location, move_type="traverse", exit_obj=exit)
+  │      (fires the full §2.5 move chain)
+  │
+  ├─ if move succeeded:  exit.at_post_traverse(mover, source_location)
+  └─ if move failed:
+        ├─ if exit.db.err_traverse: mover.msg(err_traverse); skip hook
+        └─ else: exit.at_failed_traverse(mover)
+```
+
+Traversal-level hooks (`at_pre_traverse`, `at_post_traverse`,
+`at_failed_traverse`) are exit-side; the inner move chain fires the
+mover/source/destination hooks of §2.5. A vetoed
+`at_pre_traverse` does NOT fire any move-chain hooks. A vetoed
+`at_pre_move` from within the inner move chain DOES fire
+`at_failed_traverse` afterwards (because `move_to` returns False
+without raising).
+
+The `at_failed_traverse` branch has two fire paths (pre-veto and
+post-move-failure). Overrides should be idempotent in case both
+fire.
+
+### 2.7 Puppet
+
+Driver: `DefaultAccount.puppet_object()` (accounts/accounts.py:500
+onward). Three actors: **account**, **session**, **puppet object**.
+
+```
+account                session             puppet
+───────                ──────              ──────
+puppet_object(session, obj)
+  guard: already-puppeting? msg + return
+  was_already_owned = (puppet.account == account
+                       and puppet.sessions.count() > 0)
+  access('puppet') check  ─→ deny: msg + return
+  takeover handling for existing puppet (MULTISESSION_MODE)
+  if session.puppet: unpuppet_object(session)   (fires §2.8)
+  max-puppet check
+                                            puppet.at_pre_puppet(
+                                              account, session=session)
+                                            ──── falsy-not-None?
+                                                 ─→ return (no msg)
+                                            tags.add("puppeted", "account")
+                                            sessions.add(session)
+                                            account = account
+                       session.puid = puppet.id
+                       session.puppet = puppet
+                                            puppet.locks.cache_lock_bypass
+                                            puppet.at_post_puppet()
+  SIGNAL_OBJECT_POST_PUPPET.send(sender=puppet, ...)
+  schedule_cmdset_merge_warmup_for_character(puppet)   (best-effort)
+  if not was_already_owned:
+    account.at_puppet_added(puppet, session=session)   (best-effort)
+```
+
+`at_puppet_added` fires once per FIRST-attach of `puppet` to
+`account` (not once per session). A session swap from one of the
+account's own sessions to another does NOT re-fire it. The
+membership-change semantic is documented in
+`DefaultAccount.at_puppet_added` (accounts.py:388).
+
+`at_pre_puppet` veto leaves the session unpuppeted but the engine
+emits no user-visible message; the override is expected to message
+the caller before returning falsy.
+
+`Character.at_pre_puppet` / `at_post_puppet`
+(objects/character.py:241, :264) override the lifecycle-mixin
+versions to add session-binding side effects (channel subscribe,
+unconnected-character cleanup, default echoes). The reattach
+suppression discussed in §2.9 is in
+`Character.at_post_puppet`.
+
+### 2.8 Unpuppet
+
+Driver: `DefaultAccount.unpuppet_object()` (accounts/accounts.py:614).
+
+```
+unpuppet_object(session)
+  for session in iter(session):
+    obj = session.puppet
+    if obj:
+      if is_veto(obj.at_pre_unpuppet()):
+        continue                          # veto: leave puppet attached
+      obj.sessions.remove(session)
+      last_session = (obj.sessions.count() == 0)
+      if last_session: del obj.account
+      obj.at_post_unpuppet(account, session=session)
+      obj.tags.remove("puppeted", "account")
+      SIGNAL_OBJECT_POST_UNPUPPET.send(sender=obj, ...)
+      if last_session:
+        account.at_puppet_removed(obj, session=session)
+    session.puppet = None
+    session.puid = None
+```
+
+`at_pre_unpuppet` honors the veto contract. On veto
+the puppet stays attached, session.puppet/puid are NOT cleared, and
+no engine message is emitted; the override is responsible for
+messaging the caller before vetoing.
+
+`at_puppet_removed` fires on LAST-detach, mirroring
+`at_puppet_added`'s FIRST-attach semantics.
+
+`Character.at_post_unpuppet` (objects/character.py:298) overrides
+the base to handle channel unsubscribe and default-echo emission.
+
+### 2.9 Session re-attach (at_sync)
+
+Driver: `SessionHandler` after a server reload. Each session whose
+portal connection survived is re-synced via
+`ServerSession.at_sync()` (serversession.py:95).
+
+Phase A item PA4 corrected the order to fire the puppet hooks so
+non-persistent cmdset state rebuilds. Both
+`at_pre_puppet` and `at_post_puppet` fire with `reattach=True`.
+
+```
+sessionhandler  (post-reload sync)
+  └─ session.at_sync()                          [serversession.py:95]
+       ├─ super().at_sync()  (portal-side sync, base class)
+       ├─ if not logged_in: load CMDSET_UNLOGGEDIN
+       ├─ self.cmdset.update(init_mode=True)
+       └─ if self.puid:
+            obj = ObjectDB.objects.get(id=self.puid)
+            obj.at_pre_puppet(self.account, session=self, reattach=True)
+              ─── falsy-not-None? puid=None, puppet=None; return
+            obj.sessions.add(self)
+            obj.account = self.account
+            self.puid = obj.id
+            self.puppet = obj
+            obj.locks.cache_lock_bypass(obj)
+            obj.at_post_puppet(reattach=True)
+```
+
+Differences from §2.7:
+
+- Access check is SKIPPED. The session was authenticated pre-reload.
+- `SIGNAL_OBJECT_POST_PUPPET` is NOT sent (it's a fresh-attach
+  signal, not a re-attach signal). `at_puppet_added` is also NOT
+  fired.
+- `cmdset_merge_warmup` is NOT scheduled.
+- The `reattach=True` kwarg propagates into both hooks. Default
+  Character overrides use this to suppress entry/exit echoes; game
+  overrides that reset non-persistent state should re-do that work
+  on reattach.
+
+If `at_pre_puppet` vetoes with `reattach=True`, the session is left
+unpuppeted; user-visible explanation is the override's
+responsibility.
+
+### 2.10 Appearance render
+
+Driver: `AppearanceMixin.at_look()` (mixins/appearance.py:462),
+typically called from the `look` command via
+`Character.at_look(target)`.
+
+```
+caller (looker)                target (looked-at)
+───────────────                ──────────────────
+caller.at_look(target)
+  ├─ access(target, "view") check     ─→ deny: return "Could not view '<name>'."
+  ├─ (if LOOK_ATTR_PREFETCH_ENABLED)
+  │     target.attributes.get_all()   (prefetch; errors logged + swallowed)
+  │
+  ├──────────────────────────────────→ target.return_appearance(caller)
+  │                                       ├─ get_display_name(caller)
+  │                                       ├─ get_extra_display_name_info(caller)
+  │                                       ├─ get_extra_display_state(caller)
+  │                                       ├─ get_display_desc(caller)
+  │                                       ├─ get_display_header(caller)
+  │                                       ├─ get_display_footer(caller)
+  │                                       ├─ get_display_exits(caller)
+  │                                       │     └─ filter_visible(exits, caller)
+  │                                       │     └─ for each: get_display_name(caller)
+  │                                       ├─ get_display_characters(caller)
+  │                                       │     └─ filter_visible(chars, caller)
+  │                                       │     └─ for each: get_display_name(caller)
+  │                                       │     └─ get_content_group_label('characters', caller)
+  │                                       ├─ get_display_things(caller)
+  │                                       │     └─ filter_visible(things, caller)
+  │                                       │     └─ group + get_numbered_name(count, caller)
+  │                                       │     └─ get_content_group_label('things', caller)
+  │                                       └─ format_appearance(template_result, caller)
+  │
+  ├──────────────────────────────────→ target.at_desc(looker=caller)
+  └─ returns description string
+```
+
+Notes:
+
+- `return_appearance` is the only `return_*`-prefixed hook in the
+  in-scope surface (see §1, §6). It returns a string; overriders
+  who want a different shape are expected to override the
+  `get_display_*` providers, not `return_appearance` itself.
+- The `appearance_template` class attribute (a `str.format` template
+  with named slots) is the friendly customization point: change the
+  template, leave the providers alone, and the layout shifts. The
+  template's named slots MUST stay in sync with the `get_display_*`
+  set (see §6 for the implicit coupling).
+- `get_visible_contents` and `get_content_names` (appearance.py:388,
+  :415) are marked DEPRECATED in their docstrings. `get_content_names`
+  has no callers in the appearance chain above; it's a vestige. See §6.
+- `get_extra_display_name_info` and `get_extra_display_state`
+  (appearance.py:67, :304) are hook-shaped extension points consumed
+  inside the template (`{extra_name_info}`, `{extra_state}` keys).
+  Empty default; override to inject status indicators, etc.
+- `at_desc` fires on the looked-at object after `return_appearance`
+  has been collected. The comment in `at_look` (appearance.py:499)
+  notes "must be the last reference to target so it may delete
+  itself when acted on" so overrides of `at_desc` may legitimately
+  delete `self`.
+
+Account-side `at_look` (accounts/accounts.py:1961) is a different
+hook: it composes a multi-character picker rather than calling
+`return_appearance` on a single target. The collision in name
+between `Object.at_look` and `Account.at_look` is intentional
+duck-typing for OOC look. See §6.
+
+### 2.11 Say / whisper
+
+Driver: the `say` / `whisper` commands invoke
+`speaker.at_pre_say(message, ...)` then
+`speaker.at_say(message, ...)` (mixins/appearance.py:644, :763).
+
+```
+speaker
+───────
+at_pre_say(message, **kwargs)
+  default: returns the (possibly transformed) message; falsy-not-None
+           aborts. Truthy non-string is treated as the original
+           message (transform rule, see §3).
+
+at_say(message, msg_self, msg_location, receivers, msg_receivers, **kwargs)
+  whisper = kwargs.pop("whisper", False)
+  msg_type = "whisper" or "say"
+
+  if whisper:
+    if msg_self is True:
+       msg_self = speaker.get_say_template_self(whisper=True, **kwargs)
+    if not msg_receivers:
+       msg_receivers = speaker.get_say_template_receivers(whisper=True)
+    msg_location = None
+  else:
+    if msg_self is True:
+       msg_self = speaker.get_say_template_self(whisper=False, **kwargs)
+    if not msg_location:
+       msg_location = speaker.get_say_template_location(whisper=False)
+    if not msg_receivers:
+       msg_receivers = speaker.get_say_template_receivers(whisper=False)
+
+  if msg_self:
+    self_mapping = {
+      "self": speaker.get_self_pronoun(speaker, **kwargs),
+      "object": speaker.get_display_name(speaker),
+      "location": location.get_display_name(speaker) if location else None,
+      "receiver": None,
+      "all_receivers": ", ".join(r.get_display_name(speaker)
+                                  for r in receivers) if receivers else None,
+      "speech": message,
+    }
+    self.msg(text=(msg_self.format_map(self_mapping), {"type": msg_type}),
+             from_obj=speaker)
+
+  if receivers and msg_receivers:
+    for receiver in receivers:
+      individual_mapping = {
+        "self": speaker.get_self_pronoun(receiver, **kwargs),
+        "object": speaker.get_display_name(receiver),
+        "location": location.get_display_name(receiver),
+        "receiver": receiver.get_display_name(receiver),
+        "all_receivers": ", ".join(r.get_display_name(r)
+                                    for r in receivers) if receivers else None,
+        "speech": message,
+      }
+      receiver.msg(text=(msg_receivers.format_map(...), {"type": msg_type}),
+                   from_obj=speaker)
+
+  if location and msg_location:
+    location_mapping = {
+      "self": speaker.get_self_pronoun(location, **kwargs),
+      "object": speaker, "location": location,
+      "all_receivers": ", ".join(str(r) for r in receivers) if receivers else None,
+      "receiver": None, "speech": message,
+    }
+    exclude = [speaker] if msg_self else []
+    if receivers: exclude.extend(receivers)
+    location.msg_contents(text=(msg_location, {"type": msg_type}),
+                          from_obj=speaker, exclude=exclude,
+                          mapping=location_mapping)
+```
+
+Each branch calls `get_display_name` and `get_self_pronoun` from
+the PERSPECTIVE of the eventual viewer (self / receiver / location).
+This is the only place in the typeclass surface where a hook is
+called multiple times per event with different `looker` semantics;
+see §6.
+
+Templates resolved by `get_say_template_self`,
+`get_say_template_location`, `get_say_template_receivers`
+(appearance.py:684, :704, :723) are state-query hooks returning
+`str.format`-ready strings. The bool-or-string `msg_self` kwarg of
+`at_say` overloads the parameter shape (see §3, §6).
+
+### 2.12 Object interactions
+
+Three matching pre/post pairs on `AppearanceMixin`:
+
+```
+getter.get(obj):
+  obj.at_pre_get(getter)      ─── falsy-not-None? abort
+  (call site moves obj into getter via move_to; §2.5)
+  obj.at_post_get(getter)
+```
+
+```
+giver.give(obj, getter):
+  obj.at_pre_give(giver, getter)   ─── falsy-not-None? abort
+  (call site moves obj into getter via move_to)
+  obj.at_post_give(giver, getter)
+```
+
+```
+dropper.drop(obj):
+  obj.at_pre_drop(dropper)         ─── falsy-not-None? abort
+  (call site moves obj out of dropper, typically to dropper.location)
+  obj.at_post_drop(dropper)
+```
+
+All six hooks are public override points. The fork's default
+implementations are stubs (empty/`pass`). The interaction commands
+themselves (`get`, `give`, `drop`) live in the default cmdset; they
+own the call sites for these hooks. The naming inconsistency
+(`at_get` vs `at_post_get`) is documented in §6.
+
+### 2.13 Description set
+
+Driver: `AppearanceMixin.at_desc()` (mixins/appearance.py:504),
+called from `at_look` after `return_appearance` (§2.10). Also fired
+by some game commands that "describe" an object without going
+through the look chain.
+
+```
+target.at_desc(looker=caller, **kwargs)
+```
+
+The name is misleading: `at_desc` is "called whenever someone looks
+at this object", not "called when this object's description is set".
+There is no `at_pre_desc` or `at_post_desc`. See §6.
+
+### 2.14 Account login chain
+
+Driver: `SessionHandler.login()` (server/sessionhandler.py:498
+onward).
+
+```
+sessionhandler.login(session, account)
+  ├─ account.is_connected = True
+  ├─ session.at_login(account)
+  │     ├─ session.account = account
+  │     ├─ session.uid / uname / logged_in / conn_time set
+  │     ├─ session.cmdset_storage = CMDSET_SESSION
+  │     └─ session.cmdset = CmdSetHandler(session, True)
+  ├─ account.at_post_load()
+  ├─ if is_veto(account.at_pre_login()):
+  │     self.disconnect(session, reason="Login refused.")
+  │     if no other sessions for account: account.is_connected = False
+  │     return
+  ├─ if account.db.FIRST_LOGIN:
+  │     account.at_first_login()
+  │     del account.db.FIRST_LOGIN
+  ├─ MULTISESSION_MODE==0: disconnect duplicate sessions
+  ├─ session.logged_in = True
+  ├─ portal AMP sync
+  ├─ account.at_post_login(session=session)
+  ├─ if nsess < 2: SIGNAL_ACCOUNT_POST_FIRST_LOGIN.send(...)
+  └─ SIGNAL_ACCOUNT_POST_LOGIN.send(...)
+```
+
+Notes:
+
+- `at_pre_login` honors the veto contract. On veto
+  the session is disconnected via `sessionhandler.disconnect(session,
+  reason="Login refused.")`; the override is responsible for
+  messaging the user before vetoing. `account.is_connected` is reset
+  to False if this was the only session. Failed auth uses
+  `at_failed_login` instead (retry-friendly); a veto here is a
+  deliberate refusal (banned, locked, IP block).
+- `at_first_login` fires AFTER `at_pre_login`.
+  This means a vetoed login does NOT consume the FIRST_LOGIN flag;
+  the next successful login will fire `at_first_login` instead.
+- `at_post_load` here is NOT the cache-load hook (§2.2): same name,
+  separately overridden on `DefaultAccount` (accounts.py:1590) as a
+  stub. Sharing the name is intentional (it's the same idmapper
+  hook, called from login because the account may be cold).
+- `login` is two halves, `_login_begin` (down to the portal AMP sync) and
+  `_login_finish` (`at_post_login` and the signals). Run together they are the
+  flow above. When the bus admits two or more sockets that arrive already
+  authenticated (a Portal that outlived a Server restart), `portal_connect(...,
+  defer_login=True)` runs the first half in the admitting call and each second half
+  in a loop callback of its own, so twenty players do not hold the reactor for
+  three seconds. Until its second half runs the session is the account's and
+  logged in, with no puppet; input that reaches it is held (at most 200 inputs)
+  and handed to `session.data_in` in order afterwards. A second half that raises is
+  logged and its session is disconnected.
+
+`at_failed_login(session)` fires from the auth path
+(accounts.py:833) when credentials are rejected; it does not feed
+the chain above.
+
+### 2.15 Account creation and password change
+
+```
+create_account(...)
+  └─ account.at_first_save()                      [accounts.py:1609]
+       ├─ account.basetype_setup()                 (lockstring, CMDSET_ACCOUNT)
+       ├─ account.at_account_creation()           [PUBLIC OVERRIDE POINT]
+       ├─ account.init_evennia_properties()
+       ├─ (if _createdict) apply create kwargs
+       └─ permissions.batch_add(...)
+
+account.set_password(new_password)
+  └─ account.at_post_password_change()            [stub by default]
+
+account.create_character(...)
+  └─ create_object(...)
+  └─ account.at_post_create_character(character, ip=...)
+                                                  [accounts.py:1042; stub]
+```
+
+`at_account_creation` mirrors `at_object_creation` (§2.1) in
+position and semantics. The Account does NOT have an
+`at_account_post_creation` analog; account-side post-init lives in
+`basetype_setup` and there is no public override point between
+"locks set" and `init_evennia_properties`. See §6.
+
+`PlayableCharactersList` (accounts.py:155, :167) is a custom list
+type that fires `at_character_added` / `at_character_removed`
+when items are appended/removed:
+
+```
+account.characters.append(char)
+  └─ account.at_character_added(char)
+
+account.characters.remove(char)
+  └─ account.at_character_removed(char)
+```
+
+These are DIFFERENT from `at_puppet_added` / `at_puppet_removed`
+(§2.7, §2.8). The pair `at_character_added` / `at_character_removed`
+fires on the persistent characters list ("which characters does this
+account have access to"); the pair `at_puppet_added` /
+`at_puppet_removed` fires on the live puppet set ("which characters
+is this account currently controlling"). All four hooks now share
+the `at_<set>_added` / `at_<set>_removed` convention.
+
+### 2.16 Account msg routing
+
+```
+account.msg(text, from_obj, session, options, **kwargs)
+  ├─ account.at_msg_send(text=text, to_obj=account, **kwargs)  (pre)
+  │     [accounts.py:1907; stub; falsy-not-None aborts the send]
+  └─ session(s).data_out(...)
+        recipient.at_msg_receive(text=text, from_obj=from_obj, **kwargs)
+        [accounts.py:1877; falsy-not-None aborts delivery]
+```
+
+Notes:
+
+- The pair has reversed prefix order vs. other pre/post pairs:
+  `at_msg_send` is the pre-hook (on the sender) and `at_msg_receive`
+  is per-recipient. Neither is named `at_pre_*`. Both honor a veto
+  return. See §6.
+- These hooks exist on Account but not on Object. Objects that
+  receive `msg()` go through the inherited `ObjectDB.msg()` which
+  does NOT fire these hooks. See §6.
+
+`Account.at_look(target=characters, session=...)` (accounts.py:1961)
+is the OOC look hook called from the `look` command when no puppet
+is attached. It composes a character picker; the chain it drives is
+distinct from §2.10 even though it shares the hook name.
+
+### 2.17 Channel send / receive
+
+Driver: `DefaultChannel.msg()` (comms/comms.py:611).
+
+```
+channel.msg(message, senders=..., bypass_mute=..., **kwargs)
+  ├─ message = resolve_transform(
+  │     channel.at_pre_msg(message, **send_kwargs), message
+  │   )
+  │   [comms.py:578; transform rule: falsy-not-None aborts;
+  │    None/True returns original; non-string truthy returns original;
+  │    string returns the new value]
+  │
+  ├─ for receiver in subscribers (filtered for muted):
+  │     recv_message = resolve_transform(
+  │       receiver.at_pre_channel_msg(message, channel, **send_kwargs),
+  │       message
+  │     )
+  │     [accounts.py:1329; per-recipient transform; same rule]
+  │     receiver.channel_msg(recv_message, channel, **send_kwargs)
+  │     receiver.at_post_channel_msg(recv_message, channel, **send_kwargs)
+  │     [accounts.py:1411; post-hook, return ignored]
+  │
+  └─ channel.at_post_msg(message, **send_kwargs)
+     [comms.py:691; post-hook, return ignored]
+```
+
+The channel-level chain uses the transform rule (`resolve_transform`):
+a hook may return a modified message; falsy-not-None aborts; `None`
+returns the original. This is a SUPERSET of the veto contract used
+by `at_pre_move` and friends.
+
+The `channel_msg` call inside the loop is the delivery primitive
+(it routes to `Account.msg()` and onward to `Object`/Session). The
+DOCSTRING at comms.py:636 incorrectly names this hook
+`at_channel_msg`; no such method exists. See §6.
+
+### 2.18 Channel lifecycle
+
+```
+create_channel(...)
+  └─ channel.at_first_save()                      [comms.py:122]
+       ├─ channel.basetype_setup()                 (lockstring, log rotation)
+       │     └─ channel.get_log_filename()         (read-only)
+       ├─ channel.at_channel_creation()           [PUBLIC OVERRIDE POINT]
+       ├─ channel.init_evennia_properties()
+       └─ (if _createdict) apply create kwargs
+```
+
+`get_log_filename` is consulted from `basetype_setup` (during
+`at_first_save`) and on every log write; overriders should keep it
+deterministic per channel. The cached `_log_file` class attribute is
+populated lazily on first call.
+
+### 2.19 Script lifecycle
+
+Driver: `DefaultScript`. Two creation paths
+(`evennia.create_script` and `ScriptDB.objects.create`), both ending
+in `at_first_save`.
+
+```
+create_script(...)
+  └─ script.at_first_save()                       [scripts.py:435]
+       ├─ script.basetype_setup()                  (stub by default)
+       ├─ script.at_script_creation()             [PUBLIC OVERRIDE POINT]
+       ├─ script.init_evennia_properties()
+       └─ (if _createdict) apply kwargs
+            └─ if cdict.autostart: script._start_task(force_restart=True)
+                  └─ script.at_start()
+```
+
+Timer chain:
+
+```
+script.start(interval, start_delay, repeats, **kwargs)
+  └─ _start_task → at_start(**kwargs)
+
+(every interval seconds, while running):
+  └─ at_repeat(**kwargs)
+       (preceded internally by is_valid() check;
+        is_valid() returning False stops the timer without firing at_repeat)
+
+script.pause(manual_pause=True)
+  └─ at_pause(manual_pause=True)
+
+script.unpause()
+  └─ at_start(**kwargs)   (re-fires; at_start is also the "resume" hook)
+
+script.stop()
+  └─ at_stop(**kwargs)
+```
+
+Delete:
+
+```
+script.delete()
+  ├─ script.at_pre_delete()          ─── False?  ─→ abort
+  ├─ _stop_task()                    (without firing at_stop;
+  │                                   delete bypasses the stop hook)
+  └─ super().delete()
+```
+
+`Script.at_pre_delete` (same name as `Object.at_pre_delete` (§2.3);
+they coexist on different classes) is a veto pre-hook. Renamed from
+`at_script_delete`.
+
+`at_start` is the resume hook AS WELL as the initial-start hook;
+there is no separate `at_resume`. After a server reload, persistent
+timed scripts replay through `at_start` rather than restoring mid-
+interval state. Pause-from-reload is signaled via
+`manual_pause=False` in `at_pause`, distinguishing it from a
+user-initiated pause.
+
+### 2.20 Server lifecycle
+
+Driver: `evennia/server/service.py` reload/start/shutdown paths.
+
+```
+reload sequence:
+  ├─ ObjectDB.get_all_cached_instances():
+  │     for each obj: obj.at_server_reload()      [service.py:598]
+  ├─ AccountDB.get_all_cached_instances():
+  │     for each acct: acct.at_server_reload()    [service.py:600]
+  └─ for each script: script.at_server_reload()   [service.py:608]
+
+full shutdown sequence:
+  ├─ obj.at_server_shutdown()                     [analogous]
+  ├─ acct.at_server_shutdown()
+  └─ script.at_server_shutdown()
+
+post-start (scripts only):
+  └─ script.at_server_start()                     [scripts.py:916]
+```
+
+`at_server_reload_start` / `at_server_reload_stop` are GAME-side
+hooks (in `server/conf/at_server_startstop.py`, defined per game)
+called by `service.py:729` and `:787`; they fire ONCE per reload,
+not per-instance. The pluralized per-instance versions
+(`at_server_reload` on Object/Account/Script) fire ONCE PER CACHED
+INSTANCE.
+
+`at_idmapper_flush` (typeclasses/models.py:501) fires when the
+idmapper drops the object from cache. Its return value controls
+flush behavior: `True` allows the normal flush; `False` declines
+the flush and the object stays cached. Default returns `False` when
+the object has non-persistent attributes (which would otherwise be
+lost). This is the ONLY hook in the surface whose return value gates
+cache eviction; see §6.
+
+### 2.21 Cmdset assembly (cross-reference)
+
+`at_cmdset_get`, `get_cmdsets`, `get_cmdset_providers` participate
+in cmdset assembly. The hook order is owned by
+[`command-system.md`](../.agents/docs/command-system.md); see that doc for
+`at_pre_parse`, `at_pre_cmd`, `at_post_cmd`, the AccountCommand
+normalization table, and merge-cache invariants.
+
+Calling sites in the typeclasses:
+
+- `LifecycleMixin.at_cmdset_get` (mixins/lifecycle.py:406): default
+  stub. Override point for last-second mutation of an object's
+  merged cmdset.
+- `LifecycleMixin.get_cmdsets` (mixins/lifecycle.py:423): default
+  returns the cmdset stack. The merge happens in
+  `evennia/commands/cmdsethandler.py`.
+- `DefaultObject.get_cmdset_providers` (objects/object.py:467):
+  returns the provider dict consumed by the cmdhandler
+  (`object`, `account`, `session` keys). See `command-system.md`
+  "Session-proxy contract".
+- `DefaultAccount.get_cmdset_providers` (accounts.py:353): analog
+  for the Account side.
+- `ServerSession.get_cmdset_providers` (serversession.py:72):
+  session-side. The `cmdhandler` duck-types this method on whatever
+  is passed as `session=...`.
+- `DefaultExit.at_cmdset_get` (objects/exit.py:241): rebuilds the
+  exit's default cmdset on demand.
+
+### 2.22 Access checks
+
+Driver: `LifecycleMixin.access()` (mixins/lifecycle.py:221).
+
+```
+obj.access(accessing_obj, access_type, default, no_superuser_bypass, **kwargs)
+  ├─ result = super().access(accessing_obj, access_type, ...)
+  │     (TypedObject.access; consults lock handler)
+  ├─ obj.at_post_access(result, accessing_obj, access_type, **kwargs)
+  │     [LifecycleMixin.at_post_access; mixins/lifecycle.py:542]
+  └─ return result
+```
+
+`at_post_access` fires after the lock result is computed and BEFORE
+`access()` returns. Its return value is ignored (so it cannot
+change the access decision); it's a notification hook for logging,
+trace, or analytics. (Renamed from `at_access`.)
+
+Account `at_post_access` (accounts.py:1655) is the analog for
+account-side access checks.
+
+### 2.23 Search pipeline
+
+Driver: `SearchMixin` (objects/mixins/search.py). Override points
+inside the object's `search()` and `account.search_account()`
+implementations:
+
+```
+self.search(query, **kwargs)
+  ├─ query = self.get_search_query_replacement(query, **kwargs)
+  │     [search.py:19; nick / alias expansion; returns possibly-modified query]
+  ├─ direct = self.get_search_direct_match(query, **kwargs)
+  │     [search.py:38; "is this a dbref / self / here / me"; returns Object or None]
+  │     ─→ if direct is not None: return direct (short-circuit)
+  ├─ candidates = self.get_search_candidates(query, **kwargs)
+  │     [search.py:64; returns iterable of candidates to score]
+  ├─ result = self.get_search_result(query, candidates, **kwargs)
+  │     [search.py:121; ranks/filters/returns Object or iterable]
+  └─ return self.get_stacked_results(result, **kwargs)
+        [search.py:162; applies stacking rules; returns final result]
+```
+
+All five hooks are public override points. The pipeline is the
+primary customization surface for search behavior; overriding
+`search()` itself is supported but rarely necessary.
+
+### 2.24 Container copy
+
+```
+self.copy(new_key=None, **kwargs)
+  ├─ new_obj = ObjectDB.objects.copy_object(self, new_key=..., **kwargs)
+  └─ self.at_object_post_copy(new_obj, **kwargs)
+                                         [mixins/lifecycle.py:148; stub]
+```
+
+`at_object_post_copy` is called on the SOURCE object, not the new
+copy. Its purpose is to migrate state not handled by
+`copy_object` itself (e.g. handler-managed data). No `at_pre_copy`
+exists.
+
+## §6. Misshapen hooks
+
+Running tally of hooks whose name does not match their behavior.
+Each entry names a hook (or pair), the issue, and the section where
+the symptom surfaces. Strikethrough means the issue has been
+addressed; the remainder are documented limitations.
+
+### Naming / semantics mismatches
+
+- ~~**`at_object_delete`**~~: renamed to `at_pre_delete`.
+- ~~**`at_script_delete`**~~: renamed to `at_pre_delete`.
+- ~~**`at_pre_unpuppet`**~~: now honors veto. Falsy-not-None aborts detach.
+- ~~**`at_pre_login`**~~: now honors veto. Falsy-not-None disconnects the session.
+- ~~**`at_first_login`**~~: now fires AFTER `at_pre_login`. FIRST_LOGIN flag is preserved across vetoed logins.
+- ~~**`at_access`**~~: renamed to `at_post_access`.
+- **`at_desc`** (§2.13) is named as if it were a post-event hook
+  for setting a description, but it fires on every look. Either
+  rename (`at_being_looked_at`?) or move the look-time semantics
+  into `at_look` / `return_appearance`.
+- ~~**`at_get` / `at_give` / `at_drop`**~~: renamed to
+  `at_post_get` / `at_post_give` / `at_post_drop`. Pairs
+  now symmetric with `at_pre_get` / `at_pre_give` / `at_pre_drop`.
+- **`at_msg_send` / `at_msg_receive`** (§2.16) are veto-on-falsy
+  hooks named without the `at_pre_*` prefix despite firing before
+  send/delivery. The send/receive pair is a route, not a pre/post
+  bracket; consider `at_pre_msg_out` / `at_pre_msg_in`.
+- **`return_appearance`** (§2.10) uses the `return_*` prefix; no
+  other in-scope hook does. New composite renderers should use a
+  consistent prefix (or fold the slot composition into the registry
+  schema).
+
+### Signature drift across same-named hooks
+
+- **`at_first_save`** has three definitions with different
+  signatures: `LifecycleMixin.at_first_save(self)`,
+  `DefaultAccount.at_first_save(self)`,
+  `DefaultChannel.at_first_save(self)`,
+  `DefaultScript.at_first_save(self, **kwargs)`. The Script version
+  takes `**kwargs`; the others don't. Either standardize on
+  `**kwargs` (allows future extension) or document that the Script
+  version is intentionally distinct.
+- **`at_post_unpuppet`** on `LifecycleMixin` has signature
+  `(self, account=None, session=None, **kwargs)`; the override on
+  `Character` (objects/character.py:298) matches, but the call site
+  (`account.unpuppet_object`) passes positional `(self, session=...)`,
+  not kwarg `account=`. The signature appears correct only because
+  Python coerces positional to keyword. Consider explicit positional
+  in the signature so the contract is obvious.
+- **`at_object_creation` vs `at_account_creation` vs
+  `at_channel_creation` vs `at_script_creation`**: parallel hooks,
+  but Account lacks the `at_<noun>_post_creation` analog that
+  Object has (§2.15). Either add it on Account/Channel/Script for
+  symmetry, or document the asymmetry.
+
+### Defined but never called
+
+- **`get_return_exit`** on `DefaultExit` (exit.py:319): no callers
+  in the engine, but has dedicated test coverage in
+  `evennia/objects/tests/test_objects.py:106`. Retained because the
+  tested public surface counts as API.
+- ~~**`get_content_names`** on `AppearanceMixin` (appearance.py:415)~~:
+  deleted. Docstring said DEPRECATED; zero callers in engine, tests,
+  or game tree.
+- ~~**`get_visible_contents`** on `AppearanceMixin` (appearance.py:388)~~:
+  deleted alongside `get_content_names` (its only caller).
+- ~~**`get_puppet_or_account`** on `ServerSession` (serversession.py:207)~~:
+  deleted. One-line method, zero callers.
+
+### Implicit coupling not enforced by signature
+
+- **`appearance_template` slots vs `get_display_*` methods**
+  (§2.10): the template is a `str.format` string with named slots
+  (`{name}`, `{desc}`, `{exits}`, etc.); the provider methods are
+  named to match the slots. Adding a new slot requires editing both
+  the template and adding a method; the type system does not
+  enforce the match. A separate template-slot registry would make
+  this explicit (template slot → declared provider).
+- **`at_channel_msg` named in a docstring but absent from code**
+  (§2.17): comms.py:636 documents the per-receiver delivery hook
+  as `at_channel_msg`; the actual call is `channel_msg` (no
+  `at_` prefix). One of the two needs to change.
+- **`get_say_template_*` plus `at_say` `msg_self` overload**
+  (§2.11): the `msg_self` parameter is bool-or-string. When True,
+  the template lookup runs; when a string, it's used verbatim. This
+  is a poly-typed parameter; a clearer shape splits "use template"
+  from "use this string".
+
+### Conditional / partial fire
+
+- ~~**`at_object_post_spawn`**~~: renamed to `at_prototype_spawn`
+ . Spawner-only fire path is now reflected in the name.
+- **`at_post_arrive` / `at_post_move` at first placement** (§2.1):
+  these fire ONLY when `_createdict` supplies a location at
+  creation time. The pre/leave halves of the move chain are
+  skipped (no source to leave from). Calling code that uniformly
+  expects "every move fires every move-chain hook" will miss this
+  edge case.
+- **`at_start` is also the resume hook** (§2.19): no separate
+  `at_resume`. Game overrides that want "fire only on first start,
+  not on reload-resume" must track that themselves.
+- **`at_pause(manual_pause=...)`** (§2.19): the kwarg
+  distinguishes user-pause from reload-pause. Hidden control flow
+  via a flag rather than separate hooks.
+
+### Hook fires multiple times per event with different perspective
+
+- **`get_display_name` / `get_self_pronoun`** inside `at_say`
+  (§2.11): each broadcast computes these from the perspective of
+  the eventual viewer (self / each receiver / location). One "say"
+  fires N display-name lookups where N is `1 + len(receivers) + 1`.
+  Override authors who do expensive work in `get_display_name`
+  should know this. Documented as a contract, not a bug.
+
+### Error handling swallows in chain
+
+- **`MovementMixin.move_to`** (§2.5): wraps every hook call in
+  try/except and continues on error. Hook errors do not abort the
+  move. This is intentional isolation, but overrides that rely on
+  hook-side veto-by-exception will be surprised.
+- **`Account.puppet_object`** (§2.7): `at_puppet_added` errors are
+  log-traced and swallowed; the puppet attach still succeeds. Same
+  pattern, same caveat.
+
+### Cross-class hook split
+
+- **Rename hooks** (§2.4): `at_pre_rename` defined on `TypedObject`
+  (typeclasses/models.py:910), `at_post_rename` defined on BOTH
+  `TypedObject` (models.py:931) and `AppearanceMixin`
+  (appearance.py:907). MRO resolves to the mixin for Objects, the
+  base for everything else. Two implementations of the same hook
+  is a maintenance hazard.
+- **`at_look` overloaded across Object and Account** (§2.10, §2.16):
+  same name, different contract (single target vs character
+  picker). Intentional duck-typing for OOC look; the registry keeps
+  them as separate events (`look` vs `ooc_look`) so the distinction
+  survives introspection.
+
+### Set-membership vs lifecycle pair naming
+
+- **`at_puppet_added` / `at_puppet_removed`** (§2.7, §2.8) vs
+  **`at_character_added` / `at_character_removed`** (§2.15):
+  parallel concepts (set-membership change notifications) named
+  with two different conventions on the same class. Either pick
+  `at_<set>_added` / `at_<set>_removed` everywhere or
+  `at_post_add_<noun>` / `at_post_remove_<noun>` everywhere.
+
+### Generated index
+
+The following tables are produced from the registry by
+`python -m evennia.hooks.docs --write`. PHASE_MISMATCH entries are
+lint output; self-flagged entries pull from spec `notes` fields.
+
+<!-- hooks-gen:start misshapen -->
+### Phase / name mismatches (lint)
+
+_None: every `at_pre_*` / `at_post_*` / `at_failed_*` name matches its declared phase._
+
+### Self-flagged in spec notes
+
+| Hook | Note |
+|---|---|
+| `DefaultAccount.at_msg_receive` | Misshapen veto: at_<event> name. Falsy-not-None aborts delivery. |
+| `DefaultAccount.at_msg_send` | Misshapen veto: at_<event> name. Falsy-not-None aborts the send. |
+| `TypedObject.at_idmapper_flush` | Misshapen: at_<event> name with veto contract. Return False keeps the object cached. |
+<!-- hooks-gen:end -->
