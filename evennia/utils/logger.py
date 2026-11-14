@@ -408,6 +408,9 @@ def timeformat(when=None):
 
 # a rotate that keeps failing retries once per interval, not on every write
 _LOG_ROTATE_RETRY_SECONDS = 60
+# A file this many times its max_size can only be one whose rotation keeps failing.
+# Past it, lines are dropped and counted, so an error loop cannot fill the disk.
+_LOG_SIZE_CAP_FACTOR = 100
 
 
 class WeeklyLogFile(logfile.DailyLogFile):
@@ -434,6 +437,9 @@ class WeeklyLogFile(logfile.DailyLogFile):
         self.max_size = max_size
         self.size = 0
         self.retry_rotate_at = 0.0
+        self.size_cap = max_size * _LOG_SIZE_CAP_FACTOR
+        self.dropped_lines = 0
+        self.capped_retry_at = 0.0
         logfile.DailyLogFile.__init__(self, name, directory, defaultMode=defaultMode)
 
     def _openFile(self):
@@ -506,9 +512,46 @@ class WeeklyLogFile(logfile.DailyLogFile):
         with self._lock:
             if self._file.closed:
                 self._openFile()
+            if self.size >= self.size_cap and not self._rotate_capped():
+                self.dropped_lines += data.count("\n") or 1
+                return
             logfile.BaseLogFile.write(self, data)
             self.lastDate = max(self.lastDate, self.toDate())
             self.size += len(data)
+
+    def _rotate_capped(self):
+        """
+        On a file at its size cap, retry the rotation once per
+        `_LOG_ROTATE_RETRY_SECONDS` and write a line with the count of lines dropped
+        since the last one.
+
+        Returns:
+            bool: Whether the file rotated and takes lines again.
+
+        """
+        now = time.time()
+        if now < self.capped_retry_at:
+            return False
+        # set first: a failed rotate logs its traceback through write, which drops it
+        self.capped_retry_at = now + _LOG_ROTATE_RETRY_SECONDS
+        self.flush()
+        self.rotate()
+        rotated = self.size < self.size_cap
+        state = (
+            "rotated after reaching its size cap"
+            if rotated
+            else "is over its size cap and could not rotate"
+        )
+        note = (
+            f"{datetime.now().strftime(_TIME_FORMAT)} [!!] Log file {self.name} {state}; "
+            f"dropped {self.dropped_lines} lines since the last note.\n"
+        )
+        self.dropped_lines = 0
+        # straight to the file: BaseLogFile.write would try the rotation again
+        self._file.write(note.encode("utf8"))
+        self.flush()
+        self.size += len(note)
+        return rotated
 
 
 # Arbitrary file logger

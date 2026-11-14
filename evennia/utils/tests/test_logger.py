@@ -288,6 +288,37 @@ class TestWeeklyLogFileRecovery(unittest.TestCase):
         self.logfile.write("rotated\n")
         self.assertEqual(self._read(), "rotated\n")
 
+    def test_capped_file_drops_lines_until_rotation_succeeds(self):
+        from twisted.python import logfile
+
+        big = "x" * self.logfile.size_cap + "\n"
+        self.logfile.write(big)
+        with (
+            patch.object(logfile.os, "rename", side_effect=OSError("busy")),
+            patch.object(logger, "log_trace", side_effect=self.logfile.write),
+        ):
+            # the failed rotate's traceback is the first dropped line
+            self.logfile.write("a\n")
+            self.logfile.write("b\n")
+            self.assertEqual(self.logfile.dropped_lines, 2)
+
+            self.logfile.capped_retry_at = 0
+            self.logfile.write("c\n")
+
+        stuck = self._read()
+        self.assertTrue(stuck.startswith(big))
+        notes = stuck[len(big) :].splitlines()
+        self.assertEqual(len(notes), 2)
+        self.assertRegex(notes[0], r"could not rotate; dropped 1 lines since the last note\.$")
+        self.assertRegex(notes[1], r"could not rotate; dropped 3 lines since the last note\.$")
+
+        self.logfile.capped_retry_at = 0
+        self.logfile.write("d\n")
+
+        fresh = self._read().splitlines()
+        self.assertRegex(fresh[0], r"rotated after reaching its size cap; dropped 1 lines")
+        self.assertEqual(fresh[1:], ["d"])
+
     def test_closed_handle_reopens_on_write(self):
         self.logfile.write("one\n")
         self.logfile._file.close()
