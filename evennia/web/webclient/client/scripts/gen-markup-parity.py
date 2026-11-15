@@ -64,6 +64,18 @@ def cases() -> list[str]:
     out += [f"|[={ch}grey|n" for ch in string.ascii_lowercase]
     # Formatting and whitespace codes.
     out += ["|uunder|n", "|u|rboth|n", "line|/break", "a|/|/b"]
+    # Glow: a class on the web, in one order whatever order the codes came in.
+    out += [
+        "|oglow|n",
+        "|o|yamber|n",
+        "|o|ya|Ob|n",
+        "|o|ra|nb",
+        "|u|oboth|n",
+        "|o|uboth|n",
+        "|^|oblink and glow|n",
+        "|Ostray off",
+        "|o|lclook|ltlit link|le|n",
+    ]
     # Real newlines and tabs in the body, as opposed to the |/ and |- codes.
     # The shell used to leave these alone, so a multi-line body rendered as one
     # run-on line -- `\n` is just whitespace to HTML.

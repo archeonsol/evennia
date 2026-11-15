@@ -227,3 +227,27 @@ class TestANSIString(SimpleTestCase):
         self.assertNotIn(ANSI_RED, end_raw)
         self.assertNotIn(ANSI_GREEN, end_raw)
         self.assertNotIn(ANSI_BLUE, end_raw)
+
+
+class TestGlow(SimpleTestCase):
+    """A glow is the web client's: a terminal gets the colour and no code for it."""
+
+    def test_a_terminal_gets_no_glow_code(self):
+        """Telnet and the other plain protocols parse without the glow."""
+        from evennia.utils.ansi import ANSI_GLOW, ANSI_GLOW_RESET, parse_ansi
+
+        out = parse_ansi("|o|yamber|O|n", xterm256=True)
+        self.assertNotIn(ANSI_GLOW, out)
+        self.assertNotIn(ANSI_GLOW_RESET, out)
+        self.assertIn(ANSI_HILITE + ANSI_YELLOW + "amber", out)
+
+    def test_the_web_parse_keeps_it(self):
+        """The HTML path asks for the glow and gets its escapes."""
+        from evennia.utils.ansi import ANSI_GLOW, ANSI_GLOW_RESET, parse_ansi
+
+        out = parse_ansi("|oamber|O", xterm256=True, glow=True)
+        self.assertEqual(ANSI_GLOW + "amber" + ANSI_GLOW_RESET, out)
+
+    def test_stripping_takes_the_glow_codes_too(self):
+        """Clean text has no glow codes left in it."""
+        self.assertEqual("amber", AN("|o|yamber|O|n").clean())

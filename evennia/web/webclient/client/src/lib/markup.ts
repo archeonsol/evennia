@@ -17,7 +17,8 @@
 //   - a style run becomes one <span class="…">, opened lazily so a code with no
 //     text after it emits nothing
 //   - `|n` closes an open run; text after it is bare
-//   - class order is `underline`, then background, then foreground
+//   - class order is `underline`, `blink`, `glow`, then background, then
+//     foreground (the server sorts the style classes into that order too)
 //   - `color-007` (default fg) and `bgcolor-000` (default bg) are omitted, which
 //     is why `|W` and `|[X` produce `<span class="">`
 //   - `"` is not escaped in text content
@@ -122,7 +123,6 @@ const RAW_ANSI: Record<string, string> = {
   "|I": "\u001b[23m", // italic off
   "|s": "\u001b[9m", // strikethrough on
   "|S": "\u001b[29m", // strikethrough off
-  "|U": "\u001b[24m", // underline off
 };
 
 /** Codes that expand to plain whitespace before any styling is applied. */
@@ -148,6 +148,8 @@ type Token =
    *  tells it the next text belongs to a fresh span. */
   | { kind: "restyle" }
   | { kind: "underline" }
+  /** `|U` — the underline off: the next text opens a run without the class. */
+  | { kind: "nounderline" }
   /** `|h` — turns the hilite flag on, brightening the current base colour. */
   | { kind: "hilite" }
   /** `|H` — the inverse of `|h`, dimming a bright foreground back down. */
@@ -155,6 +157,10 @@ type Token =
   /** `|*` — a flag that swaps foreground and background at render time. */
   | { kind: "inverse" }
   | { kind: "blink" }
+  /** `|o` — a glow: the halo the shell draws in the text's colour. */
+  | { kind: "glow" }
+  /** `|O` — the glow off. Like `|U`, it arms a fresh run without the class. */
+  | { kind: "unglow" }
   /**
    * A foreground colour. `base` is 0-7 for one of the eight ANSI colours, which
    * the hilite flag brightens to 8-15, or 16-255 for an xterm index, which
@@ -179,10 +185,13 @@ type Token =
 const ANSI_STYLE: Record<string, Token[]> = {
   "\u001b[0m": [{ kind: "reset" }],
   "\u001b[4m": [{ kind: "underline" }],
+  "\u001b[24m": [{ kind: "nounderline" }],
   "\u001b[1m": [{ kind: "hilite" }],
   "\u001b[22m": [{ kind: "unhilite" }],
   "\u001b[5m": [{ kind: "blink" }],
   "\u001b[7m": [{ kind: "inverse" }],
+  "\u001b[51m": [{ kind: "glow" }],
+  "\u001b[54m": [{ kind: "unglow" }],
   "\u001b[1;7m": [{ kind: "hilite" }, { kind: "inverse" }],
   // Not a typo, and not symmetric with the others. format_styles tests
   // membership against three hand-written tuples, and the combined codes are
@@ -250,7 +259,7 @@ function ansiTokens(code: string): Token[] | null {
 // hands back a literal for anything out of range. Matching loosely and rejecting
 // late is the same output as never matching, and keeps the ranges in one place.
 const TOKEN =
-  /\u001b\[(?:1;5;7|1;5|1;7|7;5|22|0|1|4|5|7)m|\u001b\[[34]8;5;[0-9]{1,3}m|\u001b\[[34]8;2;[0-9]{1,3};[0-9]{1,3};[0-9]{1,3}m|\u001b\[[34][0-7]m|\|\||\|\/|\|l[cute]|\|\[?#(?:[0-9a-fA-F]{6}|[0-9a-fA-F]{3})|\|\[[0-5][0-5][0-5]|\|[0-5][0-5][0-5]|\|\[=[a-z]|\|=[a-z]|\|\[[a-zA-Z]|\|[a-zA-Z]|\|[-*^_>]/;
+  /\u001b\[(?:1;5;7|1;5|1;7|7;5|22|24|51|54|0|1|4|5|7)m|\u001b\[[34]8;5;[0-9]{1,3}m|\u001b\[[34]8;2;[0-9]{1,3};[0-9]{1,3};[0-9]{1,3}m|\u001b\[[34][0-7]m|\|\||\|\/|\|l[cute]|\|\[?#(?:[0-9a-fA-F]{6}|[0-9a-fA-F]{3})|\|\[[0-5][0-5][0-5]|\|[0-5][0-5][0-5]|\|\[=[a-z]|\|=[a-z]|\|\[[a-zA-Z]|\|[a-zA-Z]|\|[-*^_>]/;
 
 function tokenize(text: string): Token[] {
   const out: Token[] = [];
@@ -295,6 +304,8 @@ function tokenize(text: string): Token[] {
       out.push({ kind: "reset" });
     } else if (code === "|u") {
       out.push({ kind: "underline" });
+    } else if (code === "|U") {
+      out.push({ kind: "nounderline" });
     } else if (code === "|h") {
       out.push({ kind: "hilite" });
     } else if (code === "|H") {
@@ -303,6 +314,10 @@ function tokenize(text: string): Token[] {
       out.push({ kind: "inverse" });
     } else if (code === "|^") {
       out.push({ kind: "blink" });
+    } else if (code === "|o") {
+      out.push({ kind: "glow" });
+    } else if (code === "|O") {
+      out.push({ kind: "unglow" });
     } else if (RAW_ANSI[code] !== undefined) {
       out.push({ kind: "raw", value: RAW_ANSI[code] });
     } else if (WHITESPACE[code] !== undefined) {
@@ -468,6 +483,7 @@ export function pipeToHtml(text: string): string {
   let hilite = false;
   let underline = false;
   let blink = false;
+  let glow = false;
   let inverse = false;
   let tcFg: string | null = null;
   let tcBg: string | null = null;
@@ -487,6 +503,7 @@ export function pipeToHtml(text: string): string {
     const classes: string[] = [];
     if (underline) classes.push("underline");
     if (blink) classes.push("blink");
+    if (glow) classes.push("glow");
     // `|*` swaps the two channels at render time rather than when it is seen,
     // so a colour set on either side of it lands on the opposite channel.
     const outFg = inverse ? (bg ?? DEFAULT_BG) : fgIndex();
@@ -563,6 +580,7 @@ export function pipeToHtml(text: string): string {
         hilite = false;
         underline = false;
         blink = false;
+        glow = false;
         inverse = false;
         tcFg = null;
         tcBg = null;
@@ -576,8 +594,20 @@ export function pipeToHtml(text: string): string {
         underline = true;
         pending = true;
         break;
+      case "nounderline":
+        underline = false;
+        pending = true;
+        break;
       case "blink":
         blink = true;
+        pending = true;
+        break;
+      case "glow":
+        glow = true;
+        pending = true;
+        break;
+      case "unglow":
+        glow = false;
         pending = true;
         break;
       case "inverse":

@@ -25,6 +25,35 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.349: A glow the web client draws
+
+A new markup code pair for a glow, for the game's machine bodies whose eyes and seams light up. The web client draws it as a soft halo in the text's own colour; a terminal shows the colour alone. The shell bundle is rebuilt.
+
+### Engine
+
+- **The glow codes** ([`ansi.py`](evennia/utils/ansi.py)). `|o` turns a glow on and `|O` turns it off, and `|n` ends it with everything else. They are SGR 51 and 54 on the wire (`ANSI_GLOW`, `ANSI_GLOW_RESET`), and `parse_ansi` drops both unless it is called with `glow=True`, which only the HTML parser does. Telnet and the other plain protocols therefore get the colour with no glow code at all, and an `ANSIString` (EvTable, EvForm, EvMenu) never carries one. The parse cache key includes the flag.
+- **The glow class** ([`text2html.py`](evennia/utils/text2html.py)). `parse_html` gives a glowing run the class `glow`, and `|O` arms a new run without it, as `|U` does for an underline. A span's style classes are now sorted into one order, underline, blink, glow, whatever order their codes came in: the order the shell builds them in.
+- **The shell** ([`markup.ts`](evennia/web/webclient/client/src/lib/markup.ts), [`gen-palette.mjs`](evennia/web/webclient/client/scripts/gen-palette.mjs)). The client-side parser mirrors the codes and the class. The palette draws `.glow` as a two-layer `text-shadow` in `currentColor`; Calm (`:root[data-calm]`) turns it off, since the words around a glow already say what glows.
+- **Underline off in the shell** ([`markup.ts`](evennia/web/webclient/client/src/lib/markup.ts)). The server has ended an underline on `|U` (ESC[24m) since the underline-off fix, but the shell still passed the raw escape into the text. Regenerating the parity fixture showed it; the shell now ends the underline too.
+
+### Also in this release
+
+Two changes landed on `underspire` after `.348` without a tag of their own.
+
+- **A log file whose rotation fails is capped** ([`logger.py`](evennia/utils/logger.py), `5085590ad`). A rotation that kept failing left the active log growing without limit, and an error loop filled the disk. `WeeklyLogFile` now stops at 100 times its `max_size` (`_LOG_SIZE_CAP_FACTOR`): it drops and counts the lines, retries the rotation once per `_LOG_ROTATE_RETRY_SECONDS`, and writes one note with the count at each retry. Tests in `evennia/utils/tests/test_logger.py`.
+- **Fork docs only** (`3892516a2`). The upstream Sphinx site, tutorials, API stubs and build tooling are gone; the fork's own pages moved from `docs/source/` to a flat [`docs/`](docs/), and `ENGINE.md` became `README.md`. `evennia/hooks/docs.py` and the bus cutover test read the new paths. Nothing changes at runtime.
+
+### Migration
+
+None for a game. A game that wants the glow wraps text in `|o` ... `|n`. A game that must also run on an older engine can test for `evennia.utils.ansi.ANSI_GLOW` first, since an older engine leaves an unknown `|o` in the text as written.
+
+### Tests
+
+- `TestGlow` in `evennia/utils/tests/test_text2html.py` (the class, `|O`, `|n`, class order, no stray escape) and in `evennia/utils/tests/test_ansi.py` (a terminal gets no glow code, the HTML parse keeps it, `clean()` strips it). Red on underspire.348, green here.
+- Nine glow cases in the shell's parity corpus ([`gen-markup-parity.py`](evennia/web/webclient/client/scripts/gen-markup-parity.py)); the regenerated fixture also pins `|Ux` and `ESC[24mx`. The shell's suite: 1,238 tests, `svelte-check` clean.
+
+---
+
 ## 6.0.0+underspire.348: A room made inside an object, and the web client after a reload
 
 Two faults found in production logs and tickets. A game that made a room inside another object stopped for 15.6 s, and the web client lost its channels when the game came back from a reload. The shell bundle is rebuilt.

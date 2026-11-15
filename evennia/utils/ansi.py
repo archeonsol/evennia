@@ -58,6 +58,15 @@ Xterm256 greyscale:
 
 ```
 
+Glow: `|o` turns a glow on and `|O` turns it off (`|n` ends it too). The web client draws a soft
+halo in the text's colour. A terminal has no glow, so every other protocol gets the colour alone:
+`parse_ansi` drops the glow codes unless it is asked for them (`glow=True`, the HTML path).
+
+```python
+"Thin |o|yamber light|n runs along the seams."
+
+```
+
 ----
 
 """
@@ -89,6 +98,10 @@ ANSI_ITALIC = "\033[3m"
 ANSI_ITALIC_RESET = "\033[23m"
 ANSI_STRIKE = "\033[9m"
 ANSI_STRIKE_RESET = "\033[29m"
+# A glow is the web client's alone (see the module docstring). Two SGR codes no terminal draws as
+# anything, and `parse_ansi` takes them out for a terminal all the same.
+ANSI_GLOW = "\033[51m"
+ANSI_GLOW_RESET = "\033[54m"
 ANSI_HILITE = "\033[1m"
 ANSI_UNHILITE = "\033[22m"
 ANSI_BLINK = "\033[5m"
@@ -157,6 +170,8 @@ class ANSIParser(object):
         (r"|I", ANSI_ITALIC_RESET),  # italic reset
         (r"|s", ANSI_STRIKE),  # strikethrough
         (r"|S", ANSI_STRIKE_RESET),  # strikethrough reset
+        (r"|o", ANSI_GLOW),  # glow: a halo on the web client, nothing on a terminal
+        (r"|O", ANSI_GLOW_RESET),  # glow reset
         (r"|r", ANSI_HILITE + ANSI_RED),
         (r"|g", ANSI_HILITE + ANSI_GREEN),
         (r"|y", ANSI_HILITE + ANSI_YELLOW),
@@ -444,7 +459,9 @@ class ANSIParser(object):
         """
         return self.unsafe_tokens.sub("", string)
 
-    def parse_ansi(self, string, strip_ansi=False, xterm256=False, mxp=False, truecolor=False):
+    def parse_ansi(
+        self, string, strip_ansi=False, xterm256=False, mxp=False, truecolor=False, glow=False
+    ):
         """
         Parses a string, subbing color codes according to the stored
         mapping.
@@ -455,6 +472,8 @@ class ANSIParser(object):
             xterm256 (boolean, optional): If actually using xterm256 or if
                 these values should be converted to 16-color ANSI.
             mxp (boolean, optional): Parse MXP commands in string.
+            glow (boolean, optional): Keep the glow codes (`|o`, `|O`). Only the
+                HTML parser asks for them; a terminal gets the colour alone.
 
         Returns:
             string (str): The parsed string.
@@ -471,7 +490,7 @@ class ANSIParser(object):
 
         # check cached parsings
         global _PARSE_CACHE
-        cachekey = f"{string}-{strip_ansi}-{xterm256}-{mxp}-{truecolor}"
+        cachekey = f"{string}-{strip_ansi}-{xterm256}-{mxp}-{truecolor}-{glow}"
 
         if cachekey in _PARSE_CACHE:
             return _PARSE_CACHE[cachekey]
@@ -512,6 +531,10 @@ class ANSIParser(object):
         if not mxp:
             parsed_string = self.strip_mxp(parsed_string)
 
+        if not glow:
+            # A terminal has no glow: it keeps the colour and loses the halo.
+            parsed_string = parsed_string.replace(ANSI_GLOW, "").replace(ANSI_GLOW_RESET, "")
+
         if strip_ansi:
             # remove all ansi codes (including those manually
             # inserted in string)
@@ -534,7 +557,13 @@ ANSI_PARSER = ANSIParser()
 
 
 def parse_ansi(
-    string, strip_ansi=False, parser=ANSI_PARSER, xterm256=False, mxp=False, truecolor=False
+    string,
+    strip_ansi=False,
+    parser=ANSI_PARSER,
+    xterm256=False,
+    mxp=False,
+    truecolor=False,
+    glow=False,
 ):
     """
     Parses a string, subbing color codes as needed.
@@ -546,6 +575,7 @@ def parse_ansi(
         xterm256 (bool, optional): Support xterm256 or not.
         mxp (bool, optional): Support MXP markup or not.
         truecolor (bool, optional): Support for truecolor or not.
+        glow (bool, optional): Keep the glow codes, for the HTML parser.
 
     Returns:
         string (str): The parsed string.
@@ -553,7 +583,12 @@ def parse_ansi(
     """
     string = string or ""
     return parser.parse_ansi(
-        string, strip_ansi=strip_ansi, xterm256=xterm256, mxp=mxp, truecolor=truecolor
+        string,
+        strip_ansi=strip_ansi,
+        xterm256=xterm256,
+        mxp=mxp,
+        truecolor=truecolor,
+        glow=glow,
     )
 
 

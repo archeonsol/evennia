@@ -248,3 +248,43 @@ class TestText2Html(SimpleTestCase):
         ):
             out = text2html.parse_html(src)
             self.assertNotIn(needle, out, f"parse_html leaked unescaped HTML for: {src!r}")
+
+
+class TestGlow(SimpleTestCase):
+    """`|o` turns a glow on and `|O` off: a class on the web, nothing on a terminal."""
+
+    def test_glow_becomes_a_class_on_the_web(self):
+        """The colour and the glow ride on one span."""
+        self.assertEqual(
+            '<span class="glow color-011">amber</span>',
+            text2html.parse_html("|o|yamber|n"),
+        )
+
+    def test_glow_off_ends_the_glow_and_keeps_the_colour(self):
+        """`|O` closes the glow; the colour carries on into the next run."""
+        self.assertEqual(
+            '<span class="glow color-011">a</span><span class="color-011">b</span>',
+            text2html.parse_html("|o|ya|Ob|n"),
+        )
+
+    def test_a_reset_ends_the_glow(self):
+        """`|n` resets every style, the glow included."""
+        self.assertEqual(
+            '<span class="glow color-009">a</span>b',
+            text2html.parse_html("|o|ra|nb"),
+        )
+
+    def test_the_glow_class_order_does_not_depend_on_the_code_order(self):
+        """The shell builds its class list in one order; the server matches it."""
+        self.assertEqual(
+            text2html.parse_html("|u|oab|n"),
+            text2html.parse_html("|o|uab|n"),
+        )
+        self.assertIn('class="underline glow"', text2html.parse_html("|o|uab|n"))
+
+    def test_no_escape_code_is_left_in_the_text(self):
+        """The glow escapes are style codes, never content."""
+        out = text2html.parse_html("|ohalo|O plain")
+        self.assertNotIn("\x1b", out)
+        self.assertNotIn("[51m", out)
+        self.assertNotIn("[54m", out)
