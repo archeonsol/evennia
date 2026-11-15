@@ -251,40 +251,37 @@ class TestText2Html(SimpleTestCase):
 
 
 class TestGlow(SimpleTestCase):
-    """`|o` turns a glow on and `|O` off: a class on the web, nothing on a terminal."""
+    """`|~` turns a glow on and `|n` ends it: a class on the web, nothing on a terminal."""
 
     def test_glow_becomes_a_class_on_the_web(self):
         """The colour and the glow ride on one span."""
         self.assertEqual(
             '<span class="glow color-011">amber</span>',
-            text2html.parse_html("|o|yamber|n"),
-        )
-
-    def test_glow_off_ends_the_glow_and_keeps_the_colour(self):
-        """`|O` closes the glow; the colour carries on into the next run."""
-        self.assertEqual(
-            '<span class="glow color-011">a</span><span class="color-011">b</span>',
-            text2html.parse_html("|o|ya|Ob|n"),
+            text2html.parse_html("|~|yamber|n"),
         )
 
     def test_a_reset_ends_the_glow(self):
         """`|n` resets every style, the glow included."""
         self.assertEqual(
             '<span class="glow color-009">a</span>b',
-            text2html.parse_html("|o|ra|nb"),
+            text2html.parse_html("|~|ra|nb"),
         )
 
     def test_the_glow_class_order_does_not_depend_on_the_code_order(self):
         """The shell builds its class list in one order; the server matches it."""
         self.assertEqual(
-            text2html.parse_html("|u|oab|n"),
-            text2html.parse_html("|o|uab|n"),
+            text2html.parse_html("|u|~ab|n"),
+            text2html.parse_html("|~|uab|n"),
         )
-        self.assertIn('class="underline glow"', text2html.parse_html("|o|uab|n"))
+        self.assertIn('class="underline glow"', text2html.parse_html("|~|uab|n"))
 
     def test_no_escape_code_is_left_in_the_text(self):
-        """The glow escapes are style codes, never content."""
-        out = text2html.parse_html("|ohalo|O plain")
+        """The glow escape is a style code, never content."""
+        out = text2html.parse_html("|~halo|n plain")
         self.assertNotIn("\x1b", out)
         self.assertNotIn("[51m", out)
-        self.assertNotIn("[54m", out)
+
+    def test_a_bar_before_a_letter_is_still_text(self):
+        """`on|off` keeps its `|o` on the web too: the .349 glow codes were letters."""
+        for text in ("Usage: @duty [on|off]", "|ostray and |Ostray"):
+            self.assertEqual(text, text2html.parse_html(text))

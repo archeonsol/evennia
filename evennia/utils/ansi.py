@@ -58,12 +58,13 @@ Xterm256 greyscale:
 
 ```
 
-Glow: `|o` turns a glow on and `|O` turns it off (`|n` ends it too). The web client draws a soft
-halo in the text's colour. A terminal has no glow, so every other protocol gets the colour alone:
-`parse_ansi` drops the glow codes unless it is asked for them (`glow=True`, the HTML path).
+Glow: `|~` turns a glow on and `|n` ends it. The web client draws a soft halo in the text's
+colour. A terminal has no glow, so every other protocol gets the colour alone: `parse_ansi` drops
+the glow code unless it is asked for it (`glow=True`, the HTML path). The code is a symbol and not
+a letter because text puts a bar before a letter all the time (`on|off`, `<script|object>`).
 
 ```python
-"Thin |o|yamber light|n runs along the seams."
+"Thin |~|yamber light|n runs along the seams."
 
 ```
 
@@ -98,10 +99,9 @@ ANSI_ITALIC = "\033[3m"
 ANSI_ITALIC_RESET = "\033[23m"
 ANSI_STRIKE = "\033[9m"
 ANSI_STRIKE_RESET = "\033[29m"
-# A glow is the web client's alone (see the module docstring). Two SGR codes no terminal draws as
-# anything, and `parse_ansi` takes them out for a terminal all the same.
+# A glow is the web client's alone (see the module docstring). An SGR code no terminal draws as
+# anything, and `parse_ansi` takes it out for a terminal all the same.
 ANSI_GLOW = "\033[51m"
-ANSI_GLOW_RESET = "\033[54m"
 ANSI_HILITE = "\033[1m"
 ANSI_UNHILITE = "\033[22m"
 ANSI_BLINK = "\033[5m"
@@ -170,8 +170,7 @@ class ANSIParser(object):
         (r"|I", ANSI_ITALIC_RESET),  # italic reset
         (r"|s", ANSI_STRIKE),  # strikethrough
         (r"|S", ANSI_STRIKE_RESET),  # strikethrough reset
-        (r"|o", ANSI_GLOW),  # glow: a halo on the web client, nothing on a terminal
-        (r"|O", ANSI_GLOW_RESET),  # glow reset
+        (r"|~", ANSI_GLOW),  # glow: a halo on the web client, nothing on a terminal; |n ends it
         (r"|r", ANSI_HILITE + ANSI_RED),
         (r"|g", ANSI_HILITE + ANSI_GREEN),
         (r"|y", ANSI_HILITE + ANSI_YELLOW),
@@ -472,8 +471,8 @@ class ANSIParser(object):
             xterm256 (boolean, optional): If actually using xterm256 or if
                 these values should be converted to 16-color ANSI.
             mxp (boolean, optional): Parse MXP commands in string.
-            glow (boolean, optional): Keep the glow codes (`|o`, `|O`). Only the
-                HTML parser asks for them; a terminal gets the colour alone.
+            glow (boolean, optional): Keep the glow code (`|~`). Only the HTML
+                parser asks for it; a terminal gets the colour alone.
 
         Returns:
             string (str): The parsed string.
@@ -533,7 +532,7 @@ class ANSIParser(object):
 
         if not glow:
             # A terminal has no glow: it keeps the colour and loses the halo.
-            parsed_string = parsed_string.replace(ANSI_GLOW, "").replace(ANSI_GLOW_RESET, "")
+            parsed_string = parsed_string.replace(ANSI_GLOW, "")
 
         if strip_ansi:
             # remove all ansi codes (including those manually
@@ -575,7 +574,7 @@ def parse_ansi(
         xterm256 (bool, optional): Support xterm256 or not.
         mxp (bool, optional): Support MXP markup or not.
         truecolor (bool, optional): Support for truecolor or not.
-        glow (bool, optional): Keep the glow codes, for the HTML parser.
+        glow (bool, optional): Keep the glow code, for the HTML parser.
 
     Returns:
         string (str): The parsed string.

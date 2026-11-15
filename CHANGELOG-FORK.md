@@ -25,7 +25,30 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.350: The glow code is a symbol
+
+`.349`'s glow codes were letters, `|o` and `|O`, and text puts a bar before a letter all the time. A usage line with `on|off` in it lost its `|o`: a terminal showed `onff`, and the web client glowed the rest of the line. The engine's own help had the same trouble (`<script|object>`). The glow code is now `|~`, which no text in the engine or the game holds, and `|n` ends it; there is no glow-off code. Do not pin `.349`. The shell bundle is rebuilt.
+
+### Engine
+
+- **The glow code** ([`ansi.py`](evennia/utils/ansi.py)). `|~` maps to `ANSI_GLOW` (SGR 51). `|o` and `|O` are plain text again, as they were before `.349`, and `ANSI_GLOW_RESET` (SGR 54) is gone. `parse_ansi` still drops the glow unless it is called with `glow=True`, which only the HTML parser does.
+- **The glow class** ([`text2html.py`](evennia/utils/text2html.py)). A reset ends the glow, and nothing else does. The style class order (underline, blink, glow) is unchanged.
+- **The shell** ([`markup.ts`](evennia/web/webclient/client/src/lib/markup.ts)). The client-side parser reads `|~` and no longer reads `|o`, `|O` or SGR 54.
+
+### Migration
+
+A game that used `.349`'s `|o` writes `|~` instead and ends it with `|n`. A game that must also run on an older engine tests for the code itself (`"|~" in ANSIParser.ansi_map_dict`), not for `ANSI_GLOW`, which `.349` has with the letter code.
+
+### Tests
+
+- `TestGlow` in `evennia/utils/tests/test_ansi.py` and `evennia/utils/tests/test_text2html.py` use `|~`, and each has a new case: `on|off`, `<script|object>` and a bare `|o` and `|O` stay text on a terminal, in `clean()` and on the web. `.349`'s parser fails it: it turned `Usage: @duty [on|off]` into `Usage: @duty [onff]`.
+- The shell's parity corpus ([`gen-markup-parity.py`](evennia/web/webclient/client/scripts/gen-markup-parity.py)) glows on `|~` and pins `Usage: @duty [on|off]` and `|ostray and |Ostray` as text. In the regenerated fixture `|ox` and `|Ox` are text again and `|~x` glows. The shell's suite: 1,238 tests, `svelte-check` clean.
+
+---
+
 ## 6.0.0+underspire.349: A glow the web client draws
+
+**Superseded by `.350`.** Its letter codes eat the bar in text such as `on|off`; do not pin this tag.
 
 A new markup code pair for a glow, for the game's machine bodies whose eyes and seams light up. The web client draws it as a soft halo in the text's own colour; a terminal shows the colour alone. The shell bundle is rebuilt.
 

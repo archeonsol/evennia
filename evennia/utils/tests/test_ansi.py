@@ -234,20 +234,26 @@ class TestGlow(SimpleTestCase):
 
     def test_a_terminal_gets_no_glow_code(self):
         """Telnet and the other plain protocols parse without the glow."""
-        from evennia.utils.ansi import ANSI_GLOW, ANSI_GLOW_RESET, parse_ansi
+        from evennia.utils.ansi import ANSI_GLOW, parse_ansi
 
-        out = parse_ansi("|o|yamber|O|n", xterm256=True)
+        out = parse_ansi("|~|yamber|n", xterm256=True)
         self.assertNotIn(ANSI_GLOW, out)
-        self.assertNotIn(ANSI_GLOW_RESET, out)
         self.assertIn(ANSI_HILITE + ANSI_YELLOW + "amber", out)
 
     def test_the_web_parse_keeps_it(self):
-        """The HTML path asks for the glow and gets its escapes."""
-        from evennia.utils.ansi import ANSI_GLOW, ANSI_GLOW_RESET, parse_ansi
+        """The HTML path asks for the glow and gets its escape."""
+        from evennia.utils.ansi import ANSI_GLOW, parse_ansi
 
-        out = parse_ansi("|oamber|O", xterm256=True, glow=True)
-        self.assertEqual(ANSI_GLOW + "amber" + ANSI_GLOW_RESET, out)
+        self.assertEqual(ANSI_GLOW + "amber", parse_ansi("|~amber", xterm256=True, glow=True))
 
-    def test_stripping_takes_the_glow_codes_too(self):
-        """Clean text has no glow codes left in it."""
-        self.assertEqual("amber", AN("|o|yamber|O|n").clean())
+    def test_stripping_takes_the_glow_code_too(self):
+        """Clean text has no glow code left in it."""
+        self.assertEqual("amber", AN("|~|yamber|n").clean())
+
+    def test_a_bar_before_a_letter_is_still_text(self):
+        """`on|off` keeps its `|o`: the .349 glow codes were letters and ate it."""
+        from evennia.utils.ansi import parse_ansi
+
+        for text in ("Usage: @duty [on|off]", "<script|object>", "|ostray and |Ostray"):
+            self.assertEqual(text, parse_ansi(text, strip_ansi=True))
+            self.assertEqual(text, AN(text).clean())

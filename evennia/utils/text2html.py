@@ -50,7 +50,6 @@ class TextToHTMLparser(object):
         ANSI_INV_BLINK,
         ANSI_INV_BLINK_HILITE,
         ANSI_GLOW,
-        ANSI_GLOW_RESET,
     ]
 
     ansi_color_codes = [
@@ -337,13 +336,9 @@ class TextToHTMLparser(object):
                 if substr == ANSI_UNDERLINE_RESET:
                     classes = [cls for cls in classes if cls != "underline"]
 
-                # glow: a halo the web client draws in the text's colour
+                # glow: a halo the web client draws in the text's colour; a reset ends it
                 if substr == ANSI_GLOW and "glow" not in classes:
                     classes.append("glow")
-
-                # glow off: the next text opens a span without the class
-                if substr == ANSI_GLOW_RESET:
-                    classes = [cls for cls in classes if cls != "glow"]
 
             else:
                 # normal text, add text back to list

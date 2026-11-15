@@ -157,10 +157,8 @@ type Token =
   /** `|*` — a flag that swaps foreground and background at render time. */
   | { kind: "inverse" }
   | { kind: "blink" }
-  /** `|o` — a glow: the halo the shell draws in the text's colour. */
+  /** `|~`: a glow, the halo the shell draws in the text's colour. `|n` ends it. */
   | { kind: "glow" }
-  /** `|O` — the glow off. Like `|U`, it arms a fresh run without the class. */
-  | { kind: "unglow" }
   /**
    * A foreground colour. `base` is 0-7 for one of the eight ANSI colours, which
    * the hilite flag brightens to 8-15, or 16-255 for an xterm index, which
@@ -191,7 +189,6 @@ const ANSI_STYLE: Record<string, Token[]> = {
   "\u001b[5m": [{ kind: "blink" }],
   "\u001b[7m": [{ kind: "inverse" }],
   "\u001b[51m": [{ kind: "glow" }],
-  "\u001b[54m": [{ kind: "unglow" }],
   "\u001b[1;7m": [{ kind: "hilite" }, { kind: "inverse" }],
   // Not a typo, and not symmetric with the others. format_styles tests
   // membership against three hand-written tuples, and the combined codes are
@@ -259,7 +256,7 @@ function ansiTokens(code: string): Token[] | null {
 // hands back a literal for anything out of range. Matching loosely and rejecting
 // late is the same output as never matching, and keeps the ranges in one place.
 const TOKEN =
-  /\u001b\[(?:1;5;7|1;5|1;7|7;5|22|24|51|54|0|1|4|5|7)m|\u001b\[[34]8;5;[0-9]{1,3}m|\u001b\[[34]8;2;[0-9]{1,3};[0-9]{1,3};[0-9]{1,3}m|\u001b\[[34][0-7]m|\|\||\|\/|\|l[cute]|\|\[?#(?:[0-9a-fA-F]{6}|[0-9a-fA-F]{3})|\|\[[0-5][0-5][0-5]|\|[0-5][0-5][0-5]|\|\[=[a-z]|\|=[a-z]|\|\[[a-zA-Z]|\|[a-zA-Z]|\|[-*^_>]/;
+  /\u001b\[(?:1;5;7|1;5|1;7|7;5|22|24|51|0|1|4|5|7)m|\u001b\[[34]8;5;[0-9]{1,3}m|\u001b\[[34]8;2;[0-9]{1,3};[0-9]{1,3};[0-9]{1,3}m|\u001b\[[34][0-7]m|\|\||\|\/|\|l[cute]|\|\[?#(?:[0-9a-fA-F]{6}|[0-9a-fA-F]{3})|\|\[[0-5][0-5][0-5]|\|[0-5][0-5][0-5]|\|\[=[a-z]|\|=[a-z]|\|\[[a-zA-Z]|\|[a-zA-Z]|\|[-*^_>~]/;
 
 function tokenize(text: string): Token[] {
   const out: Token[] = [];
@@ -314,10 +311,8 @@ function tokenize(text: string): Token[] {
       out.push({ kind: "inverse" });
     } else if (code === "|^") {
       out.push({ kind: "blink" });
-    } else if (code === "|o") {
+    } else if (code === "|~") {
       out.push({ kind: "glow" });
-    } else if (code === "|O") {
-      out.push({ kind: "unglow" });
     } else if (RAW_ANSI[code] !== undefined) {
       out.push({ kind: "raw", value: RAW_ANSI[code] });
     } else if (WHITESPACE[code] !== undefined) {
@@ -604,10 +599,6 @@ export function pipeToHtml(text: string): string {
         break;
       case "glow":
         glow = true;
-        pending = true;
-        break;
-      case "unglow":
-        glow = false;
         pending = true;
         break;
       case "inverse":

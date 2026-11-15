@@ -540,40 +540,40 @@
     "html": "a<br><br>b"
   },
   {
-    "src": "|oglow|n",
+    "src": "|~glow|n",
     "html": "<span class=\"glow\">glow</span>"
   },
   {
-    "src": "|o|yamber|n",
+    "src": "|~|yamber|n",
     "html": "<span class=\"glow color-011\">amber</span>"
   },
   {
-    "src": "|o|ya|Ob|n",
-    "html": "<span class=\"glow color-011\">a</span><span class=\"color-011\">b</span>"
-  },
-  {
-    "src": "|o|ra|nb",
+    "src": "|~|ra|nb",
     "html": "<span class=\"glow color-009\">a</span>b"
   },
   {
-    "src": "|u|oboth|n",
+    "src": "|u|~both|n",
     "html": "<span class=\"underline glow\">both</span>"
   },
   {
-    "src": "|o|uboth|n",
+    "src": "|~|uboth|n",
     "html": "<span class=\"underline glow\">both</span>"
   },
   {
-    "src": "|^|oblink and glow|n",
+    "src": "|^|~blink and glow|n",
     "html": "<span class=\"blink glow\">blink and glow</span>"
   },
   {
-    "src": "|Ostray off",
-    "html": "<span class=\"\">stray off</span>"
+    "src": "|~|lclook|ltlit link|le|n",
+    "html": "<span class=\"glow\"><a id=\"mxplink\" href=\"#\" onclick=\"Evennia.msg(&quot;text&quot;,[&quot;look&quot;],{});return false;\">lit link</a></span>"
   },
   {
-    "src": "|o|lclook|ltlit link|le|n",
-    "html": "<span class=\"glow\"><a id=\"mxplink\" href=\"#\" onclick=\"Evennia.msg(&quot;text&quot;,[&quot;look&quot;],{});return false;\">lit link</a></span>"
+    "src": "Usage: @duty [on|off]",
+    "html": "Usage: @duty [on|off]"
+  },
+  {
+    "src": "|ostray and |Ostray",
+    "html": "|ostray and |Ostray"
   },
   {
     "src": "line one\nline two",
@@ -1241,7 +1241,7 @@
   },
   {
     "src": "|Ox",
-    "html": "<span class=\"\">x</span>"
+    "html": "|Ox"
   },
   {
     "src": "|Px",
@@ -1369,7 +1369,7 @@
   },
   {
     "src": "|ox",
-    "html": "<span class=\"glow\">x</span>"
+    "html": "|ox"
   },
   {
     "src": "|px",
@@ -1429,7 +1429,7 @@
   },
   {
     "src": "|~x",
-    "html": "|~x"
+    "html": "<span class=\"glow\">x</span>"
   },
   {
     "src": "|[!x",
