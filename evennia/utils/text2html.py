@@ -23,6 +23,11 @@ XTERM256_BG = "\033[48;5;{}m"
 
 hex_colors = HexColors()
 
+#: The style classes a span carries, in the one order the shell's own parser
+#: (``web/webclient/client/src/lib/markup.ts``) builds them, whatever order the
+#: codes came in.
+_STYLE_CLASS_ORDER = ("underline", "blink", "glow")
+
 
 class TextToHTMLparser(object):
     """
@@ -44,6 +49,8 @@ class TextToHTMLparser(object):
         ANSI_BLINK_HILITE,
         ANSI_INV_BLINK,
         ANSI_INV_BLINK_HILITE,
+        ANSI_GLOW,
+        ANSI_GLOW_RESET,
     ]
 
     ansi_color_codes = [
@@ -330,6 +337,14 @@ class TextToHTMLparser(object):
                 if substr == ANSI_UNDERLINE_RESET:
                     classes = [cls for cls in classes if cls != "underline"]
 
+                # glow: a halo the web client draws in the text's colour
+                if substr == ANSI_GLOW and "glow" not in classes:
+                    classes.append("glow")
+
+                # glow off: the next text opens a span without the class
+                if substr == ANSI_GLOW_RESET:
+                    classes = [cls for cls in classes if cls != "glow"]
+
             else:
                 # normal text, add text back to list
                 if not str_list[i - 1]:
@@ -365,6 +380,8 @@ class TextToHTMLparser(object):
                         bg_class = "bgcolor-{}".format(str(bg_index).rjust(3, "0"))
                         color_class = "color-{}".format(str(color_index).rjust(3, "0"))
 
+                    # the style classes in one order, whatever order their codes came in
+                    classes = [cls for cls in _STYLE_CLASS_ORDER if cls in classes]
                     # black bg is the default, don't explicitly style
                     if bg_class != "bgcolor-000":
                         classes.append(bg_class)
@@ -414,7 +431,9 @@ class TextToHTMLparser(object):
 
         """
         # parse everything to ansi first
-        text = parse_ansi(text, strip_ansi=strip_ansi, xterm256=True, mxp=True, truecolor=True)
+        text = parse_ansi(
+            text, strip_ansi=strip_ansi, xterm256=True, mxp=True, truecolor=True, glow=True
+        )
         # convert all ansi to html
         result = re.sub(self.re_string, self.sub_text, text)
         result = re.sub(self.re_mxplink, self.sub_mxp_links, result)

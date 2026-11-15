@@ -49,6 +49,10 @@ for (let i = 0; i < 256; i++) {
 lines.push(".blink{animation:ev-blink 1s step-end infinite}");
 lines.push(":root[data-calm] .blink{animation:none}");
 lines.push(".underline{text-decoration:underline}");
+// A glow (`|o`) is a soft halo in the text's own colour. Calm turns it off: the
+// words around it already say what glows.
+lines.push(".glow{text-shadow:0 0 .3em currentColor,0 0 .8em currentColor}");
+lines.push(":root[data-calm] .glow{text-shadow:none}");
 lines.push("@keyframes ev-blink{50%{opacity:0}}");
 lines.push("");
 

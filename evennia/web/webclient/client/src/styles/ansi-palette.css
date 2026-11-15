@@ -516,4 +516,6 @@
 .blink{animation:ev-blink 1s step-end infinite}
 :root[data-calm] .blink{animation:none}
 .underline{text-decoration:underline}
+.glow{text-shadow:0 0 .3em currentColor,0 0 .8em currentColor}
+:root[data-calm] .glow{text-shadow:none}
 @keyframes ev-blink{50%{opacity:0}}

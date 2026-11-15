@@ -540,6 +540,42 @@
     "html": "a<br><br>b"
   },
   {
+    "src": "|oglow|n",
+    "html": "<span class=\"glow\">glow</span>"
+  },
+  {
+    "src": "|o|yamber|n",
+    "html": "<span class=\"glow color-011\">amber</span>"
+  },
+  {
+    "src": "|o|ya|Ob|n",
+    "html": "<span class=\"glow color-011\">a</span><span class=\"color-011\">b</span>"
+  },
+  {
+    "src": "|o|ra|nb",
+    "html": "<span class=\"glow color-009\">a</span>b"
+  },
+  {
+    "src": "|u|oboth|n",
+    "html": "<span class=\"underline glow\">both</span>"
+  },
+  {
+    "src": "|o|uboth|n",
+    "html": "<span class=\"underline glow\">both</span>"
+  },
+  {
+    "src": "|^|oblink and glow|n",
+    "html": "<span class=\"blink glow\">blink and glow</span>"
+  },
+  {
+    "src": "|Ostray off",
+    "html": "<span class=\"\">stray off</span>"
+  },
+  {
+    "src": "|o|lclook|ltlit link|le|n",
+    "html": "<span class=\"glow\"><a id=\"mxplink\" href=\"#\" onclick=\"Evennia.msg(&quot;text&quot;,[&quot;look&quot;],{});return false;\">lit link</a></span>"
+  },
+  {
     "src": "line one\nline two",
     "html": "line one<br>line two"
   },
@@ -973,7 +1009,7 @@
   },
   {
     "src": "\u001b[24mx",
-    "html": "\u001b[24mx"
+    "html": "<span class=\"\">x</span>"
   },
   {
     "src": "\u001b[29mx",
@@ -1205,7 +1241,7 @@
   },
   {
     "src": "|Ox",
-    "html": "|Ox"
+    "html": "<span class=\"\">x</span>"
   },
   {
     "src": "|Px",
@@ -1229,7 +1265,7 @@
   },
   {
     "src": "|Ux",
-    "html": "\u001b[24mx"
+    "html": "<span class=\"\">x</span>"
   },
   {
     "src": "|Vx",
@@ -1333,7 +1369,7 @@
   },
   {
     "src": "|ox",
-    "html": "|ox"
+    "html": "<span class=\"glow\">x</span>"
   },
   {
     "src": "|px",
