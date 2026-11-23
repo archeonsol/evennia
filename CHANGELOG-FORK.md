@@ -25,6 +25,21 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.351: Search prefers the caller's own set
+
+A verb that acts on worn things searched everything its caller carried, so a carried jacket and a worn one both answered to "jacket" and the player was asked which. The verb then refused the carried one. A search can now name the objects its caller can act on, and the name is matched against those first.
+
+### Engine
+
+- **`prefer` on search** ([`search.py`](evennia/objects/mixins/search.py)). `search_for` and `search` take `prefer=None`, a predicate `obj -> bool`. The name is matched against the candidates that pass it, and against all candidates only when none of those matched a visible object (the visibility filter registered through [`perception.py`](evennia/actions/perception.py)). So several preferred matches are asked about alone, a name that matches no preferred object still finds the others for the caller's own refusal, and a hidden preferred object cannot push out a visible one. A partial match among the preferred beats an exact match outside them. Locks, the ordinal selector, stacking and autopick run on whichever list was searched; an ordinal past the end of a preferred list finds nothing rather than counting the other list. Global, #dbref and `me`/`here`/`self` searches ignore `prefer`. With `prefer=None` the search is unchanged.
+- **`get_search_preference(action_type)`** ([`objects.py`](evennia/actions/default/objects.py)). A new hook on `CharacterObjectRules`. `drop` and `give` pass its result as `prefer` to their item searches, and `put` to its item search. The default returns `None`. [Default Actions](docs/Default-Actions.md) describes it.
+
+### Migration
+
+None required. A game that overrides `search_for` with an explicit signature takes `prefer=None` and forwards it, or a caller passing `prefer` raises `TypeError`.
+
+---
+
 ## 6.0.0+underspire.350: The glow code is a symbol
 
 `.349`'s glow codes were letters, `|o` and `|O`, and text puts a bar before a letter all the time. A usage line with `on|off` in it lost its `|o`: a terminal showed `onff`, and the web client glowed the rest of the line. The engine's own help had the same trouble (`<script|object>`). The glow code is now `|~`, which no text in the engine or the game holds, and `|n` ends it; there is no glow-off code. Do not pin `.349`. The shell bundle is rebuilt.

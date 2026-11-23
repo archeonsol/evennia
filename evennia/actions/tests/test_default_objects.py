@@ -179,6 +179,35 @@ class TestPutFindsItsContainer(unittest.TestCase):
         self.assertTrue(action._unresolved)
 
 
+class TestSearchPreference(unittest.TestCase):
+    """The engine's item searches ask the body which objects to look among first."""
+
+    def test_none_by_default(self):
+        self.assertIsNone(CharacterObjectRules().get_search_preference(Drop))
+
+    def test_put_searches_its_item_with_the_bodys_preference(self):
+        def prefer(obj):
+            return True
+
+        class _Preferring(_ScopedChar):
+            def get_search_preference(self, action_type):
+                return prefer if action_type is Put else None
+
+            def search(self, name, **kwargs):
+                self.prefers.append(kwargs.get("prefer"))
+                return super().search(name, **kwargs)
+
+        room = FakeObj(key="room")
+        char = _Preferring()
+        char.prefers = []
+        char.location = room
+        coin = FakeObj(key="coin", location=char)
+        bag = FakeObj(key="bag", location=char)
+        char.contents = [coin, bag]
+        Put.parse("coin in bag", make_actor(char))
+        self.assertEqual(char.prefers, [None, prefer])
+
+
 class _MessagingChar(CharacterObjectRules, FakeChar):
     """A character whose search reports a miss to itself, as the real one does."""
 

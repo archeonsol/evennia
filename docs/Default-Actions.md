@@ -23,6 +23,16 @@ retired.
 (`@scripts`, `@script`). Scripts are storage-only: listing, lookup, creation,
 attachment, and deletion are supported; timer controls are not.
 
+## Item searches
+
+`drop`, `give` and `put` search for their item with `prefer=`, which the body
+supplies through `CharacterObjectRules.get_search_preference(action_type)`. The
+default returns `None`, so the search is unchanged. A game returns a predicate,
+such as "not worn", and the name is then matched against the objects that pass
+it first; when none of those match a visible object, every candidate is
+searched, so the game's own refusal still reads. See `prefer` on
+`DefaultObject.search`.
+
 ## Login
 
 `await evennia.actions.default.unloggedin.login_session(session, name, password)`

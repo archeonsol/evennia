@@ -269,6 +269,7 @@ class SearchMixin:
         use_dbref=None,
         tags=None,
         stacked=0,
+        prefer=None,
     ):
         """
         Run the search pipeline and return a typed `SearchResult`.
@@ -284,7 +285,7 @@ class SearchMixin:
             searchdata (str or obj): See `.search` for full details on this and
                 all filter arguments.
             global_search, use_nicks, typeclass, location, attribute_name,
-            exact, candidates, use_locks, use_dbref, tags, stacked: See
+            exact, candidates, use_locks, use_dbref, tags, stacked, prefer: See
                 `.search` for full descriptions.
 
         Returns:
@@ -334,6 +335,69 @@ class SearchMixin:
         # always use exact match for dbref/global searches
         exact = True if global_search or dbref(searchdata) else exact
 
+        if prefer is not None and candidates is not None:
+            from evennia.actions.perception import filter_visible
+
+            preferred = [obj for obj in candidates if prefer(obj)]
+            result, matched = self._search_pass(
+                searchdata,
+                original_searchdata,
+                preferred,
+                input_kwargs,
+                attribute_name=attribute_name,
+                typeclass=typeclass,
+                exact=exact,
+                use_dbref=use_dbref,
+                tags=tags,
+                use_locks=use_locks,
+            )
+            if filter_visible(self, matched):
+                return result
+
+        result, _matched = self._search_pass(
+            searchdata,
+            original_searchdata,
+            candidates,
+            input_kwargs,
+            attribute_name=attribute_name,
+            typeclass=typeclass,
+            exact=exact,
+            use_dbref=use_dbref,
+            tags=tags,
+            use_locks=use_locks,
+        )
+        return result
+
+    def _search_pass(
+        self,
+        searchdata,
+        original_searchdata,
+        candidates,
+        input_kwargs,
+        *,
+        attribute_name,
+        typeclass,
+        exact,
+        use_dbref,
+        tags,
+        use_locks,
+    ):
+        """
+        Match `searchdata` against one candidate list and collapse the matches to a result.
+
+        Args:
+            searchdata (str): The search string, with qualifiers already parsed out.
+            original_searchdata (str): The string as the caller gave it, for the result.
+            candidates (list or None): The objects to match against; None for a global search.
+            input_kwargs (dict): The search's keyword arguments, for the stacking hook.
+            attribute_name, typeclass, exact, use_dbref, tags, use_locks: As for `search_for`,
+                after `search_for` has resolved them.
+
+        Returns:
+            tuple: `(SearchResult, matched)`, where `matched` lists the objects that matched
+            the name and passed the locks, before the ordinal selector picked among them.
+
+        """
         # do the actual search
         results = self.get_search_result(
             searchdata,
@@ -350,6 +414,7 @@ class SearchMixin:
             results = [x for x in list(results) if x.access(self, "search", default=True)]
         else:
             results = list(results)
+        matched = list(results)
 
         # apply ordinal selector ("first", "2-sword", etc.)
         invalid_other = False
@@ -368,26 +433,27 @@ class SearchMixin:
         # handle stacked objects (multiple identical matches collapsed to a stack)
         is_stacked, results = self.get_stacked_results(results, **input_kwargs)
         if is_stacked:
-            return Found(obj=results[0], stack=results)
+            return Found(obj=results[0], stack=results), matched
 
         # collapse to typed result
         if not results:
-            return NotFound(search_string=original_searchdata)
+            return NotFound(search_string=original_searchdata), matched
 
         had_qualifier = input_kwargs.get("_search_had_qualifier")
         if len(results) > 1 and not had_qualifier:
             picked = try_autopick(results, self)
             if picked is not None:
-                return Found(obj=picked)
+                return Found(obj=picked), matched
 
         if len(results) == 1:
-            return Found(obj=results[0])
+            return Found(obj=results[0]), matched
 
-        return Ambiguous(
+        ambiguous = Ambiguous(
             candidates=results,
             search_string=original_searchdata,
             invalid_other=invalid_other,
         )
+        return ambiguous, matched
 
     def search(
         self,
@@ -405,6 +471,7 @@ class SearchMixin:
         use_dbref=None,
         tags=None,
         stacked=0,
+        prefer=None,
     ):
         """
         Search for an object and return it (or None on failure).
@@ -462,6 +529,13 @@ class SearchMixin:
                 `tagname` or `(tagname, tagcategory)`.
             stacked (int, optional): If > 0, multimatches of identical objects collapse
                 into a stack of up to `stacked` items. Returned as a list in that case.
+            prefer (callable, optional): `prefer(obj) -> bool`, true for the objects the
+                caller can act on. The name is matched against the candidates that pass it
+                first, and against all candidates only when none of those matched a visible
+                object. So a carried jacket does not stand beside a worn one in the
+                which-one prompt of a verb that acts on worn things, and a name that matches
+                only other objects still finds them, for the caller's own refusal. Ignored
+                for global and #dbref searches.
 
         Returns:
             Object, list, or None: The matched object on a unique match; a list
@@ -485,6 +559,7 @@ class SearchMixin:
             use_dbref=use_dbref,
             tags=tags,
             stacked=stacked,
+            prefer=prefer,
         )
 
         if isinstance(result, Found):
