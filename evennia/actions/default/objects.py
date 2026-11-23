@@ -25,6 +25,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from evennia.hooks import hook
 from evennia.objects.character import DefaultCharacter
 from evennia.objects.object import DefaultObject
 
@@ -227,7 +228,10 @@ class Put(Action):
             and getattr(type(container), "accepts_room_character_put", False)
             else actor.character
         )
-        item = actor.search(item_spec, location=item_location)
+        # A body without these rules (an OOC actor has none) searches as usual.
+        preference = getattr(actor.character, "get_search_preference", None)
+        prefer = preference(cls) if preference is not None else None
+        item = actor.search(item_spec, location=item_location, prefer=prefer)
         act = cls(target=item, container=container)
         if item is None or container is None:
             act._unresolved = True
@@ -274,6 +278,33 @@ class CharacterObjectRules:
 
     def _is_actor(self, actor) -> bool:
         return self is getattr(actor, "character", None)
+
+    @hook(
+        event="search",
+        phase="composite",
+        actor="self",
+        returns="content",
+        discipline="public",
+        fires_from=(),
+        notes=(
+            "Queried by the default drop, give and put actions for the `prefer` of their "
+            "item search (see DefaultObject.search). Games override this to say which "
+            "objects those verbs act on."
+        ),
+    )
+    def get_search_preference(self, action_type):
+        """
+        The objects the engine's own verbs should look among first when this object acts.
+
+        Args:
+            action_type (type): The action class searching, such as `Drop`, `Give` or `Put`.
+
+        Returns:
+            callable or None: `prefer(obj) -> bool` for the item search of that action
+            (see `search`), or None to search as usual.
+
+        """
+        return None
 
     # --- get -----------------------------------------------------------------
 
@@ -353,7 +384,8 @@ class CharacterObjectRules:
         from evennia.objects.search_result import Ambiguous, Found
         from evennia.utils import utils
 
-        _r = caller.search_for(args, location=caller, stacked=action.count)
+        prefer = caller.get_search_preference(Drop)
+        _r = caller.search_for(args, location=caller, stacked=action.count, prefer=prefer)
         if isinstance(_r, Found):
             pre = list(_r.stack) if _r.stack else [_r.obj]
         elif isinstance(_r, Ambiguous):
@@ -368,6 +400,7 @@ class CharacterObjectRules:
             not_found=f"You aren't carrying {args}.",
             ambiguous=f"You carry more than one {args}:",
             stacked=action.count,
+            prefer=prefer,
         )
         if not objs:
             return SILENT_FAIL
@@ -413,7 +446,8 @@ class CharacterObjectRules:
         from evennia.objects.search_result import Ambiguous, Found
         from evennia.utils import utils
 
-        _r = caller.search_for(lhs, location=caller, stacked=action.count)
+        prefer = caller.get_search_preference(Give)
+        _r = caller.search_for(lhs, location=caller, stacked=action.count, prefer=prefer)
         if isinstance(_r, Found):
             pre = list(_r.stack) if _r.stack else [_r.obj]
         elif isinstance(_r, Ambiguous):
@@ -428,6 +462,7 @@ class CharacterObjectRules:
             not_found=f"You aren't carrying {lhs}.",
             ambiguous=f"You carry more than one {lhs}:",
             stacked=action.count,
+            prefer=prefer,
         )
         if not to_give:
             return SILENT_FAIL

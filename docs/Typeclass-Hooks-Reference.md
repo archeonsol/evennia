@@ -245,6 +245,7 @@ the authoritative roster.
 | `get_self_pronoun` | `AppearanceMixin` | target | Pronoun from the looker's perspective. Default returns 'You' when looker is self. |
 | `return_appearance` | `AppearanceMixin` | target | Composite renderer. Joins get_display_* providers via appearance_template. |
 | `return_appearance_node` | `AppearanceMixin` | target | Structured renderer. Preserves return_appearance overrides during migration. |
+| `get_search_preference` | `CharacterObjectRules` | self | Queried by the default drop, give and put actions for the `prefer` of their item search (see DefaultObject.search). Games override this to say which objects those verbs act on. |
 | `at_look` | `DefaultAccount` | self | Distinct from Object.at_look. Account.at_look is the OOC character picker. |
 | `at_sync_restore_puppet` | `DefaultAccount` | self | Reattach puppet after server reload when bid-based at_sync could not restore focus. |
 | `get_all_puppets` | `DefaultAccount` | self | Returns all currently puppeted characters on the account. |

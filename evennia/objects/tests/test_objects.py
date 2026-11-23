@@ -1983,3 +1983,110 @@ class TestObjectDBLocationBaseline(BaseEvenniaTest):
         self.assertEqual(self._rebuilds(warn), [])
         self.assertNotIn(thing, self.room1.contents)
         self.assertIn(thing, self.room2.contents)
+
+
+class TestSearchPrefer(BaseEvenniaTest):
+    """`prefer` matches the name against the caller's preferred objects first."""
+
+    def carried(self, key):
+        return DefaultObject.create(key, location=self.char1)[0]
+
+    def on_floor(self, key):
+        return DefaultObject.create(key, location=self.room1)[0]
+
+    def worn(self, obj):
+        return obj.location == self.char1
+
+    def test_the_preferred_match_wins_over_another(self):
+        mine = self.carried("bomber jacket")
+        self.on_floor("plaid jacket")
+        self.assertEqual(self.char1.search_for("jacket", prefer=self.worn), Found(obj=mine))
+
+    def test_a_partial_match_in_the_set_beats_an_exact_match_outside_it(self):
+        mine = self.carried("bomber jacket")
+        self.on_floor("jacket")
+        self.assertEqual(self.char1.search_for("jacket", prefer=self.worn), Found(obj=mine))
+
+    def test_several_preferred_matches_are_asked_about_alone(self):
+        first = self.carried("bomber jacket")
+        second = self.carried("denim jacket")
+        self.on_floor("plaid jacket")
+        result = self.char1.search_for("jacket", prefer=self.worn)
+        self.assertIsInstance(result, Ambiguous)
+        self.assertEqual(result.candidates, [first, second])
+
+    def test_no_preferred_match_searches_everything(self):
+        floor = self.on_floor("plaid jacket")
+        self.assertEqual(self.char1.search_for("jacket", prefer=self.worn), Found(obj=floor))
+
+    def test_a_hidden_preferred_match_does_not_hide_a_visible_one(self):
+        from evennia.actions import perception
+
+        hidden = self.carried("bomber jacket")
+        floor = self.on_floor("plaid jacket")
+        perception.set_visibility_filter(lambda searcher, obj: obj is not hidden)
+        self.addCleanup(perception.set_visibility_filter, None)
+        result = self.char1.search_for("jacket", prefer=self.worn)
+        self.assertNotEqual(result, Found(obj=hidden))
+        self.assertIn(floor, result.candidates if isinstance(result, Ambiguous) else [result.obj])
+
+    def test_a_preferred_match_that_fails_its_lock_searches_everything(self):
+        locked = self.carried("bomber jacket")
+        floor = self.on_floor("plaid jacket")
+        with patch.object(locked, "access", return_value=False):
+            result = self.char1.search_for("jacket", prefer=self.worn)
+        self.assertEqual(result, Found(obj=floor))
+
+    def test_an_ordinal_counts_the_preferred_list(self):
+        self.carried("bomber jacket")
+        second = self.carried("denim jacket")
+        self.on_floor("plaid jacket")
+        self.assertEqual(self.char1.search_for("2 jacket", prefer=self.worn), Found(obj=second))
+
+    def test_an_ordinal_past_the_preferred_list_finds_nothing(self):
+        self.carried("bomber jacket")
+        self.carried("denim jacket")
+        self.on_floor("plaid jacket")
+        result = self.char1.search_for("3 jacket", prefer=self.worn)
+        self.assertIsInstance(result, NotFound)
+
+    def test_a_stack_is_built_from_the_preferred_list(self):
+        coins = [self.carried("coin"), self.carried("coin")]
+        self.on_floor("coin")
+        result = self.char1.search_for("coin", stacked=5, prefer=self.worn)
+        self.assertEqual(result, Found(obj=coins[0], stack=coins))
+
+    def test_given_candidates_are_narrowed_too(self):
+        mine = self.carried("bomber jacket")
+        floor = self.on_floor("plaid jacket")
+        result = self.char1.search_for("jacket", candidates=[mine, floor], prefer=self.worn)
+        self.assertEqual(result, Found(obj=mine))
+
+    def test_a_typed_scope_is_narrowed_too(self):
+        mine = self.carried("bomber jacket")
+        other = self.carried("plaid jacket")
+        result = self.char1.search_for("my jacket", prefer=lambda obj: obj is mine)
+        self.assertEqual(result, Found(obj=mine))
+        self.assertNotEqual(result, Found(obj=other))
+
+    def test_self_reference_ignores_prefer(self):
+        self.assertEqual(
+            self.char1.search_for("me", prefer=lambda obj: False), Found(obj=self.char1)
+        )
+
+    def test_a_dbref_search_ignores_prefer(self):
+        floor = self.on_floor("plaid jacket")
+        result = self.char1.search_for(f"#{floor.id}", use_dbref=True, prefer=lambda obj: False)
+        self.assertEqual(result, Found(obj=floor))
+
+    def test_no_prefer_searches_as_before(self):
+        mine = self.carried("bomber jacket")
+        floor = self.on_floor("plaid jacket")
+        result = self.char1.search_for("jacket", prefer=None)
+        self.assertIsInstance(result, Ambiguous)
+        self.assertEqual(set(result.candidates), {mine, floor})
+
+    def test_search_forwards_prefer(self):
+        mine = self.carried("bomber jacket")
+        self.on_floor("plaid jacket")
+        self.assertIs(self.char1.search("jacket", prefer=self.worn), mine)
