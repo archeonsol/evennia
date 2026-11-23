@@ -25,6 +25,24 @@ matching release procedure.
 
 ---
 
+## 6.0.0+underspire.352: An ordinal picks the prompt's row
+
+With `prefer` set, the which-one prompt listed only the preferred matches, but an ordinal counted every match. "2nd knife" after a prompt that showed two knives could pick a third knife the prompt never offered. The prompt's own hint was also wrong whenever the matches had different names: each row read "first <its own name>", and the hint repeated the first name for every row.
+
+### Engine
+
+- **Ordinals count the narrowed list** ([`search.py`](evennia/objects/mixins/search.py)). `prefer` now narrows a tie before the ordinal selector is applied, under the same conditions as before (several matches, the typed words end a name of every match, a preferred match is visible). So "second knife", "2-knife", "2nd knife" and "other knife" count the list the prompt shows, in its order. An ordinal past that list finds nothing. A search without `prefer` is unchanged.
+- **Each prompt row names what to type to pick it** ([`utils.py`](evennia/utils/utils.py) `at_search_result`, [`multimatch.py`](evennia/utils/multimatch.py)). Rows are labelled by their place in the whole list plus the typed name, from the new `pick_phrases(query, count)`: " first knife: military knife (carried)", " other knife: kitchen knife (here)", then "Type 'first knife' or 'other knife' to pick." A `my`/`here`/`worn` prefix the player typed stays in front ("my first knife"), and an ordinal they typed is replaced. Typing a phrase runs the same search and picks that row. Rows are no longer grouped by display name.
+- **The scope hint is gone.** The "You can also try 'my X', 'here X', or 'worn X'" line suggested scopes that did not fit, such as "worn" for a person. `format_multimatch_footer(phrases)` now takes the pick phrases alone.
+- **Location notes** ([`multimatch.py`](evennia/utils/multimatch.py) `location_hint`): " (carried)" and " (here)" replace " (yours, in your pack)" and " (here, on the floor)", which misdescribed held and worn things, people and fixtures.
+- **`SEARCH_MULTIMATCH_TEMPLATE`** ([`settings_default.py`](evennia/settings_default.py)) is now `" {label}: {name}{aliases}{info}\n"`, since `{label}` is the pick phrase.
+
+### Migration
+
+A game that set `SEARCH_MULTIMATCH_TEMPLATE` gets the pick phrase in `{label}`; templates using `{number}` still work. A caller of `format_multimatch_footer` passes the list of phrases (`pick_phrases(query, len(matches))`) in place of `(name, labels, scope_hint)`. A test that asserted the old location notes or per-name labels needs the new text.
+
+---
+
 ## 6.0.0+underspire.351: Search prefers the caller's own set
 
 A verb that acts on worn things searched everything its caller carried, so a carried jacket and a worn one both answered to "jacket" and the player was asked which. The verb then refused the carried one. A search can now name the objects its caller can act on, and those settle a which-one prompt between them.
