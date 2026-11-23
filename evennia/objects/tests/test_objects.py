@@ -15,6 +15,7 @@ from evennia.typeclasses.tags import (
 )
 from evennia.utils import create, search
 from evennia.utils.ansi import strip_ansi
+from evennia.utils.multimatch import pick_phrases
 from evennia.utils.test_resources import BaseEvenniaTest, EvenniaTestCase
 
 
@@ -2068,14 +2069,20 @@ class TestSearchPrefer(BaseEvenniaTest):
             result = self.char1.search_for("jacket", prefer=self.worn)
         self.assertEqual(result, Found(obj=floor))
 
-    def test_an_ordinal_counts_the_full_list(self):
+    def test_an_ordinal_counts_the_list_the_prompt_shows(self):
+        self.carried("bomber jacket")
+        self.on_floor("plaid jacket")
+        self.carried("denim jacket")
+        listed = self.char1.search_for("jacket", prefer=self.worn).candidates
+        self.assertEqual(len(listed), 2)
+        for phrase, obj in zip(pick_phrases("jacket", len(listed)), listed):
+            self.assertEqual(self.char1.search_for(phrase, prefer=self.worn), Found(obj=obj))
+
+    def test_an_ordinal_past_the_prompt_list_finds_nothing(self):
         self.carried("bomber jacket")
         self.carried("denim jacket")
         self.on_floor("plaid jacket")
-        listed = self.char1.search_for("jacket").candidates
-        for number, obj in enumerate(listed, start=1):
-            result = self.char1.search_for(f"{number} jacket", prefer=self.worn)
-            self.assertEqual(result, Found(obj=obj))
+        self.assertIsInstance(self.char1.search_for("3 jacket", prefer=self.worn), NotFound)
 
     def test_a_stack_is_built_from_the_preferred_list(self):
         coins = [self.carried("coin"), self.carried("coin")]

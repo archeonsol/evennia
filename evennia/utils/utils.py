@@ -2445,7 +2445,7 @@ def at_search_result(matches, caller, query="", quiet=False, **kwargs):
         format_multimatch_footer,
         invalid_other_message,
         location_hint,
-        multimatch_label,
+        pick_phrases,
         try_autopick,
     )
 
@@ -2470,45 +2470,25 @@ def at_search_result(matches, caller, query="", quiet=False, **kwargs):
                 query=query
             )
 
-        # group results by display name to properly disambiguate
-        grouped_matches = defaultdict(list)
-        for item in matches:
+        phrases = pick_phrases(query, len(matches))
+        for number, (phrase, item) in enumerate(zip(phrases, matches), start=1):
             item_key = item.get_display_name(caller) if hasattr(item, "get_display_name") else query
-            # the actual searching is case-insensitive, so we force grouping keys to lower
-            grouped_matches[item_key.lower()].append((item_key, item))
+            if hasattr(item.aliases, "all"):
+                aliases = item.aliases.all(return_objs=True)
+                aliases = [alias.db_key for alias in aliases if alias.db_category != "plural_key"]
+            else:
+                aliases = getattr(item, "aliases", []) or []
+            error += apply_multimatch_template(
+                settings.SEARCH_MULTIMATCH_TEMPLATE,
+                label=phrase,
+                name=item_key,
+                aliases=(" [{alias}]".format(alias=";".join(aliases)) if aliases else ""),
+                info=location_hint(item, caller),
+                number=number,
+            )
 
-        all_labels = []
-        for key, match_list in grouped_matches.items():
-            n = len(match_list)
-            for num, (result_key, result) in enumerate(match_list):
-                if hasattr(result.aliases, "all"):
-                    aliases = result.aliases.all(return_objs=True)
-                    aliases = [
-                        alias.db_key for alias in aliases if alias.db_category != "plural_key"
-                    ]
-                else:
-                    aliases = getattr(result, "aliases", []) or []
-
-                label = multimatch_label(num, n)
-                all_labels.append(label)
-                info = location_hint(result, caller)
-
-                error += apply_multimatch_template(
-                    settings.SEARCH_MULTIMATCH_TEMPLATE,
-                    label=label,
-                    name=result_key,
-                    aliases=(" [{alias}]".format(alias=";".join(aliases)) if aliases else ""),
-                    info=info,
-                    number=num + 1,
-                )
-
-        if not kwargs.get("multimatch_string") and all_labels:
-            name = query
-            if grouped_matches:
-                first_list = next(iter(grouped_matches.values()))
-                if first_list:
-                    name = first_list[0][0]
-            error += format_multimatch_footer(name, all_labels, scope_hint=True)
+        if not kwargs.get("multimatch_string"):
+            error += format_multimatch_footer(phrases)
 
         matches = None
     else:

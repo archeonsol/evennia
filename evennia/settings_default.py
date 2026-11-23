@@ -629,12 +629,12 @@ SEARCH_MULTIMATCH_REGEX = r"^(?P<number>[0-9]+)-(?P<name>.*)(?P<args>(?:\s.*)?)$
 # To display multimatch errors in various listings we must display
 # the syntax in a way that matches what SEARCH_MULTIMATCH_REGEX understand.
 # The template will be populated with data and expects the following markup:
-# {label} - ordinal label (first, second, other, last, etc.); {name} - the
-# name (key) of the multimatched entity; {aliases} - eventual
-# aliases for the entity; {info} - extra info (location hints, #dbrefs). Legacy
-# templates may still use {number} instead of {label}. Don't forget a line break
-# if you want one match per line.
-SEARCH_MULTIMATCH_TEMPLATE = " {label} {name}{aliases}{info}\n"
+# {label} - what to type to pick this match: the row's ordinal and the typed
+# name ("first knife", "other knife"); {name} - the name (key) of the
+# multimatched entity; {aliases} - eventual aliases for the entity; {info} -
+# extra info (location hints, #dbrefs). Legacy templates may still use {number}
+# instead of {label}. Don't forget a line break if you want one match per line.
+SEARCH_MULTIMATCH_TEMPLATE = " {label}: {name}{aliases}{info}\n"
 # Callable path for parsing multimatch input (ordinals, last, other, N-name).
 SEARCH_MULTIMATCH_INPUT = "evennia.utils.multimatch.parse_multimatch_input"
 # When True, a single unambiguous inventory-only or room-only multimatch is picked silently.

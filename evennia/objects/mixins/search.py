@@ -426,6 +426,15 @@ class SearchMixin:
         else:
             results = list(results)
 
+        # narrow a tie to what the caller acts on first, so an ordinal counts the
+        # list the which-one prompt shows: "second knife" picks the prompt's second row
+        if prefer is not None and len(results) > 1 and self._each_named_by_end(searchdata, results):
+            from evennia.actions.perception import filter_visible
+
+            preferred = [obj for obj in results if prefer(obj)]
+            if filter_visible(self, preferred):
+                results = preferred
+
         # apply ordinal selector ("first", "2-sword", etc.)
         invalid_other = False
         selector = input_kwargs.get("_search_selector")
@@ -439,14 +448,6 @@ class SearchMixin:
                     results = [results[idx]]
                 else:
                     results = []
-        elif (
-            prefer is not None and len(results) > 1 and self._each_named_by_end(searchdata, results)
-        ):
-            from evennia.actions.perception import filter_visible
-
-            preferred = [obj for obj in results if prefer(obj)]
-            if filter_visible(self, preferred):
-                results = preferred
 
         # handle stacked objects (multiple identical matches collapsed to a stack)
         is_stacked, results = self.get_stacked_results(results, **input_kwargs)
@@ -577,7 +578,8 @@ class SearchMixin:
                 that acts on worn things, but "gas mask" still asks between a gas mask and
                 a gas mask filter, and a name that matches one object better than the rest
                 still finds that object, for the caller's own refusal. An ordinal
-                ("2 jacket") counts the full list. Ignored for global searches.
+                ("2 jacket") counts the narrowed list, the one the which-one prompt
+                shows. Ignored for global searches.
 
         Returns:
             Object, list, or None: The matched object on a unique match; a list
