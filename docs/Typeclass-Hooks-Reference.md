@@ -264,6 +264,7 @@ the authoritative roster.
 | `get_cmdsets` | `LifecycleMixin` | self | Returns the per-class cmdset stack as (current, cmdsets). See command-system.md. |
 | `get_message_recipients` | `MessagingMixin` | self | Resolves the recipient set for a msg_contents broadcast. |
 | `get_search_candidates` | `SearchMixin` | self | Search-pipeline stage 3: compute candidate set (location/contents-aware). |
+| `get_search_names` | `SearchMixin` | self | Names self can find obj by, read by prefer to tell what a match names. |
 | `get_search_query_replacement` | `SearchMixin` | self | Search-pipeline stage 1: rewrite the raw search string (nick replacement etc). |
 | `get_search_result` | `SearchMixin` | self | Search-pipeline stage 4: actual ObjectDB query. Returns queryset/iterable. |
 | `get_account` | `ServerSession` | self | Returns the Account attached to this session. |

@@ -27,16 +27,17 @@ matching release procedure.
 
 ## 6.0.0+underspire.351: Search prefers the caller's own set
 
-A verb that acts on worn things searched everything its caller carried, so a carried jacket and a worn one both answered to "jacket" and the player was asked which. The verb then refused the carried one. A search can now name the objects its caller can act on, and the name is matched against those first.
+A verb that acts on worn things searched everything its caller carried, so a carried jacket and a worn one both answered to "jacket" and the player was asked which. The verb then refused the carried one. A search can now name the objects its caller can act on, and those settle a which-one prompt between them.
 
 ### Engine
 
-- **`prefer` on search** ([`search.py`](evennia/objects/mixins/search.py)). `search_for` and `search` take `prefer=None`, a predicate `obj -> bool`. The name is matched against the candidates that pass it, and against all candidates only when none of those matched a visible object (the visibility filter registered through [`perception.py`](evennia/actions/perception.py)). So several preferred matches are asked about alone, a name that matches no preferred object still finds the others for the caller's own refusal, and a hidden preferred object cannot push out a visible one. A partial match among the preferred beats an exact match outside them. Locks, the ordinal selector, stacking and autopick run on whichever list was searched; an ordinal past the end of a preferred list finds nothing rather than counting the other list. Global, #dbref and `me`/`here`/`self` searches ignore `prefer`. With `prefer=None` the search is unchanged.
+- **`prefer` on search** ([`search.py`](evennia/objects/mixins/search.py)). `search_for` and `search` take `prefer=None`, a predicate `obj -> bool`. The search runs as before, and `prefer` acts only when it leaves several matches and the typed words end a name of every match: "jacket" ends "bomber jacket" and "plaid jacket", but "gas mask" does not end "gas mask filter". Then the matches that pass it are kept, if any of those is visible (the visibility filter registered through [`perception.py`](evennia/actions/perception.py)); one is found, several are asked about alone. Otherwise the result is unchanged. So an exact name still beats a partial one whatever the predicate says, and a name the caller typed for one object never finds another: the verb's own refusal reads, or the player is asked. Locks run before `prefer`; an ordinal ("2 jacket") counts the full list and skips `prefer`; stacking and autopick run on the kept list. Global and `me`/`here`/`self` searches ignore `prefer`. With `prefer=None` the search is unchanged.
+- **`get_search_names(obj)`** ([`search.py`](evennia/objects/mixins/search.py)). A new hook on the searcher: the names it can find `obj` by, which `prefer` reads to tell whether the typed words end each match's name. The default returns the key and aliases. A game that finds characters by a per-viewer name overrides it.
 - **`get_search_preference(action_type)`** ([`objects.py`](evennia/actions/default/objects.py)). A new hook on `CharacterObjectRules`. `drop` and `give` pass its result as `prefer` to their item searches, and `put` to its item search. The default returns `None`. [Default Actions](docs/Default-Actions.md) describes it.
 
 ### Migration
 
-None required. A game that overrides `search_for` with an explicit signature takes `prefer=None` and forwards it, or a caller passing `prefer` raises `TypeError`.
+None required. A game that overrides `search_for` with an explicit signature takes `prefer=None` and forwards it, or a caller passing `prefer` raises `TypeError`. A game whose `get_search_result` finds objects by names other than key and aliases overrides `get_search_names` to return them, or `prefer` treats those matches as unnamed and asks.
 
 ---
 
