@@ -28,10 +28,11 @@ attachment, and deletion are supported; timer controls are not.
 `drop`, `give` and `put` search for their item with `prefer=`, which the body
 supplies through `CharacterObjectRules.get_search_preference(action_type)`. The
 default returns `None`, so the search is unchanged. A game returns a predicate,
-such as "not worn", and the name is then matched against the objects that pass
-it first; when none of those match a visible object, every candidate is
-searched, so the game's own refusal still reads. See `prefer` on
-`DefaultObject.search`.
+such as "not worn". The search runs as usual, and the predicate only settles a
+result that would otherwise ask which one, when the typed words end a name of
+every match (`get_search_names`). A name that matches one object better than the
+rest still finds that object, so the game's own refusal still reads. See
+`prefer` on `DefaultObject.search`.
 
 ## Login
 

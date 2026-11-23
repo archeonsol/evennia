@@ -1986,7 +1986,7 @@ class TestObjectDBLocationBaseline(BaseEvenniaTest):
 
 
 class TestSearchPrefer(BaseEvenniaTest):
-    """`prefer` matches the name against the caller's preferred objects first."""
+    """`prefer` settles a match that would otherwise ask which one."""
 
     def carried(self, key):
         return DefaultObject.create(key, location=self.char1)[0]
@@ -2002,10 +2002,41 @@ class TestSearchPrefer(BaseEvenniaTest):
         self.on_floor("plaid jacket")
         self.assertEqual(self.char1.search_for("jacket", prefer=self.worn), Found(obj=mine))
 
-    def test_a_partial_match_in_the_set_beats_an_exact_match_outside_it(self):
+    def test_an_exact_match_outside_the_set_beats_a_partial_match_in_it(self):
+        self.carried("bomber jacket")
+        floor = self.on_floor("jacket")
+        self.assertEqual(self.char1.search_for("jacket", prefer=self.worn), Found(obj=floor))
+
+    def test_a_match_the_words_do_not_end_is_asked_about(self):
+        mask = self.carried("military gas mask")
+        filter_ = self.on_floor("gas mask filter")
+        result = self.char1.search_for("gas mask", prefer=self.worn)
+        self.assertIsInstance(result, Ambiguous)
+        self.assertEqual(set(result.candidates), {mask, filter_})
+
+    def test_words_left_out_of_the_middle_still_end_the_name(self):
+        mine = self.carried("red leather jacket")
+        self.on_floor("red wool jacket")
+        self.assertEqual(self.char1.search_for("red jacket", prefer=self.worn), Found(obj=mine))
+
+    def test_the_names_come_from_get_search_names(self):
         mine = self.carried("bomber jacket")
-        self.on_floor("jacket")
-        self.assertEqual(self.char1.search_for("jacket", prefer=self.worn), Found(obj=mine))
+        floor = self.on_floor("plaid jacket")
+        with patch.object(
+            type(self.char1),
+            "get_search_names",
+            lambda searcher, obj: ["jacket lining"],
+        ):
+            result = self.char1.search_for("jacket", prefer=self.worn)
+        self.assertIsInstance(result, Ambiguous)
+        self.assertEqual(set(result.candidates), {mine, floor})
+
+    def test_several_matches_none_preferred_are_all_asked_about(self):
+        first = self.on_floor("plaid jacket")
+        second = self.on_floor("denim jacket")
+        result = self.char1.search_for("jacket", prefer=self.worn)
+        self.assertIsInstance(result, Ambiguous)
+        self.assertEqual(set(result.candidates), {first, second})
 
     def test_several_preferred_matches_are_asked_about_alone(self):
         first = self.carried("bomber jacket")
@@ -2037,18 +2068,14 @@ class TestSearchPrefer(BaseEvenniaTest):
             result = self.char1.search_for("jacket", prefer=self.worn)
         self.assertEqual(result, Found(obj=floor))
 
-    def test_an_ordinal_counts_the_preferred_list(self):
-        self.carried("bomber jacket")
-        second = self.carried("denim jacket")
-        self.on_floor("plaid jacket")
-        self.assertEqual(self.char1.search_for("2 jacket", prefer=self.worn), Found(obj=second))
-
-    def test_an_ordinal_past_the_preferred_list_finds_nothing(self):
+    def test_an_ordinal_counts_the_full_list(self):
         self.carried("bomber jacket")
         self.carried("denim jacket")
         self.on_floor("plaid jacket")
-        result = self.char1.search_for("3 jacket", prefer=self.worn)
-        self.assertIsInstance(result, NotFound)
+        listed = self.char1.search_for("jacket").candidates
+        for number, obj in enumerate(listed, start=1):
+            result = self.char1.search_for(f"{number} jacket", prefer=self.worn)
+            self.assertEqual(result, Found(obj=obj))
 
     def test_a_stack_is_built_from_the_preferred_list(self):
         coins = [self.carried("coin"), self.carried("coin")]

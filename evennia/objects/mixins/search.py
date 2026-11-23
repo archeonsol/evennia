@@ -1,5 +1,7 @@
 """Search mixin for DefaultObject."""
 
+import re
+
 from django.conf import settings
 from django.utils.translation import gettext as _
 
@@ -13,6 +15,7 @@ from evennia.utils.multimatch import (
     resolve_multimatch_index,
     try_autopick,
 )
+from evennia.utils.ansi import strip_ansi
 from evennia.utils.utils import dbref, make_iter, variable_from_module
 
 _AT_SEARCH_RESULT = variable_from_module(*settings.SEARCH_AT_RESULT.rsplit(".", 1))
@@ -204,6 +207,32 @@ class SearchMixin:
         event="search",
         phase="composite",
         actor="self",
+        returns="content",
+        discipline="public",
+        fires_from=("DefaultObject.search",),
+        notes="Names self can find obj by, read by prefer to tell what a match names.",
+    )
+    def get_search_names(self, obj):
+        """
+        The names `self` can find `obj` by.
+
+        `search_for` reads them when `prefer` is set, to tell whether the typed words end
+        one of the names of each match. Games that find objects by other names (a short
+        description, a name that depends on the searcher) override this to return them.
+
+        Args:
+            obj (Object): An object the search matched.
+
+        Returns:
+            list: Name strings.
+
+        """
+        return [obj.key, *obj.aliases.all()]
+
+    @hook(
+        event="search",
+        phase="composite",
+        actor="self",
         returns="conditional",
         discipline="public",
         fires_from=("DefaultObject.search",),
@@ -335,26 +364,7 @@ class SearchMixin:
         # always use exact match for dbref/global searches
         exact = True if global_search or dbref(searchdata) else exact
 
-        if prefer is not None and candidates is not None:
-            from evennia.actions.perception import filter_visible
-
-            preferred = [obj for obj in candidates if prefer(obj)]
-            result, matched = self._search_pass(
-                searchdata,
-                original_searchdata,
-                preferred,
-                input_kwargs,
-                attribute_name=attribute_name,
-                typeclass=typeclass,
-                exact=exact,
-                use_dbref=use_dbref,
-                tags=tags,
-                use_locks=use_locks,
-            )
-            if filter_visible(self, matched):
-                return result
-
-        result, _matched = self._search_pass(
+        return self._search_pass(
             searchdata,
             original_searchdata,
             candidates,
@@ -365,8 +375,8 @@ class SearchMixin:
             use_dbref=use_dbref,
             tags=tags,
             use_locks=use_locks,
+            prefer=prefer if candidates is not None else None,
         )
-        return result
 
     def _search_pass(
         self,
@@ -381,9 +391,10 @@ class SearchMixin:
         use_dbref,
         tags,
         use_locks,
+        prefer,
     ):
         """
-        Match `searchdata` against one candidate list and collapse the matches to a result.
+        Match `searchdata` against the candidates and collapse the matches to a result.
 
         Args:
             searchdata (str): The search string, with qualifiers already parsed out.
@@ -392,10 +403,10 @@ class SearchMixin:
             input_kwargs (dict): The search's keyword arguments, for the stacking hook.
             attribute_name, typeclass, exact, use_dbref, tags, use_locks: As for `search_for`,
                 after `search_for` has resolved them.
+            prefer (callable or None): Narrows a match that would otherwise be ambiguous.
 
         Returns:
-            tuple: `(SearchResult, matched)`, where `matched` lists the objects that matched
-            the name and passed the locks, before the ordinal selector picked among them.
+            SearchResult: `Found`, `Ambiguous` or `NotFound`.
 
         """
         # do the actual search
@@ -414,7 +425,6 @@ class SearchMixin:
             results = [x for x in list(results) if x.access(self, "search", default=True)]
         else:
             results = list(results)
-        matched = list(results)
 
         # apply ordinal selector ("first", "2-sword", etc.)
         invalid_other = False
@@ -429,31 +439,61 @@ class SearchMixin:
                     results = [results[idx]]
                 else:
                     results = []
+        elif (
+            prefer is not None and len(results) > 1 and self._each_named_by_end(searchdata, results)
+        ):
+            from evennia.actions.perception import filter_visible
+
+            preferred = [obj for obj in results if prefer(obj)]
+            if filter_visible(self, preferred):
+                results = preferred
 
         # handle stacked objects (multiple identical matches collapsed to a stack)
         is_stacked, results = self.get_stacked_results(results, **input_kwargs)
         if is_stacked:
-            return Found(obj=results[0], stack=results), matched
+            return Found(obj=results[0], stack=results)
 
         # collapse to typed result
         if not results:
-            return NotFound(search_string=original_searchdata), matched
+            return NotFound(search_string=original_searchdata)
 
         had_qualifier = input_kwargs.get("_search_had_qualifier")
         if len(results) > 1 and not had_qualifier:
             picked = try_autopick(results, self)
             if picked is not None:
-                return Found(obj=picked), matched
+                return Found(obj=picked)
 
         if len(results) == 1:
-            return Found(obj=results[0]), matched
+            return Found(obj=results[0])
 
         ambiguous = Ambiguous(
             candidates=results,
             search_string=original_searchdata,
             invalid_other=invalid_other,
         )
-        return ambiguous, matched
+        return ambiguous
+
+    def _each_named_by_end(self, searchdata, matches):
+        """
+        True when the typed words end a name of every match.
+
+        "jacket" ends "bomber jacket" and "plaid jacket", so the player named two jackets
+        and `prefer` may pick between them. "gas mask" does not end "gas mask filter", so
+        the player may mean the filter or the mask, and the search asks which.
+        """
+        words = strip_ansi(str(searchdata)).lower().split()
+        if words and words[0] in ("a", "an", "the") and len(words) > 1:
+            words = words[1:]
+        if not words:
+            return False
+        pattern = re.compile(r".* ".join(r"\b" + re.escape(word) for word in words) + r"\S*$")
+        return all(
+            any(
+                pattern.search(" ".join(strip_ansi(str(name)).lower().split()))
+                for name in self.get_search_names(obj)
+            )
+            for obj in matches
+        )
 
     def search(
         self,
@@ -530,12 +570,14 @@ class SearchMixin:
             stacked (int, optional): If > 0, multimatches of identical objects collapse
                 into a stack of up to `stacked` items. Returned as a list in that case.
             prefer (callable, optional): `prefer(obj) -> bool`, true for the objects the
-                caller can act on. The name is matched against the candidates that pass it
-                first, and against all candidates only when none of those matched a visible
-                object. So a carried jacket does not stand beside a worn one in the
-                which-one prompt of a verb that acts on worn things, and a name that matches
-                only other objects still finds them, for the caller's own refusal. Ignored
-                for global and #dbref searches.
+                caller can act on. It only settles a match that would otherwise ask
+                which one, and only when the typed words end a name of every match (see
+                `get_search_names`): then the visible matches that pass it are kept. So
+                "jacket" takes a worn bomber jacket over a carried plaid jacket for a verb
+                that acts on worn things, but "gas mask" still asks between a gas mask and
+                a gas mask filter, and a name that matches one object better than the rest
+                still finds that object, for the caller's own refusal. An ordinal
+                ("2 jacket") counts the full list. Ignored for global searches.
 
         Returns:
             Object, list, or None: The matched object on a unique match; a list
