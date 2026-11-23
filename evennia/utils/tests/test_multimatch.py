@@ -94,3 +94,25 @@ class TestTryAutopick(SimpleTestCase):
         room_sword = self.Obj(room)
         picked = multimatch.try_autopick([inv_sword, room_sword], caller)
         self.assertIsNone(picked)
+
+
+class TestPickPhrases(SimpleTestCase):
+    def test_ordinal_and_typed_name(self):
+        self.assertEqual(
+            multimatch.pick_phrases("knife", 3), ["first knife", "second knife", "last knife"]
+        )
+
+    def test_two_matches_use_other(self):
+        self.assertEqual(multimatch.pick_phrases("knife", 2), ["first knife", "other knife"])
+
+    def test_scope_stays_and_a_typed_ordinal_is_replaced(self):
+        self.assertEqual(
+            multimatch.pick_phrases("my other knife", 2), ["my first knife", "my other knife"]
+        )
+
+    def test_each_phrase_parses_back_to_its_row(self):
+        for index, phrase in enumerate(multimatch.pick_phrases("worn red knife", 4)):
+            quals = multimatch.parse_search_qualifiers(phrase)
+            self.assertEqual(quals["scope"], "worn")
+            self.assertEqual(quals["searchdata"], "red knife")
+            self.assertEqual(multimatch.resolve_multimatch_index(quals["selector"], 4), index)

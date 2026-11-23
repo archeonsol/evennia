@@ -1051,7 +1051,7 @@ class TestAtSearchResult(TestCase):
         self.assertNotIn("obj1-1", msg)
 
     def test_partial_multimatch(self):
-        """multiple partial matches with different names should use ordinals per group"""
+        """matches with different names are numbered across the whole list, by the typed name"""
         matches = [self.MockObject("obj1") for _ in range(3)] + [
             self.MockObject("obj2") for _ in range(2)
         ]
@@ -1059,8 +1059,9 @@ class TestAtSearchResult(TestCase):
         caller.location = None
         self.assertIsNone(utils.at_search_result(matches, caller, "obj"))
         msg = caller.msg.call_args[0][0]
-        self.assertIn("first", msg)
-        self.assertIn("other", msg)
+        self.assertIn("first obj: obj1", msg)
+        self.assertIn("fourth obj: obj2", msg)
+        self.assertIn("last obj: obj2", msg)
 
     def test_mixed_case_multimatch(self):
         """multiple matches with different case should increment index by case-insensitive name"""
@@ -1109,7 +1110,7 @@ class TestAtSearchResultRealObjects(BaseEvenniaTest):
 
     def test_direct_base_extra_info_keeps_stock_location_context(self):
         self.obj1.location = self.char1
-        self.assertIn("yours", self.obj1.get_extra_info(self.char1))
+        self.assertIn("carried", self.obj1.get_extra_info(self.char1))
 
         self.obj1.location = self.room1
         self.char1.location = self.room1
@@ -1140,7 +1141,21 @@ class TestAtSearchResultRealObjects(BaseEvenniaTest):
         self.assertIsNone(first.ndb.extra_info_calls)
         self.assertIsNone(second.ndb.extra_info_calls)
         rendered = message.call_args.args[0]
-        self.assertEqual(rendered.count("here, on the floor"), 2)
+        self.assertEqual(rendered.count("(here)"), 2)
+
+    def test_each_row_shows_what_to_type_to_pick_it(self):
+        knife = create_object(key="military knife", location=self.char1)
+        other = create_object(key="kitchen knife", location=self.char1)
+
+        with mock.patch.object(self.char1, "msg") as message:
+            result = utils.at_search_result([knife, other], self.char1, "knife")
+
+        self.assertIsNone(result)
+        rendered = message.call_args.args[0]
+        self.assertIn("first knife: military knife (carried)", rendered)
+        self.assertIn("other knife: kitchen knife (carried)", rendered)
+        self.assertIn("Type 'first knife' or 'other knife' to pick.", rendered)
+        self.assertNotIn("You can also try", rendered)
 
 
 class TestGroupObjectsByKeyAndDesc(TestCase):

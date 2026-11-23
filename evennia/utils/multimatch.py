@@ -154,6 +154,23 @@ def resolve_multimatch_index(selector: Selector, num_matches: int) -> Optional[i
     return None
 
 
+def pick_phrases(query: str, num_matches: int) -> list[str]:
+    """
+    What to type to pick each of `num_matches` matches for `query`, in list order.
+
+    A scope prefix the player typed stays in front and an ordinal they typed is
+    replaced, so "my knife" with two matches gives "my first knife" and "my other
+    knife". Typing one runs the same search again and picks that row.
+    """
+    text = (query or "").strip()
+    _scope, remainder = parse_location_scope(text)
+    prefix = text[: len(text) - len(remainder)]
+    _selector, name = parse_multimatch_input(remainder)
+    return [
+        f"{prefix}{multimatch_label(index, num_matches)} {name}" for index in range(num_matches)
+    ]
+
+
 def multimatch_label(index: int, num_matches: int) -> str:
     """Display label for a multimatch row (0-based index)."""
     if num_matches == 2 and index == 1:
@@ -244,34 +261,29 @@ def location_hint(obj, caller, *, _include_extra=True) -> str:
     if not caller:
         return ""
     if getattr(obj, "location", None) == caller:
-        return _(" (yours, in your pack)")
+        return _(" (carried)")
     loc = getattr(caller, "location", None)
     if loc and getattr(obj, "location", None) == loc:
-        return _(" (here, on the floor)")
+        return _(" (here)")
     if _include_extra and hasattr(obj, "get_extra_info"):
         return obj.get_extra_info(caller) or ""
     return ""
 
 
-def format_multimatch_footer(name: str, labels: list[str], scope_hint: bool = False) -> str:
+def format_multimatch_footer(phrases: list[str]) -> str:
     """
-    Build a 'Type ...' hint line from display labels.
+    Build a 'Type ...' hint line from the phrases that pick each match.
     """
-    parts = [f"{label} {name}" for label in labels]
-    if not parts:
+    if not phrases:
         return ""
-    if len(parts) == 1:
-        hint = _("Type '{example}' to pick.").format(example=parts[0])
-    else:
-        hint = _("Type {examples}, or '{last}' to pick.").format(
-            examples=", ".join(f"'{p}'" for p in parts[:-1]),
-            last=parts[-1],
-        )
-    if scope_hint:
-        hint += " " + _("You can also try 'my {name}', 'here {name}', or 'worn {name}'.").format(
-            name=name
-        )
-    return hint
+    if len(phrases) == 1:
+        return _("Type '{example}' to pick.").format(example=phrases[0])
+    if len(phrases) == 2:
+        return _("Type '{first}' or '{last}' to pick.").format(first=phrases[0], last=phrases[1])
+    return _("Type {examples}, or '{last}' to pick.").format(
+        examples=", ".join(f"'{phrase}'" for phrase in phrases[:-1]),
+        last=phrases[-1],
+    )
 
 
 def apply_multimatch_template(
